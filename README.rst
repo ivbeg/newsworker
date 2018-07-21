@@ -1,31 +1,27 @@
 ====================================================
-newsworker -- automatic news extractor using HTML scraping
+newsworker -- advanced automatic news extractor using HTML scraping
 ====================================================
 
-.. image:: https://img.shields.io/travis/ivbeg/qddate/master.svg?style=flat-square
-    :target: https://travis-ci.org/ivbeg/qddate
-    :alt: travis build status
 
-.. image:: https://img.shields.io/pypi/v/qddate.svg?style=flat-square
-    :target: https://pypi.python.org/pypi/qddate
+.. image:: https://img.shields.io/pypi/v/newsworker.svg?style=flat-square
+    :target: https://pypi.python.org/pypi/newsworker
     :alt: pypi version
 
-.. image:: https://readthedocs.org/projects/qddate/badge/?version=latest
-    :target: http://qddate.readthedocs.org/en/latest/?badge=latest
+.. image:: https://readthedocs.org/projects/newsworker/badge/?version=latest
+    :target: http://newsworker.readthedocs.org/en/latest/?badge=latest
     :alt: Documentation Status
 
-.. image:: https://codecov.io/gh/scrapinghub/dateparser/branch/master/graph/badge.svg
-   :target: https://codecov.io/gh/ivbeg/qddate
-   :alt: Code Coverage
-
-.. image:: https://badges.gitter.im/scrapinghub/dateparser.svg
-   :alt: Join the chat at https://gitter.im/ivbeg/qddate
-   :target: https://gitter.im/ivbeg/qddate?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge
 
 
 `newsworker` is a Python 3 lib that extracts feeds from html pages. It's useful when you need to subscribe to a news
 from website that doesn't publish RSS/ATOM feeds and you don't want to use page change monitoring tools since it's not
 so accurate.
+
+An idea behind this algorithm is simple. Most pages with news contain date and time information about certain news.
+These dates could look like "2017-09-27" or "1 jul 2016" or many other ways. First of all we needed to find all dates,
+second is to understand when date is just a date of this webpage and when date is on webpage area dedicated for news.
+
+This tool helps to find news by locating news blocks on html webpage and parsing them for further usage.
 
 
 Usage examples
@@ -87,8 +83,8 @@ Documentation is built automatically and can be found on
 Features
 ========
 
-* Identifies news blocks on webpages using date patterns. More than 348 date patterns supported. Uses <https://github.com/ivbeg/qddate>
-* Extremely fast, uses pyparsing
+* Identifies news blocks on webpages using date patterns. More than 348 date patterns supported. Uses `qddate <https://github.com/ivbeg/qddate>`_
+* Extremely fast, uses pyparsing to identify dates on webpages
 * Includes function to find feeds on html page and if no feed found, than extract news
 
 Limitations
@@ -101,7 +97,7 @@ Limitations
 Speed optimization
 ========
 
-* qddate <https://github.com/ivbeg/qddate> date parsing lib was created for this algorithm. Right now pattern marching is really fast
+* `qddate <https://github.com/ivbeg/qddate>`_ date parsing lib was created for this algorithm. Right now pattern marching is really fast
 * date patterns could be cached to speed up parsing speed for the same website
 * feed finder without verification of feeds works fast, but if verification enabled than it's slowed down
 
@@ -130,8 +126,10 @@ Dependencies
 
   * qddate_ is a module for data processing
 .. _qddate: https://pypi.python.org/pypi/qddate
+
   * pyparsing_ is a module for advanced text processing.
 .. _pyparsing: https://pypi.python.org/pypi/pyparsing
+
   * lxml is a module for xml parsing.
 .. _lxml: https://pypi.python.org/pypi/lxml
 
