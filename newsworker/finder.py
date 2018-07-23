@@ -4,7 +4,6 @@
 import sys
 import os
 import urllib.request, urllib.parse, urllib.error
-import urllib.request, urllib.error, urllib.parse
 import chardet
 from urllib.parse import urljoin, urlparse
 from bs4 import UnicodeDammit

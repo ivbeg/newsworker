@@ -1,4 +1,5 @@
 lxml
 bs4
 pyparsing
+feedparser
 qddate
