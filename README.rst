@@ -1,5 +1,5 @@
 ====================================================
-newsworker -- advanced automatic news extractor using HTML scraping
+newsworker -- advanced automatic news extractor using HTML scraping - An Amazing Project
 ====================================================
 
 
