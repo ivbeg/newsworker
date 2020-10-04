@@ -17,7 +17,7 @@ newsworker -- advanced automatic news extractor using HTML scraping
 from website that doesn't publish RSS/ATOM feeds and you don't want to use page change monitoring tools since it's not
 so accurate.
 
-An idea behind this algorithm is simple. Most pages with news contain date and time information about certain news.
+An idea behind this algorithm is simple. Most pages with news contains date and time information about certain news.
 These dates could look like "2017-09-27" or "1 jul 2016" or many other ways. First of all we needed to find all dates,
 second is to understand when date is just a date of this webpage and when date is on webpage area dedicated for news.
 
