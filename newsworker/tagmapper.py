@@ -8,7 +8,18 @@ Tag mapping routines. Initially it was created for other purposes. It's intended
 from lxml import etree
 import hashlib
 
-from .consts import TAG_TYPE_BOLD, TAG_TYPE_EMPTY, TAG_TYPE_DATE, TAG_TYPE_HREF, TAG_TYPE_IMG, TAG_TYPE_LAST, TAG_TYPE_TAIL, TAG_TYPE_TEXT, TAG_TYPE_WRAPPER
+from .consts import (
+    TAG_TYPE_BOLD,
+    TAG_TYPE_EMPTY,
+    TAG_TYPE_DATE,
+    TAG_TYPE_HREF,
+    TAG_TYPE_IMG,
+    TAG_TYPE_LAST,
+    TAG_TYPE_TAIL,
+    TAG_TYPE_TEXT,
+    TAG_TYPE_WRAPPER,
+)
+
 
 class TagPath:
     """Tag path class. Allows unique tag identification"""
@@ -36,7 +47,7 @@ class TagPath:
                 p_2 = p_2.getparent()
         while p_1 is not None and p_2 is not None:
             if p_1 == p_2:
-                if upToRelated and p_1.tag == 'tbody':
+                if upToRelated and p_1.tag == "tbody":
                     p_1 = p_1.getparent()
                 return p_1
             p_1 = p_1.getparent()
@@ -54,7 +65,7 @@ class TagPath:
     def __parseNode(self, node, limit, inprogress=False):
         """Parses node to the tag path"""
         parent = node.getparent()
-        if parent is not None and parent.tag != '<DOCUMENT_ROOT>' and node != limit:
+        if parent is not None and parent.tag != "<DOCUMENT_ROOT>" and node != limit:
             self.__shifts.append(parent.index(node))
             self.__tag_names.append(node.tag)
             self.__parseNode(parent, limit, inprogress=True)
@@ -65,13 +76,16 @@ class TagPath:
         if not inprogress:
             self.__shifts.reverse()
             self.__tag_names.reverse()
-        self.key = '_'.join(map(str, self.__shifts))
+        self.key = "_".join(map(str, self.__shifts))
         md = hashlib.md5()
-        md.update(self.key.encode('utf8') if type(self.key) == type(u'') else self.key)
+        md.update(self.key.encode("utf8") if type(self.key) == type(u"") else self.key)
         self.hash = md.hexdigest()
 
     def __cmp__(self, tagpath):
-        if list(self.values()) == list(tagpath.values()) and self.limit == tagpath.limit:
+        if (
+            list(self.values()) == list(tagpath.values())
+            and self.limit == tagpath.limit
+        ):
             return True
         return False
 
@@ -81,7 +95,7 @@ class TagPath:
 
     def key_values(self):
         """Returns list of values as unique key"""
-        return '_'.join(map(str, self.__shifts))
+        return "_".join(map(str, self.__shifts))
 
     def tag_names(self):
         """Returns list of tag names"""
@@ -96,16 +110,19 @@ class TagPath:
 
         results = []
         i = 0
-        results.append('//html')  # lxml hack to support DOCUMENT_ROOT
+        results.append("//html")  # lxml hack to support DOCUMENT_ROOT
         for i in range(0, len(tnames)):
-            results.append('/%s[%d]' % ('*', vals[i] + 1))
+            results.append("/%s[%d]" % ("*", vals[i] + 1))
             i += 1
-        return ''.join(results)
+        return "".join(results)
 
 
 class TagEntry:
     """Tag record used to map tags to entities"""
-    def __init__(self, aid, node, tag, position, path, parent_id, attrs=None, htmlattrs=None):
+
+    def __init__(
+        self, aid, node, tag, position, path, parent_id, attrs=None, htmlattrs=None
+    ):
         if not attrs:
             attrs = []
         self.__id = aid
@@ -118,10 +135,20 @@ class TagEntry:
         self.htmlattrs = htmlattrs
 
     def as_list(self):
-        return [self.__id, self.path.key_values(), self.tag, self.position, self.parent_id, self.attrs, self.htmlattrs]
+        return [
+            self.__id,
+            self.path.key_values(),
+            self.tag,
+            self.position,
+            self.parent_id,
+            self.attrs,
+            self.htmlattrs,
+        ]
+
 
 class TagBlock:
     """Block of tags"""
+
     def __init__(self, root_node, path, position, shift):
         self.path = path
         self.__root_node = root_node
@@ -137,11 +164,18 @@ class TagBlock:
         return self.entities
 
     def as_dict(self):
-        return {'position' : self.position, 'shift': self.shift, 'path' : self.path, 'entities' : self.entities}
+        return {
+            "position": self.position,
+            "shift": self.shift,
+            "path": self.path,
+            "entities": self.entities,
+        }
 
     def as_html(self):
         if self.shift is None:
-            return etree.tostring(self.__root_node.getchildren()[self.position], encoding='utf8')
+            return etree.tostring(
+                self.__root_node.getchildren()[self.position], encoding="utf8"
+            )
         else:
             s = None
             ch = self.__root_node.getchildren()
@@ -149,9 +183,9 @@ class TagBlock:
             for i in range(0, self.shift):
                 if self.position + i < wlen:
                     if not s:
-                        s = etree.tostring(ch[self.position + i], encoding='utf8')
+                        s = etree.tostring(ch[self.position + i], encoding="utf8")
                     else:
-                        s += etree.tostring(ch[self.position + i], encoding='utf8')
+                        s += etree.tostring(ch[self.position + i], encoding="utf8")
             return s
 
     def identify_entities(self, node=None, parent_id=None):
@@ -161,12 +195,14 @@ class TagBlock:
         if node is None and self.shift is None:
             node = self.__root_node[self.position]
         elif node is None:
-        #            logging.info(u'Root node: %s' %(unicode(self.__root_node)))
-        #            logging.info(u'Position %d shift %d' %(self.position, self.shift))
-        #            logging.info(u'Ch nodes: %s' %(unicode(self.__root_node.getchildren())))
-        #            print len(self.__root_node.getchildren()[1].getchildren())
-            for node in self.__root_node.getchildren()[self.position: self.position + self.shift]:
-            #            print node
+            #            logging.info(u'Root node: %s' %(unicode(self.__root_node)))
+            #            logging.info(u'Position %d shift %d' %(self.position, self.shift))
+            #            logging.info(u'Ch nodes: %s' %(unicode(self.__root_node.getchildren())))
+            #            print len(self.__root_node.getchildren()[1].getchildren())
+            for node in self.__root_node.getchildren()[
+                self.position : self.position + self.shift
+            ]:
+                #            print node
                 if node is not None:
                     annotations.extend(self.identify_entities(node))
             return annotations
@@ -174,7 +210,7 @@ class TagBlock:
         ch = node
         ch_childs = ch.getchildren()
         attrs = []
-        if ch.text and ch.tag not in ['script',] and len(ch.text.strip()) != 0:
+        if ch.text and ch.tag not in ["script",] and len(ch.text.strip()) != 0:
             attrs.append(TAG_TYPE_TEXT)
         if ch.tail and len(ch.tail.strip()) != 0:
             attrs.append(TAG_TYPE_TAIL)
@@ -184,17 +220,28 @@ class TagBlock:
             attrs.append(TAG_TYPE_LAST)
         elif len(ch_childs) == 1 and TAG_TYPE_EMPTY in attrs:
             attrs.append(TAG_TYPE_WRAPPER)
-        if ch.tag == 'a' and 'href' in ch.attrib:
+        if ch.tag == "a" and "href" in ch.attrib:
             attrs.append(TAG_TYPE_HREF)
-        if ch.tag in ['h1', 'h2', 'h3', 'h4', 'b', 'strong']:
+        if ch.tag in ["h1", "h2", "h3", "h4", "b", "strong"]:
             attrs.append(TAG_TYPE_BOLD)
-        if ch.tag == 'img' and 'src' in ch.attrib:
+        if ch.tag == "img" and "src" in ch.attrib:
             attrs.append(TAG_TYPE_IMG)
         apath = TagPath(ch, self.__root_node)
         htmlattrs = dict(ch.attrib)
         self.global_id += 1
         aid = self.global_id
-        annotations.append(TagEntry(aid, ch, ch.tag, ch.getparent().index(ch), apath, parent_id, attrs, htmlattrs))
+        annotations.append(
+            TagEntry(
+                aid,
+                ch,
+                ch.tag,
+                ch.getparent().index(ch),
+                apath,
+                parent_id,
+                attrs,
+                htmlattrs,
+            )
+        )
         #       print 'Childs', ch_childs, ch
         #    logging.info('Node childs: %s' %(ch_childs))
         for child in ch_childs:
@@ -203,12 +250,15 @@ class TagBlock:
             #                print 'Anns', annotations
         return annotations
 
-
     def print_block(self):
         """Prints this tag block"""
         if self.shift is None:
-            print(etree.tostring(self.__root_node.getchildren()[self.position], encoding='utf8'))
+            print(
+                etree.tostring(
+                    self.__root_node.getchildren()[self.position], encoding="utf8"
+                )
+            )
         else:
             ch = self.__root_node.getchildren()
             for i in range(0, self.shift):
-                print(etree.tostring(ch[self.position + i], encoding='utf8'))
+                print(etree.tostring(ch[self.position + i], encoding="utf8"))

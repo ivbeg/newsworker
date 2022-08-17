@@ -28,8 +28,14 @@ setup(
         'pyparsing',
         'lxml',
         'bs4',
-        'qddate'
+        'qddate',
+        'click'
     ],
+    entry_points={
+        'console_scripts': [
+            'newsworker = newsworker.__main__:main',
+        ],
+    },
     license="BSD",
     zip_safe=False,
     keywords='news parsing extraction feeds rss atom',

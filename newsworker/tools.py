@@ -16,35 +16,35 @@ def decode_html(html_string):
 def get_abs_url(root_url, url):
     """Returns absolute url"""
     https = False
-#    print('Root url: %s and url: %s' % (root_url, url))
-    if root_url[:7] == 'http://':
+    #    print('Root url: %s and url: %s' % (root_url, url))
+    if root_url[:7] == "http://":
         o = urlparse(root_url)
-    elif root_url[:8] == 'https://':
+    elif root_url[:8] == "https://":
         o = urlparse(root_url)
         https = True
     else:
-        o = urlparse('http://' + root_url)
+        o = urlparse("http://" + root_url)
         #    if url:
     #        o = urlparse.urlparse(root_url)
     if len(url) == 0:
-        url = 'http://' + o.netloc
-    if url[0] == '/':
-        url = 'http://' + o.netloc + url
-    elif url[:2] == './':
-        url = root_url.rsplit('/', 1)[0] + url[1:]
-    elif url[:7] != 'http://' and url[:8] != 'https://':
-        if len(o.path) > 0 and o.path[len(o.path) - 1] == '/':
-            if o.path[len(o.path) - 1] == '/':
+        url = "http://" + o.netloc
+    if url[0] == "/":
+        url = "http://" + o.netloc + url
+    elif url[:2] == "./":
+        url = root_url.rsplit("/", 1)[0] + url[1:]
+    elif url[:7] != "http://" and url[:8] != "https://":
+        if len(o.path) > 0 and o.path[len(o.path) - 1] == "/":
+            if o.path[len(o.path) - 1] == "/":
                 url = root_url + url
             else:
-                parts = o.path.rsplit('/', 1)
+                parts = o.path.rsplit("/", 1)
                 if len(parts) == 1:
-                    url = root_url + '/' + url
+                    url = root_url + "/" + url
                 else:
                     if not https:
-                        url = 'http://' + o.netloc + parts[0] + '/' + url
+                        url = "http://" + o.netloc + parts[0] + "/" + url
                     else:
-                        url = 'https://' + o.netloc + parts[0] + '/' + url
+                        url = "https://" + o.netloc + parts[0] + "/" + url
 
     return url
 
@@ -52,10 +52,10 @@ def get_abs_url(root_url, url):
 def clean_url(url):
     """Removes just query parameters from url"""
     # clean url from jsession param
-    THE_JS_KEY  = ';jsessionid='
+    THE_JS_KEY = ";jsessionid="
     n = url.find(THE_JS_KEY)
     if n > -1:
-        thepath = url[:n] + url[n+len(THE_JS_KEY) + 32:]
+        thepath = url[:n] + url[n + len(THE_JS_KEY) + 32 :]
         url = thepath
     o = urlparse(url)
 
@@ -63,12 +63,13 @@ def clean_url(url):
     if len(o.query) > 0:
         query = clean_urlquery(o.query)[0]
         if len(query) > 0:
-            url = o.geturl().rsplit('?')[0] + '?' + query
+            url = o.geturl().rsplit("?")[0] + "?" + query
         else:
-            return o.geturl().rsplit('?')[0]
+            return o.geturl().rsplit("?")[0]
         return url
-#    print o
+    #    print o
     return o.geturl()
+
 
 def clean_urlquery(qs):
     """Removes _junk_ query parameters left by analytics systems"""
@@ -82,10 +83,9 @@ def clean_urlquery(qs):
             filtered[k] = v
     q = []
     for k, v in list(results.items()):
-        q.append('%s=%s' % (k, v[0]))
-    query = '&'.join(q)
+        q.append("%s=%s" % (k, v[0]))
+    query = "&".join(q)
     return query, results, filtered
-
 
 
 class Logger:
@@ -101,14 +101,17 @@ class Logger:
     def clear(self):
         self.logs = []
 
-
     def save(self, code, msg, autoreset=True):
         current = time.time()
-        record = {'dt' : datetime.datetime.now().isoformat(), 'time' : current - self.current, 'msg' : msg, 'code' : code}
+        record = {
+            "dt": datetime.datetime.now().isoformat(),
+            "time": current - self.current,
+            "msg": msg,
+            "code": code,
+        }
         if autoreset:
             self.current = current
         self.logs.append(record)
-
 
     def getlogs(self):
         return self.logs

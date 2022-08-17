@@ -15,6 +15,7 @@ import requests
 from .extractor import FeedExtractor
 from .consts import FEED_CONTENT_TYPES
 
+
 def decode_html(html_string):
     converted = UnicodeDammit(html_string)
     return converted.unicode_markup
@@ -44,6 +45,7 @@ def get_url_data(url):
 
 class FeedsFinder:
     """Look up for feeds on website pages"""
+
     def __init__(self):
         self.feedext = FeedExtractor()
         pass
@@ -51,166 +53,182 @@ class FeedsFinder:
     def __find_rss_autodiscover(self, root, url):
         """Autodiscover feeds by link"""
         feeds = []
-        links = root.xpath('//link')
+        links = root.xpath("//link")
         logging.info(links)
         for link in links:
-            if 'rel' in link.attrib and link.attrib['rel'].lower() == 'alternate':
+            if "rel" in link.attrib and link.attrib["rel"].lower() == "alternate":
                 item = {}
-                item['url'] = link.attrib['href']
-                if 'type' in link.attrib:
-                    ltype = link.attrib['type'].lower()
-                    if ltype == 'application/atom+xml':
-                        item['feedtype'] = 'atom'
-                    elif ltype == 'application/rss+xml':
-                        item['feedtype'] = 'rss'
+                item["url"] = link.attrib["href"]
+                if "type" in link.attrib:
+                    ltype = link.attrib["type"].lower()
+                    if ltype == "application/atom+xml":
+                        item["feedtype"] = "atom"
+                    elif ltype == "application/rss+xml":
+                        item["feedtype"] = "rss"
                     else:
                         continue
-                if 'title' in link.attrib: item['title'] = link.attrib['title']
-                item['confidence'] = 1
+                if "title" in link.attrib:
+                    item["title"] = link.attrib["title"]
+                item["confidence"] = 1
                 feeds.append(item)
         return feeds
-
 
     def __find_feed_img(self, root, url):
         """Find by RSS image """
         feeds = []
-        for img in root.xpath('//img'):
-            if 'src' in img.attrib:
-                href = img.attrib['src']
+        for img in root.xpath("//img"):
+            if "src" in img.attrib:
+                href = img.attrib["src"]
                 up = urlparse(href)
                 ipath = up.path
-                parts = ipath.split('/')
+                parts = ipath.split("/")
                 parts.reverse()
                 if len(parts) > 1:
                     name = parts[0] if len(parts[0]) > 0 else parts[1]
                 else:
                     name = parts[0]
                 name = name.lower()
-                for k in ['rss', 'feed']:
-                    if name.find(k) == 0 and name.find('feedback') == -1:
+                for k in ["rss", "feed"]:
+                    if name.find(k) == 0 and name.find("feedback") == -1:
                         atag = img.getparent()
-                        if atag.tag == 'a':
-                            u = atag.attrib['href']
+                        if atag.tag == "a":
+                            u = atag.attrib["href"]
                             if u not in feeds:
-                                item = {'url' : u}
+                                item = {"url": u}
                                 text = None
-                                if 'title' in atag.attrib: text = atag.attrib['title']
-                                if not text and 'alt' in atag.attrib: text = atag.attrib['alt']
-                                if not text and 'title' in img.attrib: text = img.attrib['title']
-                                if not text and 'alt' in img.attrib: text = img.attrib['alt']
-                                if text is not None: item['title'] = text
-                                if k == 'rss': item['feedtype'] = 'rss'
-                                else: item['feedtype'] = 'undefined'
-                                item['confidence'] = 0.5
+                                if "title" in atag.attrib:
+                                    text = atag.attrib["title"]
+                                if not text and "alt" in atag.attrib:
+                                    text = atag.attrib["alt"]
+                                if not text and "title" in img.attrib:
+                                    text = img.attrib["title"]
+                                if not text and "alt" in img.attrib:
+                                    text = img.attrib["alt"]
+                                if text is not None:
+                                    item["title"] = text
+                                if k == "rss":
+                                    item["feedtype"] = "rss"
+                                else:
+                                    item["feedtype"] = "undefined"
+                                item["confidence"] = 0.5
                                 feeds.append(item)
         return feeds
-
 
     def __find_feed_by_urls(self, root, url):
         "Find feeds by related urls"
         feeds = []
-        for olink in root.xpath('//a'):
+        for olink in root.xpath("//a"):
             item = {}
             feedfound = False
-            if 'href' in olink.attrib:
-                href = olink.attrib['href']
+            if "href" in olink.attrib:
+                href = olink.attrib["href"]
                 up = urlparse(href)
                 ipath = up.path
-                parts = ipath.split('/')
+                parts = ipath.split("/")
                 parts.reverse()
                 if len(parts) > 1:
                     name = parts[0] if len(parts[0]) > 0 else parts[1]
                 else:
                     name = parts[0]
                 name = name.lower()
-                if name.find('.') > -1:
-                    name, ext = name.rsplit('.', 1)
+                if name.find(".") > -1:
+                    name, ext = name.rsplit(".", 1)
                 else:
-                    ext = ''
-                for k in ['rss', 'feed']:
-                    if name.find(k) == 0 and name.find('feedback') == -1:
-                        u = olink.attrib['href']
+                    ext = ""
+                for k in ["rss", "feed"]:
+                    if name.find(k) == 0 and name.find("feedback") == -1:
+                        u = olink.attrib["href"]
                         if u not in feeds:
-                            item['url'] = u
-                            if k == 'rss':
-                                item['feedtype'] = 'rss'
+                            item["url"] = u
+                            if k == "rss":
+                                item["feedtype"] = "rss"
                             else:
-                                item['feedtype'] = 'undefined'
-                            item['confidence'] = 0.5
+                                item["feedtype"] = "undefined"
+                            item["confidence"] = 0.5
                             feeds.append(item)
                             feedfound = True
                             break
-                if feedfound: continue
+                if feedfound:
+                    continue
                 for p in parts:
-                    if p in ['rss', 'feed']:
-                        u = olink.attrib['href']
+                    if p in ["rss", "feed"]:
+                        u = olink.attrib["href"]
                         if u not in feeds:
-                            item['url'] = u
-                            if p == 'rss':
-                                item['feedtype'] = 'rss'
+                            item["url"] = u
+                            if p == "rss":
+                                item["feedtype"] = "rss"
                             else:
-                                item['feedtype'] = 'undefined'
-                            item['confidence'] = 0.5
+                                item["feedtype"] = "undefined"
+                            item["confidence"] = 0.5
                             feeds.append(item)
                             feedfound = True
                             break
-                if feedfound: continue
+                if feedfound:
+                    continue
                 try:
                     text = olink.text if olink.text else None
                 except:
                     text = None
                 if text:
-                    if text.lower().find('rss') > -1:
-                        u = olink.attrib['href']
+                    if text.lower().find("rss") > -1:
+                        u = olink.attrib["href"]
                         if u not in feeds:
-                            item['url'] = u
-                            item['confidence'] = 0.5
-                            item['feedtype'] = 'rss'
+                            item["url"] = u
+                            item["confidence"] = 0.5
+                            item["feedtype"] = "rss"
                             feeds.append(item)
                             feedfound = True
                             break
-                if feedfound: continue
-                for k in ['rss', 'xml']:
+                if feedfound:
+                    continue
+                for k in ["rss", "xml"]:
                     if ext.find(k) == 0:
-                        if olink.getparent().tag == 'a':
-                            u = olink.attrib['href']
+                        if olink.getparent().tag == "a":
+                            u = olink.attrib["href"]
                             if u not in feeds:
-                                item['url'] = u
-                                if k == 'rss':
-                                    item['feedtype'] = 'rss'
+                                item["url"] = u
+                                if k == "rss":
+                                    item["feedtype"] = "rss"
                                 else:
-                                    item['feedtype'] = 'undefined'
-                                item['confidence'] = 0.5
+                                    item["feedtype"] = "undefined"
+                                item["confidence"] = 0.5
                                 feeds.append(item)
                                 feedfound = True
                                 break
-                if feedfound: continue
+                if feedfound:
+                    continue
         return feeds
-
-
 
     def collect_feeds(self, root, url):
         urls = []
         feeds = self.__find_rss_autodiscover(root, url)
         for f in feeds:
-            urls.append(f['url'])
+            urls.append(f["url"])
         for u in self.__find_feed_img(root, url):
-            if u['url'] not in urls:
-                urls.append(u['url'])
+            if u["url"] not in urls:
+                urls.append(u["url"])
                 feeds.append(u)
         for u in self.__find_feed_by_urls(root, url):
-            if u['url'] not in urls:
-                urls.append(u['url'])
+            if u["url"] not in urls:
+                urls.append(u["url"])
                 feeds.append(u)
         res = []
         for f in feeds:
-            f['url'] = urljoin(url, f['url'])
+            f["url"] = urljoin(url, f["url"])
             res.append(f)
-#        feeds = [urljoin(url, u) for f in feeds]
+        #        feeds = [urljoin(url, u) for f in feeds]
         return res
 
-
-    def find_feeds(self, url, noverify=True, force_htmlparse=False, include_entries=False, extractrss=False, crawl=False):
+    def find_feeds(
+        self,
+        url,
+        noverify=True,
+        force_htmlparse=False,
+        include_entries=False,
+        extractrss=False,
+        crawl=False,
+        timeout=30
+    ):
         """
         :param url: webpage url
         :param noverify: Adds feeds without parsing. Warning, it's true by default. If you set it to false, it will be much slover
@@ -222,18 +240,22 @@ class FeedsFinder:
         """
         feed_urls = []
         items = []
-        r = requests.get(url)
+        r = requests.get(url, timeout=timeout)
         real_url = r.url
-        results = {'url': real_url, 'items': items}
-        if r.headers['content-type'] in FEED_CONTENT_TYPES:
+        results = {"url": real_url, "items": items}
+        if r.headers["content-type"] in FEED_CONTENT_TYPES:
             d = feedparser.parse(r.content)
-            if 'title' in d.feed:
-                item = {'title': d.feed.title, 'url': real_url, 'feedtype': 'rss',
-                        'num_entries': len(d.entries)}
-                if 'language' in d.feed:
-                    item['language'] = d.feed.language
+            if "title" in d.feed:
+                item = {
+                    "title": d.feed.title,
+                    "url": real_url,
+                    "feedtype": "rss",
+                    "num_entries": len(d.entries),
+                }
+                if "language" in d.feed:
+                    item["language"] = d.feed.language
                 if include_entries:
-                    item['entries'] = d.entries
+                    item["entries"] = d.entries
                 items.append(item)
         else:
             root = fromstring(r.content)
@@ -241,64 +263,80 @@ class FeedsFinder:
                 feeds = self.collect_feeds(root, real_url)
                 for f in feeds:
                     if noverify:
-                        item = {'title': f['url'], 'url': f['url'], 'feedtype': 'rss'}
+                        item = {"title": f["url"], "url": f["url"], "feedtype": "rss"}
                         items.append(item)
                         continue
                     else:
-                        d = feedparser.parse(f['url'])
-                        if 'title' in d.feed:
-                            item = {'title': d.feed.title, 'url': f['url'], 'feedtype': f['feedtype'], 'num_entries' : len(d.entries)}
-                            if 'language' in d.feed:
-                                item['language'] = d.feed.language
+                        d = feedparser.parse(f["url"])
+                        if "title" in d.feed:
+                            item = {
+                                "title": d.feed.title,
+                                "url": f["url"],
+                                "feedtype": f["feedtype"],
+                                "num_entries": len(d.entries),
+                            }
+                            if "language" in d.feed:
+                                item["language"] = d.feed.language
                             if include_entries:
-                                item['entries'] = d.entries
+                                item["entries"] = d.entries
                             items.append(item)
                         elif force_htmlparse:
-                            rp = requests.get(f['url'])
+                            rp = requests.get(f["url"])
                             if not rp.content:
                                 continue
                             cfeeds = self.collect_feeds(rp.content, rp.url)
                             for cf in cfeeds:
-                                if cf['url'] in feed_urls:
+                                if cf["url"] in feed_urls:
                                     continue
-                                d = feedparser.parse(cf['url'])
-                                item = {'title': d.feed.title, 'url': f['url'], 'feedtype': f['feedtype'],
-                                        'num_entries': len(d.entries)}
-                                if 'language' in d.feed:
-                                    item['language'] = d.feed.language
+                                d = feedparser.parse(cf["url"])
+                                item = {
+                                    "title": d.feed.title,
+                                    "url": f["url"],
+                                    "feedtype": f["feedtype"],
+                                    "num_entries": len(d.entries),
+                                }
+                                if "language" in d.feed:
+                                    item["language"] = d.feed.language
                                 if include_entries:
-                                    item['entries'] = d.entries
+                                    item["entries"] = d.entries
                                 items.append(item)
                 if extractrss:
                     datafeed, session = self.feedext.get_feed(r.url, data=r.content)
-                    if datafeed and len(datafeed['items']) > 0:
-                        item = {'feedtype': 'html', 'title': datafeed['title'], 'num_entries': len(datafeed['items']), 'url': r.url}
+                    if datafeed and len(datafeed["items"]) > 0:
+                        item = {
+                            "feedtype": "html",
+                            "title": datafeed["title"],
+                            "num_entries": len(datafeed["items"]),
+                            "url": r.url,
+                        }
                         if include_entries:
-                            item['entries'] = datafeed['entries']
+                            item["entries"] = datafeed["entries"]
                         items.append(item)
-                results['items'] = items
+                results["items"] = items
         return results
 
     def find_feeds_deep(self, url, lookin=True):
         items = []
         root, real_url = self.__get_page(url)
-        results = {'url' : real_url, 'items' : items}
+        results = {"url": real_url, "items": items}
         if not root:
             return {}
         feeds = self.collect_feeds(root, real_url)
         for f in feeds:
-            d = feedparser.parse(f['url'])
-            if 'title' in d.feed:
-                items.append({'title' : d.feed.title, 'url' : f['url'], 'feedtype' : f['feedtype']})
+            d = feedparser.parse(f["url"])
+            if "title" in d.feed:
+                items.append(
+                    {"title": d.feed.title, "url": f["url"], "feedtype": f["feedtype"]}
+                )
             elif lookin:
-                dp, dp_url = self.__get_page(f['url'])
+                dp, dp_url = self.__get_page(f["url"])
                 if not dp:
-                    results['items'] = items
+                    results["items"] = items
                     return results
                 cfeeds = self.collect_feeds(dp, dp_url)
                 for cf in cfeeds:
-                    d = feedparser.parse(cf['url'])
-                    if 'title' in d.feed:
+                    d = feedparser.parse(cf["url"])
+                    if "title" in d.feed:
                         items.append(cf)
-        results['items'] = items
+        results["items"] = items
         return results
