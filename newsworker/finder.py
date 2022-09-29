@@ -74,7 +74,7 @@ class FeedsFinder:
         return feeds
 
     def __find_feed_img(self, root, url):
-        """Find by RSS image """
+        """Find by RSS image"""
         feeds = []
         for img in root.xpath("//img"):
             if "src" in img.attrib:
@@ -227,7 +227,7 @@ class FeedsFinder:
         include_entries=False,
         extractrss=False,
         crawl=False,
-        timeout=30
+        timeout=30,
     ):
         """
         :param url: webpage url
@@ -317,7 +317,7 @@ class FeedsFinder:
 
     def find_feeds_deep(self, url, lookin=True):
         items = []
-        root, real_url = self.__get_page(url)
+        root, real_url = get_url_data(url)
         results = {"url": real_url, "items": items}
         if not root:
             return {}
@@ -329,7 +329,7 @@ class FeedsFinder:
                     {"title": d.feed.title, "url": f["url"], "feedtype": f["feedtype"]}
                 )
             elif lookin:
-                dp, dp_url = self.__get_page(f["url"])
+                dp, dp_url = get_url_data(f["url"])
                 if not dp:
                     results["items"] = items
                     return results

@@ -4,7 +4,6 @@
 Tag mapping routines. Initially it was created for other purposes. It's intended to create web page map of tags, annotating
 """
 
-
 from lxml import etree
 import hashlib
 
@@ -78,7 +77,7 @@ class TagPath:
             self.__tag_names.reverse()
         self.key = "_".join(map(str, self.__shifts))
         md = hashlib.md5()
-        md.update(self.key.encode("utf8") if type(self.key) == type(u"") else self.key)
+        md.update(self.key.encode("utf8") if type(self.key) == type("") else self.key)
         self.hash = md.hexdigest()
 
     def __cmp__(self, tagpath):
@@ -210,7 +209,14 @@ class TagBlock:
         ch = node
         ch_childs = ch.getchildren()
         attrs = []
-        if ch.text and ch.tag not in ["script",] and len(ch.text.strip()) != 0:
+        if (
+            ch.text
+            and ch.tag
+            not in [
+                "script",
+            ]
+            and len(ch.text.strip()) != 0
+        ):
             attrs.append(TAG_TYPE_TEXT)
         if ch.tail and len(ch.tail.strip()) != 0:
             attrs.append(TAG_TYPE_TAIL)

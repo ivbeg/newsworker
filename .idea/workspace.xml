@@ -5,18 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="587ca514-2bd7-41ad-9de6-a889c3f993ed" name="Default" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/newsworker.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/newsworker.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.rst" beforeDir="false" afterPath="$PROJECT_DIR$/README.rst" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/newsworker/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/newsworker/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/newsworker/consts.py" beforeDir="false" afterPath="$PROJECT_DIR$/newsworker/consts.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/newsworker/extractor.py" beforeDir="false" afterPath="$PROJECT_DIR$/newsworker/extractor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/newsworker/finder.py" beforeDir="false" afterPath="$PROJECT_DIR$/newsworker/finder.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/newsworker/tagmapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/newsworker/tagmapper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/newsworker/tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/newsworker/tools.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/setup.py" beforeDir="false" afterPath="$PROJECT_DIR$/setup.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/newsworker/__main__.py" beforeDir="false" afterPath="$PROJECT_DIR$/newsworker/__main__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../qddate/qddate/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/../qddate/qddate/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../qddate/setup.py" beforeDir="false" afterPath="$PROJECT_DIR$/../qddate/setup.py" afterDir="false" />
     </list>
@@ -98,11 +88,22 @@
       <workItem from="1591379718402" duration="2005000" />
       <workItem from="1591387491279" duration="611000" />
       <workItem from="1660576522851" duration="312000" />
-      <workItem from="1660577551471" duration="5591000" />
+      <workItem from="1660577551471" duration="10837000" />
     </task>
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
 </project>
