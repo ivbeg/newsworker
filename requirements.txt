@@ -4,3 +4,4 @@ pyparsing
 feedparser
 qddate
 click
+feedgen
