@@ -8,9 +8,16 @@ import logging
 logging.getLogger().addHandler(logging.StreamHandler())
 
 import hashlib
+import requests.exceptions
 from copy import copy
 import datetime
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import urllib3
+
+# Suppress InsecureRequestWarning for unverified HTTPS requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from lxml.html import fromstring
 from pprint import PrettyPrinter
 from lxml import etree
@@ -25,6 +32,9 @@ from .tagmapper import (
     TAG_TYPE_HREF,
     TAG_TYPE_IMG,
 )
+
+# Default timeout for HTTP requests
+DEFAULT_TIMEOUT = 30
 
 
 class FeedExtractor:
@@ -43,17 +53,38 @@ class FeedExtractor:
         # key parameters
         self.filtered_text_length = filtered_text_length
 
+        # Create session with connection pooling
+        self.http_session = requests.Session()
+        
+        # Configure retry strategy
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=10,
+            pool_maxsize=20
+        )
+        self.http_session.mount("http://", adapter)
+        self.http_session.mount("https://", adapter)
+
         self.session = None
 
     def initfeed(self, document, base_url):
         """Inits feed to get data"""
-        t_nodes = document.xpath("//head/title")
-        if len(t_nodes) > 0 and t_nodes[0].text is not None:
-            feed_title = t_nodes[0].text.strip()
-            title_extracted = True
-        else:
+        if document is None:
             feed_title = "News from " + base_url
             title_extracted = False
+        else:
+            t_nodes = document.xpath("//head/title")
+            if len(t_nodes) > 0 and t_nodes[0].text is not None:
+                feed_title = t_nodes[0].text.strip()
+                title_extracted = True
+            else:
+                feed_title = "News from " + base_url
+                title_extracted = False
         # FIXME! default language should be page language based not just english by default. Not yet implemented
         feed = {
             "title": feed_title,
@@ -73,7 +104,8 @@ class FeedExtractor:
             return False, None, None, None
         res = self.indexer.match(text)
         #        print('Compare %s ' % (text))
-        self.session["debug"]["num_textcompared"] += 1
+        if self.session:
+            self.session["debug"]["num_textcompared"] += 1
         #        self.log.save('match_text', 'Text %s against patterns, result %s' % (text, str(p)))
         if res:
             r = res["values"]
@@ -85,9 +117,11 @@ class FeedExtractor:
                 d[k] = int(v)
             try:
                 the_date = datetime.datetime(**d)
-                self.session["debug"]["num_matched"] += 1
+                if self.session:
+                    self.session["debug"]["num_matched"] += 1
                 return True, p["key"], p, text, the_date
-            except:
+            except (ValueError, TypeError, KeyError) as e:
+                self.log.save("match_text", f"Failed to create datetime: {e}")
                 return False, None, None, None
         return False, None, None, None
 
@@ -109,12 +143,14 @@ class FeedExtractor:
         if text_1 is not None:
             results = self.match_text(text_1)
             if results[0] is True:
-                self.session["debug"]["num_datematched"] += 1
+                if self.session:
+                    self.session["debug"]["num_datematched"] += 1
                 return results
         if text_2 is not None:
             results = self.match_text(text_2)
             if results[0] is True:
-                self.session["debug"]["num_datematched"] += 1
+                if self.session:
+                    self.session["debug"]["num_datematched"] += 1
                 return results
         return None, None, None, None, None
 
@@ -125,18 +161,40 @@ class FeedExtractor:
         :param base_url: base url of the processed webpage
         :return:
         """
+        if document is None:
+            self.session["debug"]["num_nodes"] = 0
+            self.session["debug"]["num_clusters"] = 0
+            self.session["debug"]["clusters"] = {}
+            self.log.save("getclusters", "Document is None, returning empty clusters")
+            return {}
+        
+        # Optimized XPath: exclude script/style nodes early for better performance
         nodes = document.xpath(
-            "//*[string-length(text())<%d]" % self.filtered_text_length
+            "//*[not(self::script or self::style) and string-length(text())<%d]" % self.filtered_text_length
         )
         self.session["debug"]["num_nodes"] = len(nodes)
         self.log.save("getclusters", "Nodes extracted")
+        
+        # Early filtering: only check nodes that likely contain dates (have digits)
+        # This avoids expensive pattern matching on nodes that can't be dates
+        potential_date_nodes = []
+        for node in nodes:
+            text = (node.text or "").strip()
+            tail = (node.tail or "").strip()
+            # Quick check: dates typically contain digits
+            if text and any(char.isdigit() for char in text):
+                potential_date_nodes.append(node)
+            elif tail and any(char.isdigit() for char in tail):
+                potential_date_nodes.append(node)
+        
         shared_node = None
         last = None
         last_d = {}
         last_path = None
         clusters = {}
         first = True
-        for node in nodes:
+        # Only match patterns on potential date nodes
+        for node in potential_date_nodes:
             (match, t_key, t_data, the_text, the_date) = self.match_date(node)
             if match:
                 path = TagPath(node)
@@ -146,7 +204,7 @@ class FeedExtractor:
                         if shared_node is None:
                             shared_node = snode
                         spath = document.getroottree().getpath(snode)
-                        if spath not in list(clusters.keys()):
+                        if spath not in clusters:
                             clusters[spath] = {"snode": snode, "nodes": []}
                         if first:
                             clusters[spath]["nodes"].append(last_d)
@@ -196,8 +254,7 @@ class FeedExtractor:
             for i in range(len(data) - 1, -1, -1):
                 if i != len(data) - 1:
                     diff = data[i + 1] - data[i]
-                    if diff not in list(avg_diff.keys()):
-                        avg_diff[diff] = 0
+                    avg_diff.setdefault(diff, 0)
                     avg_diff[diff] += 1
                     block = TagBlock(snode, snode_path, data[i], diff)
                     (match, t_key, t_data, the_text, the_date) = self.match_date(
@@ -279,6 +336,7 @@ class FeedExtractor:
                         ann.attrs.append(TAG_TYPE_DATE)
                 title = None
                 description = None
+                description_parts = []  # Collect text parts for efficient joining
                 url = None
                 links = []
                 images = []
@@ -289,36 +347,44 @@ class FeedExtractor:
                     if ann.node.tag is etree.Comment:
                         continue
                     if TAG_TYPE_TEXT in ann.attrs and TAG_TYPE_DATE not in ann.attrs:
-                        if len(ann.node.text.strip()) > 10 and title is None:
-                            title = ann.node.text.strip()
+                        text_content = ann.node.text.strip() if ann.node.text else ""
+                        if len(text_content) > 10 and title is None:
+                            title = text_content
                         if (
                             description is None
                             and title is not None
-                            and title != ann.node.text.strip()
-                            and len(ann.node.text) > 10
+                            and title != text_content
+                            and len(text_content) > 10
                         ):
-                            description = ann.node.text.strip()
+                            description = text_content
                         elif (
                             title is not None
                             and description is not None
-                            and len(ann.node.text) > 10
+                            and len(text_content) > 10
                         ):
-                            description += "\n" + ann.node.text.strip()
+                            description_parts.append(text_content)
                     if TAG_TYPE_TAIL in ann.attrs:
-                        if len(ann.node.tail.strip()) > 10 and title is None:
-                            title = ann.node.tail.strip()
+                        tail_content = ann.node.tail.strip() if ann.node.tail else ""
+                        if len(tail_content) > 10 and title is None:
+                            title = tail_content
                         if (
                             description is None
                             and title is not None
-                            and len(ann.node.tail) > 10
+                            and len(tail_content) > 10
                         ):
-                            description = ann.node.tail.strip()
+                            description = tail_content
                         elif (
                             title is not None
                             and description is not None
-                            and len(ann.node.tail) > 10
+                            and len(tail_content) > 10
                         ):
-                            description += "\n" + ann.node.tail.strip()
+                            description_parts.append(tail_content)
+                # Join description parts efficiently
+                if description_parts:
+                    if description is None:
+                        description = "\n".join(description_parts)
+                    else:
+                        description = description + "\n" + "\n".join(description_parts)
                     if TAG_TYPE_HREF in ann.attrs and "href" in ann.node.attrib:
                         clr = clean_url(get_abs_url(base_url, ann.node.attrib["href"]))
                         if clr not in links:
@@ -367,14 +433,22 @@ class FeedExtractor:
         return feed
 
     def fetch(self, url, user_agent=None):
+        headers = {}
         if user_agent is not None:
-            headers = {"User-agent": user_agent}
-            u = requests.get(url, headers=headers, verify=False)
-        else:
-            u = requests.get(url, verify=False)
-        data = u.content
-        self.session["debug"]["page_length"] = len(data)
-        return data
+            headers["User-agent"] = user_agent
+        try:
+            u = self.http_session.get(url, headers=headers, verify=False, timeout=DEFAULT_TIMEOUT)
+            u.raise_for_status()  # Raise an exception for bad status codes
+            data = u.content
+            if self.session:
+                self.session["debug"]["page_length"] = len(data)
+            return data
+        except requests.exceptions.Timeout:
+            self.log.save("fetch", f"Timeout while fetching {url}")
+            raise
+        except requests.exceptions.RequestException as e:
+            self.log.save("fetch", f"Request error while fetching {url}: {e}")
+            raise
 
     def init_session(self):
         """Used to start internal debugging session"""
@@ -403,10 +477,20 @@ class FeedExtractor:
         edata = decode_html(data)
         self.log.save("get_rss", "Decode data")
         try:
-            document = fromstring(edata)
-        except ValueError:
+            # Use memory-efficient parser that removes blank text nodes
+            parser = etree.HTMLParser(remove_blank_text=True)
+            document = fromstring(edata, parser=parser)
+        except (ValueError, etree.ParserError, etree.XMLSyntaxError) as e:
+            self.log.save("get_rss", f"Failed to parse HTML: {e}")
             document = None
         self.log.save("get_rss", "Parsed data")
+        
+        if document is None:
+            self.log.save("get_rss", "Document is None, returning empty feed")
+            feed = self.initfeed(None, url)
+            session = self.clear_session()
+            return feed, session
+        
         feed = self.initfeed(document, url)
         clusters = self.getclusters(document, url)
         self.log.save("get_rss", "Clusters extracted")
@@ -427,10 +511,20 @@ class FeedExtractor:
         edata = decode_html(data)
         self.log.save("learn_rss_data", "Decode data")
         try:
-            document = fromstring(edata)
-        except:
+            # Use memory-efficient parser that removes blank text nodes
+            parser = etree.HTMLParser(remove_blank_text=True)
+            document = fromstring(edata, parser=parser)
+        except (ValueError, etree.ParserError, etree.XMLSyntaxError) as e:
+            self.log.save("learn_rss_data", f"Failed to parse HTML: {e}")
             document = None
         self.log.save("learn_rss_data", "Parsed data")
+        
+        if document is None:
+            self.log.save("learn_rss_data", "Document is None, returning empty feed")
+            feed = self.initfeed(None, url)
+            session = self.clear_session()
+            return feed, session
+        
         feed = self.initfeed(document, url)
         clusters = self.getclusters(document, url)
         self.log.save("learn_rss_data", "Clusters %s" % (printer.pformat(clusters)))

@@ -7,10 +7,10 @@ open_as_utf = lambda x: io.open(x, encoding='utf-8')
 (__version__, ) = re.findall("__version__.*\s*=\s*[']([^']+)[']",
                              open('newsworker/__init__.py').read())
 
-readme = re.sub(r':members:.+|..\sautomodule::.+|:class:|:func:', '', open_as_utf('README.rst').read())
+readme = re.sub(r':members:.+|..\sautomodule::.+|:class:|:func:', '', open_as_utf('README.md').read())
 readme = re.sub(r'`Settings`_', '`Settings`', readme)
 readme = re.sub(r'`Contributing`_', '`Contributing`', readme)
-history = re.sub(r':mod:|:class:|:func:', '', open_as_utf('HISTORY.rst').read())
+changelog = re.sub(r':mod:|:class:|:func:', '', open_as_utf('CHANGELOG.md').read())
 
 
 
@@ -18,7 +18,8 @@ setup(
     name='newsworker',
     version=__version__,
     description=' Advanced news feeds extractor and finder library. Helps to automatically extract news from websites without RSS/ATOM feeds',
-    long_description=readme + '\n\n' + history,
+    long_description=readme + '\n\n' + changelog,
+    long_description_content_type='text/markdown',
     author='Ivan Begtin',
     author_email='ivan@begtin.tech',
     url='https://github.com/ivbeg/newsworker',
@@ -29,7 +30,8 @@ setup(
         'lxml',
         'bs4',
         'qddate',
-        'click'
+        'typer',
+        'feedgen'
     ],
     entry_points={
         'console_scripts': [

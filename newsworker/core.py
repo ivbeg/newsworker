@@ -8,7 +8,7 @@ logging.getLogger().addHandler(logging.StreamHandler())
 from pprint import PrettyPrinter, pprint
 import json
 import datetime
-import click
+import typer
 from newsworker.extractor import FeedExtractor
 from newsworker.finder import FeedsFinder
 
@@ -32,80 +32,89 @@ def enableVerbose():
     )
 
 
-@click.group()
-def cli1():
-    pass
+app = typer.Typer()
 
 
-@cli1.command()
-@click.argument("url")
-@click.option(
-    "--verbose",
-    "-v",
-    count=True,
-    help="Verbose output. Print additional info on command execution",
-)
-def extract(url, verbose):
+@app.command()
+def extract(
+    url: str = typer.Argument(..., help="URL to extract feed from"),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Verbose output. Print additional info on command execution",
+    ),
+):
     """Extract feed records from web page"""
     if verbose:
         enableVerbose()
-    ext = FeedExtractor(filtered_text_length=DEFAULT_FILTERED_TEXT_URL)
-    feed, session = ext.get_feed(sys.argv[2], user_agent=USER_AGENT)
-    print(json.dumps(feed, indent=4, default=date_handler))
-    pass
+    try:
+        ext = FeedExtractor(filtered_text_length=DEFAULT_FILTERED_TEXT_URL)
+        feed, session = ext.get_feed(url, user_agent=USER_AGENT)
+        print(json.dumps(feed, indent=4, default=date_handler))
+    except Exception as e:
+        logging.error(f"Failed to extract feed from {url}: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
 
 
-@click.group()
-def cli2():
-    pass
-
-
-@cli2.command()
-@click.argument("url")
-@click.option(
-    "--verbose",
-    "-v",
-    count=True,
-    help="Verbose output. Print additional info on command execution",
-)
-def scan(url, verbose):
+@app.command()
+def scan(
+    url: str = typer.Argument(..., help="URL to scan for feeds"),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Verbose output. Print additional info on command execution",
+    ),
+):
     """Page scanner and feed finder"""
     if verbose:
         enableVerbose()
-    r = FeedsFinder().find_feeds(sys.argv[2], noverify=False)
-    print("---")
-    pprint(r)
-    pass
+    try:
+        r = FeedsFinder().find_feeds(url, noverify=False)
+        print("---")
+        pprint(r)
+    except Exception as e:
+        logging.error(f"Failed to scan {url}: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
 
 
-@click.group()
-def cli3():
-    pass
-
-
-@cli3.command()
-@click.argument("datestr")
-@click.option(
-    "--verbose",
-    "-v",
-    count=True,
-    help="Verbose output. Print additional info on command execution",
-)
-def parsedate(datestr, verbose):
+@app.command()
+def parsedate(
+    datestr: str = typer.Argument(..., help="Date string to parse"),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Verbose output. Print additional info on command execution",
+    ),
+):
     """Parses date and time strings"""
     from qddate import DateParser
 
     if verbose:
         enableVerbose()
-    parser = DateParser(generate=True)
-    res = parser.match(datestr)
-    pprint(res)
-    pass
+    try:
+        parser = DateParser(generate=True)
+        res = parser.match(datestr)
+        pprint(res)
+    except Exception as e:
+        logging.error(f"Failed to parse date '{datestr}': {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
 
 
-cli = click.CommandCollection(
-    sources=[cli1, cli2, cli3]
-)  # , cli3, cli4, cli5, cli6, cli7, cli8, cli9, cli10, cli11, cli12])
+def cli():
+    """Main CLI entry point"""
+    app()
 
 # if __name__ == '__main__':
 #    cli()

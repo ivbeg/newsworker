@@ -63,14 +63,24 @@ class TagPath:
 
     def __parseNode(self, node, limit, inprogress=False):
         """Parses node to the tag path"""
+        # Handle case where node might not have a tag attribute
+        node_tag = getattr(node, 'tag', None)
+        if node_tag is None:
+            # If tag is missing, use a default value
+            node_tag = "unknown"
+        
         parent = node.getparent()
         if parent is not None and parent.tag != "<DOCUMENT_ROOT>" and node != limit:
-            self.__shifts.append(parent.index(node))
-            self.__tag_names.append(node.tag)
+            try:
+                self.__shifts.append(parent.index(node))
+            except (AttributeError, ValueError) as e:
+                # Fallback if index() fails
+                self.__shifts.append(0)
+            self.__tag_names.append(node_tag)
             self.__parseNode(parent, limit, inprogress=True)
         else:
             self.__shifts.append(0)
-            self.__tag_names.append(node.tag)
+            self.__tag_names.append(node_tag)
         self.level = len(self.__shifts)
         if not inprogress:
             self.__shifts.reverse()
@@ -236,12 +246,25 @@ class TagBlock:
         htmlattrs = dict(ch.attrib)
         self.global_id += 1
         aid = self.global_id
+        # Handle case where getparent() might return None
+        parent = ch.getparent()
+        position = 0
+        if parent is not None:
+            try:
+                position = parent.index(ch)
+            except (AttributeError, ValueError) as e:
+                # Fallback if index() fails for any reason
+                position = 0
+        
+        # Handle case where tag might not exist
+        ch_tag = getattr(ch, 'tag', None)
+        
         annotations.append(
             TagEntry(
                 aid,
                 ch,
-                ch.tag,
-                ch.getparent().index(ch),
+                ch_tag,
+                position,
                 apath,
                 parent_id,
                 attrs,

@@ -12,8 +12,12 @@ import lxml.etree
 import feedparser
 import logging
 import requests
+import urllib3
 from .extractor import FeedExtractor
 from .consts import FEED_CONTENT_TYPES
+
+# Suppress InsecureRequestWarning for unverified HTTPS requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def decode_html(html_string):
@@ -22,25 +26,28 @@ def decode_html(html_string):
 
 
 def get_url_data(url):
-    realurl = None
-    r = requests.get(url)
+    """Extract HTML data from URL"""
     try:
-        f = urllib.request.urlopen(url)
-        data = f.read()
-        realurl = f.geturl()
-        f.close()
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()  # Raise an exception for bad status codes
+        realurl = r.url
+        data = r.content  # Use this instead of urllib
+        data = decode_html(data)
+        # Use memory-efficient parser that removes blank text nodes
+        parser = etree.HTMLParser(remove_blank_text=True)
+        root = fromstring(data, parser=parser)
+        return root, realurl
     except KeyboardInterrupt:
         sys.exit(0)
-    #        except :
-    #            return None, None
-    data = decode_html(data)
-    try:
-        root = fromstring(data)
-    except ValueError:
+    except requests.exceptions.RequestException as e:
+        logging.warning(f"Request error while fetching {url}: {e}")
         return None, None
-    except lxml.etree.ParserError:
+    except (ValueError, lxml.etree.ParserError, lxml.etree.XMLSyntaxError) as e:
+        logging.warning(f"Failed to parse HTML from {url}: {e}")
         return None, None
-    return root, realurl
+    except Exception as e:
+        logging.warning(f"Unexpected error while processing {url}: {e}")
+        return None, None
 
 
 class FeedsFinder:
@@ -167,7 +174,8 @@ class FeedsFinder:
                     continue
                 try:
                     text = olink.text if olink.text else None
-                except:
+                except (AttributeError, TypeError) as e:
+                    logging.debug(f"Error accessing link text: {e}")
                     text = None
                 if text:
                     if text.lower().find("rss") > -1:
@@ -200,23 +208,28 @@ class FeedsFinder:
         return feeds
 
     def collect_feeds(self, root, url):
-        urls = []
-        feeds = self.__find_rss_autodiscover(root, url)
-        for f in feeds:
-            urls.append(f["url"])
+        url_set = set()  # Use set for O(1) lookups
+        feeds = []
+        
+        for f in self.__find_rss_autodiscover(root, url):
+            if f["url"] not in url_set:
+                url_set.add(f["url"])
+                feeds.append(f)
+        
         for u in self.__find_feed_img(root, url):
-            if u["url"] not in urls:
-                urls.append(u["url"])
+            if u["url"] not in url_set:  # O(1) lookup
+                url_set.add(u["url"])
                 feeds.append(u)
+        
         for u in self.__find_feed_by_urls(root, url):
-            if u["url"] not in urls:
-                urls.append(u["url"])
+            if u["url"] not in url_set:  # O(1) lookup
+                url_set.add(u["url"])
                 feeds.append(u)
+        
         res = []
         for f in feeds:
             f["url"] = urljoin(url, f["url"])
             res.append(f)
-        #        feeds = [urljoin(url, u) for f in feeds]
         return res
 
     def find_feeds(
@@ -240,12 +253,26 @@ class FeedsFinder:
         """
         feed_urls = []
         items = []
-        r = requests.get(url, timeout=timeout)
+        try:
+            r = requests.get(url, timeout=timeout)
+            r.raise_for_status()  # Raise an exception for bad status codes
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Failed to fetch {url}: {e}")
+            return {"url": url, "items": []}
+        
         real_url = r.url
         results = {"url": real_url, "items": items}
-        if r.headers["content-type"] in FEED_CONTENT_TYPES:
-            d = feedparser.parse(r.content)
-            if "title" in d.feed:
+        
+        # Check if content-type header exists
+        content_type = r.headers.get("content-type", "").split(";")[0].strip()
+        if content_type in FEED_CONTENT_TYPES:
+            try:
+                d = feedparser.parse(r.content)
+            except Exception as e:
+                logging.warning(f"Failed to parse feed from {url}: {e}")
+                d = None
+            
+            if d and "title" in d.feed:
                 item = {
                     "title": d.feed.title,
                     "url": real_url,
@@ -258,7 +285,14 @@ class FeedsFinder:
                     item["entries"] = d.entries
                 items.append(item)
         else:
-            root = fromstring(r.content)
+            # Use memory-efficient parser that removes blank text nodes
+            try:
+                parser = etree.HTMLParser(remove_blank_text=True)
+                root = fromstring(r.content, parser=parser)
+            except (ValueError, lxml.etree.ParserError, lxml.etree.XMLSyntaxError) as e:
+                logging.warning(f"Failed to parse HTML from {url}: {e}")
+                root = None
+            
             if root is not None:
                 feeds = self.collect_feeds(root, real_url)
                 for f in feeds:
@@ -267,8 +301,13 @@ class FeedsFinder:
                         items.append(item)
                         continue
                     else:
-                        d = feedparser.parse(f["url"])
-                        if "title" in d.feed:
+                        try:
+                            d = feedparser.parse(f["url"])
+                        except Exception as e:
+                            logging.warning(f"Failed to parse feed from {f['url']}: {e}")
+                            d = None
+                        
+                        if d and "title" in d.feed:
                             item = {
                                 "title": d.feed.title,
                                 "url": f["url"],
@@ -281,28 +320,54 @@ class FeedsFinder:
                                 item["entries"] = d.entries
                             items.append(item)
                         elif force_htmlparse:
-                            rp = requests.get(f["url"])
+                            try:
+                                rp = requests.get(f["url"], timeout=timeout)
+                                rp.raise_for_status()
+                            except requests.exceptions.RequestException as e:
+                                logging.warning(f"Failed to fetch {f['url']} for HTML parsing: {e}")
+                                continue
+                            
                             if not rp.content:
                                 continue
-                            cfeeds = self.collect_feeds(rp.content, rp.url)
+                            
+                            try:
+                                parser = etree.HTMLParser(remove_blank_text=True)
+                                root_content = fromstring(rp.content, parser=parser)
+                                if root_content is None:
+                                    continue
+                                cfeeds = self.collect_feeds(root_content, rp.url)
+                            except (ValueError, lxml.etree.ParserError, lxml.etree.XMLSyntaxError) as e:
+                                logging.warning(f"Failed to parse HTML from {f['url']}: {e}")
+                                continue
                             for cf in cfeeds:
                                 if cf["url"] in feed_urls:
                                     continue
-                                d = feedparser.parse(cf["url"])
-                                item = {
-                                    "title": d.feed.title,
-                                    "url": f["url"],
-                                    "feedtype": f["feedtype"],
-                                    "num_entries": len(d.entries),
-                                }
-                                if "language" in d.feed:
-                                    item["language"] = d.feed.language
-                                if include_entries:
-                                    item["entries"] = d.entries
-                                items.append(item)
+                                try:
+                                    d = feedparser.parse(cf["url"])
+                                except Exception as e:
+                                    logging.warning(f"Failed to parse feed from {cf['url']}: {e}")
+                                    continue
+                                
+                                if d and "title" in d.feed:
+                                    item = {
+                                        "title": d.feed.title,
+                                        "url": f["url"],
+                                        "feedtype": f["feedtype"],
+                                        "num_entries": len(d.entries),
+                                    }
+                                    if "language" in d.feed:
+                                        item["language"] = d.feed.language
+                                    if include_entries:
+                                        item["entries"] = d.entries
+                                    items.append(item)
                 if extractrss:
-                    datafeed, session = self.feedext.get_feed(r.url, data=r.content)
-                    if datafeed and len(datafeed["items"]) > 0:
+                    try:
+                        datafeed, session = self.feedext.get_feed(r.url, data=r.content)
+                    except Exception as e:
+                        logging.warning(f"Failed to extract feed from {r.url}: {e}")
+                        datafeed = None
+                    
+                    if datafeed and len(datafeed.get("items", [])) > 0:
                         item = {
                             "feedtype": "html",
                             "title": datafeed["title"],
@@ -323,8 +388,13 @@ class FeedsFinder:
             return {}
         feeds = self.collect_feeds(root, real_url)
         for f in feeds:
-            d = feedparser.parse(f["url"])
-            if "title" in d.feed:
+            try:
+                d = feedparser.parse(f["url"])
+            except Exception as e:
+                logging.warning(f"Failed to parse feed from {f['url']}: {e}")
+                d = None
+            
+            if d and "title" in d.feed:
                 items.append(
                     {"title": d.feed.title, "url": f["url"], "feedtype": f["feedtype"]}
                 )
@@ -335,8 +405,13 @@ class FeedsFinder:
                     return results
                 cfeeds = self.collect_feeds(dp, dp_url)
                 for cf in cfeeds:
-                    d = feedparser.parse(cf["url"])
-                    if "title" in d.feed:
+                    try:
+                        d = feedparser.parse(cf["url"])
+                    except Exception as e:
+                        logging.warning(f"Failed to parse feed from {cf['url']}: {e}")
+                        continue
+                    
+                    if d and "title" in d.feed:
                         items.append(cf)
         results["items"] = items
         return results
