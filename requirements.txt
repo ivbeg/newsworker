@@ -1,7 +1,11 @@
 lxml
+cssselect
 bs4
 pyparsing
 feedparser
 qddate
 typer
 feedgen
+pyyaml
+requests
+urllib3

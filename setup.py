@@ -28,10 +28,15 @@ setup(
     install_requires=[
         'pyparsing',
         'lxml',
+        'cssselect',
         'bs4',
         'qddate',
         'typer',
-        'feedgen'
+        'feedgen',
+        'pyyaml',
+        'requests',
+        'urllib3',
+        'feedparser'
     ],
     entry_points={
         'console_scripts': [
