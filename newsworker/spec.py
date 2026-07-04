@@ -38,7 +38,7 @@ from lxml.html import fromstring
 
 from .consts import DATE_CLASSES_KEYWORDS, NEWS_CLASSES_KEYWORDS
 from .extractor import FeedExtractor
-from .tools import clean_url, decode_html, get_abs_url
+from .tools import clean_url, decode_html, detect_html_language, get_abs_url
 
 SPEC_VERSION = 1
 
@@ -358,10 +358,16 @@ class SpecAnalyzer:
     def analyze(self, url, data=None, user_agent=None):
         """Analyzes ``url`` (or provided ``data``) and returns a ``FeedSpec``."""
         document = self._parse(url, data=data, user_agent=user_agent)
+        language = (
+            getattr(self.ext, "default_language", None)
+            or detect_html_language(document)
+            or getattr(self.ext, "_last_content_language", None)
+            or "en"
+        )
         spec = FeedSpec(
             source_url=url,
             analyzed_at=datetime.datetime.now().isoformat(timespec="seconds"),
-            language="en",
+            language=language,
         )
         if document is None:
             return spec

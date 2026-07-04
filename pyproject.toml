@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "newsworker"
+description = "Advanced news feeds extractor and finder library. Helps to automatically extract news from websites without RSS/ATOM feeds"
+readme = "README.md"
+requires-python = ">=3.7"
+license = { text = "MIT" }
+authors = [{ name = "Ivan Begtin", email = "ivan@begtin.tech" }]
+keywords = ["news", "parsing", "extraction", "feeds", "rss", "atom"]
+dynamic = ["version"]
+
+dependencies = [
+    "pyparsing",
+    "lxml",
+    "cssselect",
+    "bs4",
+    "qddate",
+    "typer",
+    "feedgen",
+    "pyyaml",
+    "requests",
+    "urllib3",
+    "feedparser",
+]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+[project.urls]
+Homepage = "https://github.com/ivbeg/newsworker"
+Documentation = "https://github.com/ivbeg/newsworker/blob/master/docs/README.md"
+Repository = "https://github.com/ivbeg/newsworker"
+
+[project.optional-dependencies]
+test = ["pytest"]
+dev = ["pytest", "ruff", "build", "twine", "mypy", "pre-commit"]
+metrics = ["prometheus_client"]
+fulltext = ["trafilatura"]
+async = ["aiohttp"]
+
+[project.scripts]
+newsworker = "newsworker.__main__:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { attr = "newsworker.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["newsworker*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+newsworker = ["bridges/*.yaml", "bridges/*.yml"]
+
+# ---------------------------------------------------------------------------
+# Tooling configuration (single source of truth)
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+# Scope linting to the high-signal rule sets that catch real defects
+# (pyflakes + syntax/runtime errors) rather than churning stylistic issues
+# across this legacy codebase. Style rules can be enabled incrementally later.
+target-version = "py38"
+line-length = 100
+extend-exclude = ["build", "dist", "docs", "*.egg-info"]
+
+[tool.ruff.lint]
+select = ["E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-ra"
+
+[tool.mypy]
+# Type checking is being adopted incrementally. Third-party stubs are often
+# missing, so imports are treated leniently and errors from not-yet-annotated
+# modules that are only imported (``follow_imports = silent``) are suppressed.
+# Only the modules listed in ``files`` are actively checked; expand this list
+# as more modules gain type hints.
+python_version = "3.9"
+ignore_missing_imports = true
+follow_imports = "silent"
+disable_error_code = ["import-untyped"]
+files = ["newsworker/settings.py", "newsworker/cache.py"]

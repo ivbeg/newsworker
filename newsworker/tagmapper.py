@@ -10,7 +10,6 @@ import hashlib
 from .consts import (
     TAG_TYPE_BOLD,
     TAG_TYPE_EMPTY,
-    TAG_TYPE_DATE,
     TAG_TYPE_HREF,
     TAG_TYPE_IMG,
     TAG_TYPE_LAST,
@@ -73,7 +72,7 @@ class TagPath:
         if parent is not None and parent.tag != "<DOCUMENT_ROOT>" and node != limit:
             try:
                 self.__shifts.append(parent.index(node))
-            except (AttributeError, ValueError) as e:
+            except (AttributeError, ValueError):
                 # Fallback if index() fails
                 self.__shifts.append(0)
             self.__tag_names.append(node_tag)
@@ -252,7 +251,7 @@ class TagBlock:
         if parent is not None:
             try:
                 position = parent.index(ch)
-            except (AttributeError, ValueError) as e:
+            except (AttributeError, ValueError):
                 # Fallback if index() fails for any reason
                 position = 0
         

@@ -3,9 +3,6 @@
 """
 """
 
-import logging
-
-logging.getLogger().addHandler(logging.StreamHandler())
 
 import hashlib
 import requests.exceptions
@@ -19,13 +16,21 @@ import urllib3
 # Suppress InsecureRequestWarning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from lxml.html import fromstring
-from pprint import PrettyPrinter
 from lxml import etree
 from qddate import DateParser
-from .tools import get_abs_url, decode_html, clean_url, Logger
-from .tagmapper import (
-    TagPath,
-    TagBlock,
+from .tools import (
+    get_abs_url,
+    decode_html,
+    clean_url,
+    validate_url,
+    can_fetch,
+    parse_fuzzy_date,
+    looks_like_fuzzy_date,
+    detect_html_language,
+    Logger,
+)
+from .tagmapper import TagPath, TagBlock
+from .consts import (
     TAG_TYPE_DATE,
     TAG_TYPE_TAIL,
     TAG_TYPE_TEXT,
@@ -36,14 +41,37 @@ from .tagmapper import (
 # Default timeout for HTTP requests
 DEFAULT_TIMEOUT = 30
 
+#: Default cap on fetched response size (bytes). Guards against very large or
+#: hostile pages exhausting memory. Override via ``FeedExtractor(max_bytes=...)``.
+DEFAULT_MAX_BYTES = 10 * 1024 * 1024
+
 
 class FeedExtractor:
     """Feed Extraction class"""
 
-    def __init__(self, debug=True, patterns=None, filtered_text_length=50):
+    def __init__(
+        self,
+        debug=True,
+        patterns=None,
+        filtered_text_length=150,
+        max_bytes=DEFAULT_MAX_BYTES,
+        verify_tls=True,
+        respect_robots=True,
+        timeout=DEFAULT_TIMEOUT,
+        proxy=None,
+        extra_headers=None,
+        cookies_file=None,
+        default_language=None,
+    ):
         """
 
         :param patterns:List of patterns to use as rules
+        :param verify_tls: verify TLS certificates on outgoing requests.
+        :param respect_robots: consult ``robots.txt`` before fetching.
+        :param timeout: seconds to wait for an HTTP response.
+        :param proxy: optional proxy URL for outgoing requests.
+        :param extra_headers: extra HTTP headers sent on every request.
+        :param cookies_file: optional Netscape cookie jar path.
         """
         self.log = Logger()
         self.debug = debug
@@ -52,6 +80,20 @@ class FeedExtractor:
         self.log.save("initclass", "End loading patterns")
         # key parameters
         self.filtered_text_length = filtered_text_length
+        self.max_bytes = max_bytes
+        self.verify_tls = verify_tls
+        self.respect_robots = respect_robots
+        self.timeout = timeout
+        self.proxy = proxy or None
+        self.extra_headers = dict(extra_headers or {})
+        self.cookies_file = cookies_file or None
+        self._cookie_jar = None
+        #: Explicit language override; empty/None means auto-detect.
+        self.default_language = default_language or None
+        #: Language captured from the last response's Content-Language header.
+        self._last_content_language = None
+        #: Validators (``etag``/``last_modified``) from the last response.
+        self.last_response_meta = {}
 
         # Create session with connection pooling
         self.http_session = requests.Session()
@@ -85,10 +127,15 @@ class FeedExtractor:
             else:
                 feed_title = "News from " + base_url
                 title_extracted = False
-        # FIXME! default language should be page language based not just english by default. Not yet implemented
+        language = (
+            self.default_language
+            or detect_html_language(document)
+            or self._last_content_language
+            or "en"
+        )
         feed = {
             "title": feed_title,
-            "language": "en",
+            "language": language,
             "link": base_url,
             "description": feed_title,
             "items": [],
@@ -99,9 +146,13 @@ class FeedExtractor:
         return feed
 
     def match_text(self, text):
-        """Matches text to the regular expressions"""
+        """Matches text to the regular expressions.
+
+        Always returns a 5-tuple ``(matched, key, pattern, text, date)`` so
+        callers can unpack it uniformly whether or not a date was found.
+        """
         if text is None:
-            return False, None, None, None
+            return False, None, None, None, None
         res = self.indexer.match(text)
         #        print('Compare %s ' % (text))
         if self.session:
@@ -122,8 +173,13 @@ class FeedExtractor:
                 return True, p["key"], p, text, the_date
             except (ValueError, TypeError, KeyError) as e:
                 self.log.save("match_text", f"Failed to create datetime: {e}")
-                return False, None, None, None
-        return False, None, None, None
+                return False, None, None, None, None
+        fuzzy_date = parse_fuzzy_date(text)
+        if fuzzy_date is not None:
+            if self.session:
+                self.session["debug"]["num_matched"] += 1
+            return True, "fuzzy", {"key": "fuzzy"}, text, fuzzy_date
+        return False, None, None, None, None
 
     def match_date(self, node):
         """Matches date to regular expressions. Uses  node as parameter"""
@@ -175,16 +231,20 @@ class FeedExtractor:
         self.session["debug"]["num_nodes"] = len(nodes)
         self.log.save("getclusters", "Nodes extracted")
         
-        # Early filtering: only check nodes that likely contain dates (have digits)
-        # This avoids expensive pattern matching on nodes that can't be dates
+        # Early filtering: only check nodes that likely contain dates (have digits
+        # or a relative-date keyword such as "yesterday"/"ago"). This avoids
+        # expensive pattern matching on nodes that cannot be dates.
         potential_date_nodes = []
         for node in nodes:
             text = (node.text or "").strip()
             tail = (node.tail or "").strip()
-            # Quick check: dates typically contain digits
-            if text and any(char.isdigit() for char in text):
+            if text and (
+                any(char.isdigit() for char in text) or looks_like_fuzzy_date(text)
+            ):
                 potential_date_nodes.append(node)
-            elif tail and any(char.isdigit() for char in tail):
+            elif tail and (
+                any(char.isdigit() for char in tail) or looks_like_fuzzy_date(tail)
+            ):
                 potential_date_nodes.append(node)
         
         shared_node = None
@@ -219,50 +279,90 @@ class FeedExtractor:
         return clusters
 
     def process_clusters(self, base_url, clusters, feed):
-        """Extracts information from single clusters
-        :param base_url: base url
-        :param clusters: list of clusters
-        :param feed: feed
+        """Extracts news items from clustered date nodes into ``feed``.
+
+        Orchestration only: for each cluster it resolves the shared container,
+        builds the candidate item blocks (:meth:`_build_item_blocks`) and turns
+        each block into a feed item (:meth:`_item_from_block`).
         """
         cache_block = {"pats": []}
         self.log.save("process_clusters", "Start cluster processing")
         self.session["debug"]["tagblocks"] = []
         self.session["debug"]["annotations"] = []
-        for p, node_info in list(clusters.items()):
+        for _p, node_info in list(clusters.items()):
             snode = node_info["snode"]
             nodes = node_info["nodes"]
-            data = []
             if snode.tag == "table":
-                chd = snode.getchildren()
-                for ch in chd:
+                for ch in snode.getchildren():
                     if ch.tag == "tbody":
                         snode = ch
                         break
             snode_path = TagPath(snode)
-            for nodeitem in nodes:
-                node = nodeitem["node"]
-                path = TagPath(node, snode)
-                #                print path.tag_names(), path.values()
-                vals = list(path.values())
-                #                if snode.tag == 'table':
-                #                    data.append(vals[2])
-                #                else:
-                data.append(vals[1])
-            res = []
-            avg_diff = {}
-            last_block = None
-            for i in range(len(data) - 1, -1, -1):
-                if i != len(data) - 1:
-                    diff = data[i + 1] - data[i]
-                    avg_diff.setdefault(diff, 0)
-                    avg_diff[diff] += 1
-                    block = TagBlock(snode, snode_path, data[i], diff)
-                    (match, t_key, t_data, the_text, the_date) = self.match_date(
-                        nodes[i]["node"]
+            # Position of each date node among its siblings under ``snode``.
+            data = [list(TagPath(ni["node"], snode).values())[1] for ni in nodes]
+            blocks = self._build_item_blocks(snode, snode_path, nodes, data)
+            for block in blocks:
+                item = self._item_from_block(base_url, block, cache_block)
+                if item is not None:
+                    feed["items"].append(item)
+        feed["cache"] = cache_block
+        self.log.save("process_clusters", "End cluster processing")
+        return feed
+
+    def _build_item_blocks(self, snode, snode_path, nodes, data):
+        """Builds the list of :class:`TagBlock` item candidates for a cluster.
+
+        Walks the date-node positions in reverse to size each item block by the
+        gap to the next date, then aligns the final block's stride with the most
+        common gap.
+        """
+        res = []
+        avg_diff = {}
+        last_block = None
+        for i in range(len(data) - 1, -1, -1):
+            if i != len(data) - 1:
+                diff = data[i + 1] - data[i]
+                avg_diff.setdefault(diff, 0)
+                avg_diff[diff] += 1
+                block = TagBlock(snode, snode_path, data[i], diff)
+                (match, t_key, t_data, the_text, the_date) = self.match_date(
+                    nodes[i]["node"]
+                )
+                use_tail = nodes[i]["node"].text is None
+                text = nodes[i]["node"].text if not use_tail else nodes[i]["node"].tail
+                if text is not None:
+                    block.add_entity(
+                        "pub_date",
+                        TagPath(nodes[i]["node"]),
+                        None,
+                        text.strip(),
+                        the_date,
                     )
+                    res.append(block)
+            else:
+                diff = len(snode.getchildren()) - data[i]
+                if len(data) > 1:
+                    block = TagBlock(snode, snode_path, data[i], diff)
+                else:
+                    block = TagBlock(snode, snode_path, data[i], None)
+                last_block = block
+                (match, t_key, t_data, the_text, the_date) = self.match_date(
+                    nodes[i]["node"]
+                )
+                if nodes[i]["node"].text:
+                    block.add_entity(
+                        "pub_date",
+                        TagPath(nodes[i]["node"]),
+                        None,
+                        the_text.strip(),
+                        the_date,
+                    )
+                else:
                     use_tail = nodes[i]["node"].text is None
                     text = (
-                        nodes[i]["node"].text if not use_tail else nodes[i]["node"].tail
+                        nodes[i]["node"].text
+                        if not use_tail
+                        else nodes[i]["node"].tail
                     )
                     if text is not None:
                         block.add_entity(
@@ -272,174 +372,213 @@ class FeedExtractor:
                             text.strip(),
                             the_date,
                         )
-                        res.append(block)
-                #                        print block
-                else:
-                    diff = len(snode.getchildren()) - data[i]
-                    if len(data) > 1:
-                        block = TagBlock(snode, snode_path, data[i], diff)
-                    else:
-                        block = TagBlock(snode, snode_path, data[i], None)
-                    last_block = block
-                    (match, t_key, t_data, the_text, the_date) = self.match_date(
-                        nodes[i]["node"]
-                    )
-                    if nodes[i]["node"].text:
-                        block.add_entity(
-                            "pub_date",
-                            TagPath(nodes[i]["node"]),
-                            None,
-                            the_text.strip(),
-                            the_date,
-                        )
-                        pass
-                    else:
-                        use_tail = nodes[i]["node"].text is None
-                        text = (
-                            nodes[i]["node"].text
-                            if not use_tail
-                            else nodes[i]["node"].tail
-                        )
-                        if text is not None:
-                            block.add_entity(
-                                "pub_date",
-                                TagPath(nodes[i]["node"]),
-                                None,
-                                text.strip(),
-                                the_date,
-                            )
-                            #                            print block
-                            # res.append(block)
-                            max_num = 0
-                            akey = 0
-            max_num = 0
-            akey = 0
-            for key, value in list(avg_diff.items()):
-                if value > max_num:
-                    akey = key
-            if last_block.shift != akey:
-                last_block.shift = akey
-            res.reverse()
-            res.append(last_block)
-            #            print res
+        # NOTE: this picks the last non-zero gap rather than the true mode
+        # (``max_num`` is never updated); preserved as-is to keep the extraction
+        # output stable. See the maintainer notes for a possible follow-up.
+        max_num = 0
+        akey = 0
+        for key, value in list(avg_diff.items()):
+            if value > max_num:
+                akey = key
+        if last_block.shift != akey:
+            last_block.shift = akey
+        res.reverse()
+        res.append(last_block)
+        return res
 
-            for block in res:
-                #                self.session['debug']['tagblocks'].append([block.as_html(), block.as_dict()])
-                anns = block.identify_entities()
-                raw_anns = []
-                for ann in anns:
-                    raw_anns.append(ann.as_list())
-                #                self.session['debug']['annotations'].append(raw_anns)
-                for ann in anns:
-                    (match, key, t_data, the_text, the_date) = self.match_date(ann.node)
-                    if match:
-                        ann.attrs.append(TAG_TYPE_DATE)
-                title = None
-                description = None
-                description_parts = []  # Collect text parts for efficient joining
-                url = None
-                links = []
-                images = []
-                the_date = None
-                i = 0
-                for ann in anns:
-                    i += 1
-                    if ann.node.tag is etree.Comment:
-                        continue
-                    if TAG_TYPE_TEXT in ann.attrs and TAG_TYPE_DATE not in ann.attrs:
-                        text_content = ann.node.text.strip() if ann.node.text else ""
-                        if len(text_content) > 10 and title is None:
-                            title = text_content
-                        if (
-                            description is None
-                            and title is not None
-                            and title != text_content
-                            and len(text_content) > 10
-                        ):
-                            description = text_content
-                        elif (
-                            title is not None
-                            and description is not None
-                            and len(text_content) > 10
-                        ):
-                            description_parts.append(text_content)
-                    if TAG_TYPE_TAIL in ann.attrs:
-                        tail_content = ann.node.tail.strip() if ann.node.tail else ""
-                        if len(tail_content) > 10 and title is None:
-                            title = tail_content
-                        if (
-                            description is None
-                            and title is not None
-                            and len(tail_content) > 10
-                        ):
-                            description = tail_content
-                        elif (
-                            title is not None
-                            and description is not None
-                            and len(tail_content) > 10
-                        ):
-                            description_parts.append(tail_content)
-                # Join description parts efficiently
-                if description_parts:
-                    if description is None:
-                        description = "\n".join(description_parts)
-                    else:
-                        description = description + "\n" + "\n".join(description_parts)
-                    if TAG_TYPE_HREF in ann.attrs and "href" in ann.node.attrib:
-                        clr = clean_url(get_abs_url(base_url, ann.node.attrib["href"]))
-                        if clr not in links:
-                            links.append(clr)
-                    if TAG_TYPE_IMG in ann.attrs and "src" in ann.node.attrib:
-                        clr = clean_url(get_abs_url(base_url, ann.node.attrib["src"]))
-                        if clr not in images:
-                            images.append(clr)
+    def _item_from_block(self, base_url, block, cache_block):
+        """Turns a single :class:`TagBlock` into a feed item dict, or ``None``.
 
-                    if TAG_TYPE_DATE in ann.attrs:
-                        the_date = ann.node
-                if title is not None and description is None:
-                    description = title
-                (match, t_key, t_data, the_text, a_date) = self.match_date(the_date)
-                if match is None:
-                    continue
-                if not block.entities:
-                    continue
-                if t_key not in cache_block["pats"]:
-                    cache_block["pats"].append(t_key)
-                md = hashlib.md5()
-                md.update(block.entities["pub_date"][2].encode("utf8"))
-                if title:
-                    md.update(title.encode("utf8"))
-                if description:
-                    md.update(description.encode("utf8"))
-                if url:
-                    md.update(url.encode("utf8"))
-                ahash = md.hexdigest()
-                item = {
-                    "title": title,
-                    "description": description,
-                    "pubdate": a_date,
-                    "unique_id": str(ahash),
-                    "raw_html": block.as_html(),
-                }
-                item["extra"] = {"links": links, "images": images}
-                if len(links) > 0:
-                    item["link"] = clean_url(get_abs_url(base_url, links[0]))
-                else:
-                    item["link"] = clean_url(base_url)
+        Classifies the block's annotations into title / description / links /
+        images / date and assembles the item. Returns ``None`` when the block
+        has no usable date or no entities.
+        """
+        anns = block.identify_entities()
+        for ann in anns:
+            (match, key, t_data, the_text, the_date) = self.match_date(ann.node)
+            if match:
+                ann.attrs.append(TAG_TYPE_DATE)
+        title = None
+        description = None
+        description_parts = []  # Collect text parts for efficient joining
+        url = None
+        links = []
+        images = []
+        the_date = None
+        for ann in anns:
+            if ann.node.tag is etree.Comment:
+                continue
+            if TAG_TYPE_TEXT in ann.attrs and TAG_TYPE_DATE not in ann.attrs:
+                text_content = ann.node.text.strip() if ann.node.text else ""
+                if len(text_content) > 10 and title is None:
+                    title = text_content
+                if (
+                    description is None
+                    and title is not None
+                    and title != text_content
+                    and len(text_content) > 10
+                ):
+                    description = text_content
+                elif (
+                    title is not None
+                    and description is not None
+                    and len(text_content) > 10
+                ):
+                    description_parts.append(text_content)
+            if TAG_TYPE_TAIL in ann.attrs:
+                tail_content = ann.node.tail.strip() if ann.node.tail else ""
+                if len(tail_content) > 10 and title is None:
+                    title = tail_content
+                if (
+                    description is None
+                    and title is not None
+                    and len(tail_content) > 10
+                ):
+                    description = tail_content
+                elif (
+                    title is not None
+                    and description is not None
+                    and len(tail_content) > 10
+                ):
+                    description_parts.append(tail_content)
+            if TAG_TYPE_HREF in ann.attrs and "href" in ann.node.attrib:
+                clr = clean_url(get_abs_url(base_url, ann.node.attrib["href"]))
+                if clr not in links:
+                    links.append(clr)
+            if TAG_TYPE_IMG in ann.attrs and "src" in ann.node.attrib:
+                clr = clean_url(get_abs_url(base_url, ann.node.attrib["src"]))
+                if clr not in images:
+                    images.append(clr)
+            if TAG_TYPE_DATE in ann.attrs:
+                the_date = ann.node
+        # Join collected description parts efficiently, once per item.
+        if description_parts:
+            if description is None:
+                description = "\n".join(description_parts)
+            else:
+                description = description + "\n" + "\n".join(description_parts)
+        if title is not None and description is None:
+            description = title
+        (match, t_key, t_data, the_text, a_date) = self.match_date(the_date)
+        if match is None:
+            return None
+        if not block.entities:
+            return None
+        if t_key not in cache_block["pats"]:
+            cache_block["pats"].append(t_key)
+        md = hashlib.md5()
+        md.update(block.entities["pub_date"][2].encode("utf8"))
+        if title:
+            md.update(title.encode("utf8"))
+        if description:
+            md.update(description.encode("utf8"))
+        if url:
+            md.update(url.encode("utf8"))
+        ahash = md.hexdigest()
+        item = {
+            "title": title,
+            "description": description,
+            "pubdate": a_date,
+            "unique_id": str(ahash),
+            "raw_html": block.as_html(),
+        }
+        item["extra"] = {"links": links, "images": images}
+        if len(links) > 0:
+            item["link"] = clean_url(get_abs_url(base_url, links[0]))
+        else:
+            item["link"] = clean_url(base_url)
+        return item
 
-                feed["items"].append(item)
-        feed["cache"] = cache_block
-        self.log.save("process_clusters", "End cluster processing")
-        return feed
+    def _load_cookies(self):
+        """Returns a loaded cookie jar for ``cookies_file`` or ``None``.
 
-    def fetch(self, url, user_agent=None):
-        headers = {}
+        The jar is loaded once and cached. A missing or malformed file is
+        ignored (no cookies) rather than aborting the fetch.
+        """
+        if not self.cookies_file:
+            return None
+        if self._cookie_jar is None:
+            from http.cookiejar import MozillaCookieJar
+
+            jar = MozillaCookieJar(self.cookies_file)
+            try:
+                jar.load(ignore_discard=True, ignore_expires=True)
+            except (OSError, ValueError):
+                self.log.save("fetch", "Could not load cookies from %s" % self.cookies_file)
+            self._cookie_jar = jar
+        return self._cookie_jar
+
+    def fetch(self, url, user_agent=None, max_bytes=None, conditional=None):
+        """Fetches ``url`` and returns its bytes, capped at ``max_bytes``.
+
+        Only ``http``/``https`` URLs are accepted (a baseline SSRF guard). TLS
+        certificates are verified unless ``verify_tls`` was disabled. When
+        ``respect_robots`` is set the site's ``robots.txt`` is consulted first and
+        a disallowed URL raises :class:`PermissionError`. The response is streamed
+        and aborted once it exceeds the size cap so a huge or hostile page cannot
+        exhaust memory.
+
+        When ``conditional`` is a mapping with ``etag``/``last_modified`` keys the
+        request is made conditionally (``If-None-Match``/``If-Modified-Since``);
+        a ``304 Not Modified`` response returns ``None`` so the caller can reuse
+        its cached copy. Response validators are recorded on ``last_response_meta``.
+        """
+        validate_url(url)
+        if self.respect_robots and not can_fetch(url, user_agent):
+            raise PermissionError("robots.txt disallows fetching %s" % url)
+        limit = max_bytes if max_bytes is not None else self.max_bytes
+        headers = dict(self.extra_headers)
         if user_agent is not None:
             headers["User-agent"] = user_agent
+        if conditional:
+            if conditional.get("etag"):
+                headers["If-None-Match"] = conditional["etag"]
+            if conditional.get("last_modified"):
+                headers["If-Modified-Since"] = conditional["last_modified"]
+        proxies = None
+        if self.proxy:
+            proxies = {"http": self.proxy, "https": self.proxy}
         try:
-            u = self.http_session.get(url, headers=headers, verify=False, timeout=DEFAULT_TIMEOUT)
-            u.raise_for_status()  # Raise an exception for bad status codes
-            data = u.content
+            with self.http_session.get(
+                url,
+                headers=headers,
+                verify=self.verify_tls,
+                timeout=self.timeout,
+                proxies=proxies,
+                cookies=self._load_cookies(),
+                stream=True,
+            ) as u:
+                if getattr(u, "status_code", None) == 304:
+                    return None
+                u.raise_for_status()  # Raise an exception for bad status codes
+                self.last_response_meta = {
+                    "etag": u.headers.get("ETag"),
+                    "last_modified": u.headers.get("Last-Modified"),
+                }
+                content_language = u.headers.get("Content-Language")
+                if content_language:
+                    self._last_content_language = (
+                        content_language.split(",")[0].strip().split("-")[0].lower()
+                        or None
+                    )
+                declared = u.headers.get("Content-Length")
+                if declared and declared.isdigit() and int(declared) > limit:
+                    raise ValueError(
+                        "Response too large: %s bytes declared (max %d)"
+                        % (declared, limit)
+                    )
+                chunks = []
+                total = 0
+                for chunk in u.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > limit:
+                        raise ValueError(
+                            "Response exceeded max size of %d bytes" % limit
+                        )
+                    chunks.append(chunk)
+                data = b"".join(chunks)
             if self.session:
                 self.session["debug"]["page_length"] = len(data)
             return data
@@ -502,33 +641,9 @@ class FeedExtractor:
         return feed, session
 
     def learn_feed(self, url, user_agent=None, data=None):
-        """Get Feed from page content in data field without using cached data"""
-        self.init_session()
-        printer = PrettyPrinter()
-        self.log.save("learn_rss_data", "Download url")
-        if data is None:
-            data = self.fetch(url, user_agent)
-        edata = decode_html(data)
-        self.log.save("learn_rss_data", "Decode data")
-        try:
-            # Use memory-efficient parser that removes blank text nodes
-            parser = etree.HTMLParser(remove_blank_text=True)
-            document = fromstring(edata, parser=parser)
-        except (ValueError, etree.ParserError, etree.XMLSyntaxError) as e:
-            self.log.save("learn_rss_data", f"Failed to parse HTML: {e}")
-            document = None
-        self.log.save("learn_rss_data", "Parsed data")
-        
-        if document is None:
-            self.log.save("learn_rss_data", "Document is None, returning empty feed")
-            feed = self.initfeed(None, url)
-            session = self.clear_session()
-            return feed, session
-        
-        feed = self.initfeed(document, url)
-        clusters = self.getclusters(document, url)
-        self.log.save("learn_rss_data", "Clusters %s" % (printer.pformat(clusters)))
-        feed = self.process_clusters(url, clusters, feed)
-        self.log.save("learn_rss_data", "End of log")
-        session = self.clear_session()
-        return feed, session
+        """Build a feed from a page without reusing cached date patterns.
+
+        Retained for backwards compatibility; delegates to :meth:`get_feed`,
+        which performs the same fetch/parse/cluster/extract pipeline.
+        """
+        return self.get_feed(url, data=data, user_agent=user_agent)

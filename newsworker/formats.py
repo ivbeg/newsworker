@@ -38,10 +38,13 @@ import csv
 import datetime
 import io
 import json
+from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape, quoteattr
 
+import yaml
+
 #: Supported output format identifiers for extracted feeds.
-SUPPORTED_FORMATS = ("json", "rss", "atom", "csv")
+SUPPORTED_FORMATS = ("json", "rss", "atom", "csv", "jsonfeed", "html", "markdown", "yaml")
 
 #: Supported output format identifiers for discovered feeds (``scan``).
 SCAN_FORMATS = ("json", "rss", "atom", "csv", "opml")
@@ -79,6 +82,21 @@ def _first_image(item):
     return images[0] if images else None
 
 
+def _enclosure_length(item):
+    """Returns a known enclosure byte length for ``item`` or ``None``.
+
+    The length is only emitted when the extractor recorded a real value
+    (``extra.enclosure_length``); otherwise it is omitted rather than reported
+    as a misleading ``0``.
+    """
+    extra = item.get("extra") or {}
+    length = extra.get("enclosure_length")
+    try:
+        return int(length) if length is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def to_json(feed):
     """Serializes ``feed`` to a pretty-printed JSON string."""
     return json.dumps(feed, indent=4, default=_date_handler, ensure_ascii=False)
@@ -105,17 +123,24 @@ def _build_feedgen(feed, public_url=None):
         item_link = item.get("link")
         entry.id(item.get("unique_id") or item_link or item.get("title") or "")
         entry.title(item.get("title") or item.get("description") or "(no title)")
+        if item.get("content"):
+            entry.content(item["content"])
         if item.get("description"):
             entry.description(item["description"])
         if item_link:
             entry.link(href=item_link)
+        if item.get("author"):
+            entry.author(name=item["author"])
+        if item.get("categories"):
+            entry.category([{"term": c} for c in item["categories"]])
         pubdate = _ensure_tz(item.get("pubdate"))
         if pubdate is not None:
             entry.pubDate(pubdate)
             entry.updated(pubdate)
         image = _first_image(item)
         if image:
-            entry.enclosure(image, 0, "image/jpeg")
+            length = _enclosure_length(item)
+            entry.enclosure(image, str(length) if length is not None else "0", "image/jpeg")
     return fg
 
 
@@ -134,7 +159,16 @@ def to_atom(feed, public_url=None):
 def to_csv(feed):
     """Serializes ``feed`` items to a CSV string."""
     buffer = io.StringIO()
-    fieldnames = ["title", "link", "pubdate", "description", "image", "unique_id"]
+    fieldnames = [
+        "title",
+        "link",
+        "pubdate",
+        "description",
+        "image",
+        "author",
+        "categories",
+        "unique_id",
+    ]
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
     for item in feed.get("items", []):
@@ -146,10 +180,148 @@ def to_csv(feed):
                 "pubdate": pubdate.isoformat() if pubdate is not None else "",
                 "description": item.get("description") or "",
                 "image": _first_image(item) or "",
+                "author": item.get("author") or "",
+                "categories": ", ".join(item.get("categories") or []),
                 "unique_id": item.get("unique_id") or "",
             }
         )
     return buffer.getvalue()
+
+
+def to_jsonfeed(feed, public_url=None):
+    """Serializes ``feed`` to a JSON Feed 1.1 document.
+
+    See https://jsonfeed.org/version/1.1. Reuses the internal feed dict without
+    changing its shape.
+    """
+    out = {
+        "version": "https://jsonfeed.org/version/1.1",
+        "title": feed.get("title") or "News feed",
+        "home_page_url": feed.get("link"),
+        "feed_url": public_url,
+        "items": [],
+    }
+    if feed.get("language"):
+        out["language"] = feed["language"]
+    for item in feed.get("items", []):
+        entry = {
+            "id": item.get("unique_id") or item.get("link") or "",
+            "title": item.get("title") or "(no title)",
+        }
+        if item.get("link"):
+            entry["url"] = item["link"]
+        if item.get("description"):
+            entry["content_text"] = item["description"]
+        pubdate = _ensure_tz(item.get("pubdate"))
+        if pubdate is not None:
+            entry["date_published"] = pubdate.isoformat()
+        if item.get("author"):
+            entry["authors"] = [{"name": item["author"]}]
+        if item.get("categories"):
+            entry["tags"] = list(item["categories"])
+        image = _first_image(item)
+        if image:
+            entry["image"] = image
+        out["items"].append(entry)
+    return json.dumps(out, indent=2, ensure_ascii=False, default=_date_handler)
+
+
+def _format_item_date(item):
+    pubdate = item.get("pubdate")
+    if pubdate is None:
+        return ""
+    try:
+        return pubdate.isoformat()
+    except AttributeError:
+        return str(pubdate)
+
+
+def to_html(feed):
+    """Serializes ``feed`` to an HTML preview page rendering items as cards."""
+    title = escape(feed.get("title") or "News feed")
+    parts = [
+        "<!DOCTYPE html>",
+        '<html lang="%s">' % escape(feed.get("language") or "en"),
+        "<head>",
+        '<meta charset="utf-8">',
+        "<title>%s</title>" % title,
+        "<style>",
+        "body{font-family:system-ui,sans-serif;max-width:48rem;margin:2rem auto;"
+        "padding:0 1rem;line-height:1.5}",
+        ".card{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}",
+        ".card h2{margin:0 0 .25rem;font-size:1.1rem}",
+        ".card .date{color:#666;font-size:.85rem}",
+        "</style>",
+        "</head>",
+        "<body>",
+        "<h1>%s</h1>" % title,
+    ]
+    for item in feed.get("items", []):
+        item_title = escape(item.get("title") or item.get("description") or "(no title)")
+        link = item.get("link")
+        date = escape(_format_item_date(item))
+        parts.append('<article class="card">')
+        if link:
+            parts.append(
+                '<h2><a href="%s">%s</a></h2>' % (escape(link), item_title)
+            )
+        else:
+            parts.append("<h2>%s</h2>" % item_title)
+        if date:
+            parts.append('<div class="date">%s</div>' % date)
+        if item.get("description"):
+            parts.append("<p>%s</p>" % escape(item["description"]))
+        parts.append("</article>")
+    parts.append("</body>")
+    parts.append("</html>")
+    return "\n".join(parts) + "\n"
+
+
+def to_markdown(feed):
+    """Serializes ``feed`` items to a Markdown bulleted list."""
+    lines = ["# %s" % (feed.get("title") or "News feed"), ""]
+    for item in feed.get("items", []):
+        title = item.get("title") or item.get("description") or "(no title)"
+        link = item.get("link")
+        date = _format_item_date(item)
+        heading = "[%s](%s)" % (title, link) if link else title
+        prefix = "- **%s** — " % date if date else "- "
+        lines.append("%s%s" % (prefix, heading))
+    return "\n".join(lines) + "\n"
+
+
+def to_yaml(feed):
+    """Serializes ``feed`` to a YAML document (symmetric with the spec format)."""
+    return yaml.safe_dump(feed, sort_keys=False, allow_unicode=True)
+
+
+def read_opml(source):
+    """Parses an OPML document into ``[{title, url, html_url}]`` entries.
+
+    ``source`` may be a filesystem path or a string of OPML XML. Only outlines
+    carrying an ``xmlUrl`` attribute (feed subscriptions) are returned.
+    """
+    import os
+
+    if isinstance(source, str) and (
+        "\n" in source or source.lstrip().startswith("<")
+    ) and not os.path.exists(source):
+        root = ET.fromstring(source)
+    else:
+        root = ET.parse(source).getroot()
+    entries = []
+    for outline in root.iter("outline"):
+        xml_url = outline.get("xmlUrl")
+        if not xml_url:
+            continue
+        entries.append(
+            {
+                "title": outline.get("text") or outline.get("title") or xml_url,
+                "url": xml_url,
+                "html_url": outline.get("htmlUrl"),
+            }
+        )
+    return entries
 
 
 def format_feed(feed, fmt="json", public_url=None):
@@ -171,6 +343,14 @@ def format_feed(feed, fmt="json", public_url=None):
         return to_atom(feed, public_url=public_url)
     if fmt == "csv":
         return to_csv(feed)
+    if fmt == "jsonfeed":
+        return to_jsonfeed(feed, public_url=public_url)
+    if fmt == "html":
+        return to_html(feed)
+    if fmt == "markdown":
+        return to_markdown(feed)
+    if fmt == "yaml":
+        return to_yaml(feed)
     raise ValueError(
         "Unsupported format '%s'. Supported formats: %s"
         % (fmt, ", ".join(SUPPORTED_FORMATS))

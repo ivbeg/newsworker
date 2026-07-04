@@ -1,4 +1,4 @@
-.PHONY: clean-pyc clean-build docs clean
+.PHONY: help clean clean-pyc clean-build clean-test lint test coverage release dist
 SHELL := /bin/bash
 
 help:
@@ -6,11 +6,11 @@ help:
 	@echo "clean-build - remove build artifacts"
 	@echo "clean-pyc - remove Python file artifacts"
 	@echo "clean-test - remove test and coverage artifacts"
-	@echo "lint - check style with flake8"
-	@echo "coverage - check code coverage quickly with the default Python"
-	@echo "docs - generate Sphinx HTML documentation, including API docs"
-	@echo "release - package and upload a release"
-	@echo "dist - package"
+	@echo "lint - lint code with ruff"
+	@echo "test - run the test suite with pytest"
+	@echo "coverage - run tests and report coverage"
+	@echo "release - build and upload a release with twine"
+	@echo "dist - build sdist and wheel"
 
 clean: clean-build clean-pyc clean-test
 
@@ -31,27 +31,20 @@ clean-test:
 	rm -fr htmlcov/
 
 lint:
-	flake8 newsworker tests --config=./flake8
+	ruff check newsworker tests
+
+test:
+	pytest -q
 
 coverage:
-	coverage run --source newsworker setup.py test
+	coverage run --source newsworker -m pytest
 	coverage report -m
 	coverage html
 	python -m webbrowser htmlcov/index.html
 
-docs:
-	rm -f docs/newsworker.rst
-	rm -f docs/modules.rst
-	sphinx-apidoc -o docs/ newsworker
-	$(MAKE) -C docs clean
-	$(MAKE) -C docs html
-	python -m webbrowser docs/_build/html/index.html
-
-release: clean
-	python setup.py sdist upload
-	python setup.py bdist_wheel upload
+release: dist
+	twine upload dist/*
 
 dist: clean
-	python setup.py sdist
-	python setup.py bdist_wheel
+	python -m build
 	ls -l dist

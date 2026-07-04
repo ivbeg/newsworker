@@ -1,11 +1,15 @@
-lxml
-cssselect
-bs4
-pyparsing
-feedparser
-qddate
-typer
-feedgen
-pyyaml
-requests
-urllib3
+# Pinned runtime dependencies for reproducible installs.
+# Loose constraints live in pyproject.toml; regenerate this file with:
+#   pip install -e . && pip freeze | grep -E '<direct-deps>' > requirements.txt
+# or use a lockfile tool (uv/pip-tools) if preferred.
+pyparsing==3.2.5
+lxml==6.0.2
+cssselect==1.4.0
+beautifulsoup4==4.14.2
+qddate==1.0.4
+typer==0.20.0
+feedgen==1.0.0
+PyYAML==6.0.3
+requests==2.32.5
+urllib3==2.5.0
+feedparser==6.0.12

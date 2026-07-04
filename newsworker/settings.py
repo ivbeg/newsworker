@@ -12,7 +12,8 @@ default values on first load so users have a template to edit.
 """
 
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
+from typing import Dict, List
 
 import yaml
 
@@ -39,6 +40,12 @@ class Settings:
     content_ttl: int = 3600
     #: Seconds a cached spec stays valid; ``0`` means it never expires.
     spec_ttl: int = 0
+    #: Max number of cached content entries kept on disk; ``0`` = unbounded.
+    content_cache_max_entries: int = 0
+    #: Max total size (bytes) of cached content on disk; ``0`` = unbounded.
+    content_cache_max_bytes: int = 0
+    #: Max number of cached spec entries kept on disk; ``0`` = unbounded.
+    spec_cache_max_entries: int = 0
     #: Host interface the local server binds to.
     host: str = "127.0.0.1"
     #: TCP port the local server listens on.
@@ -47,6 +54,36 @@ class Settings:
     user_agent: str = DEFAULT_USER_AGENT
     #: Maximum text length considered when detecting date-bearing nodes.
     filtered_text_length: int = 150
+    #: Maximum fetched response size in bytes (guards against huge pages).
+    max_content_bytes: int = 10 * 1024 * 1024
+    #: Verify TLS certificates on outgoing HTTPS requests. Disable only via an
+    #: explicit opt-out (e.g. the ``--insecure`` CLI flag) for sites with broken
+    #: certificate chains.
+    verify_tls: bool = True
+    #: Consult the target site's ``robots.txt`` and refuse disallowed fetches.
+    respect_robots: bool = True
+    #: Seconds to wait for an HTTP response before timing out.
+    request_timeout: int = 30
+    #: Optional proxy URL applied to outgoing http/https requests. Empty = none.
+    proxy: str = ""
+    #: Extra HTTP headers sent with every outgoing request.
+    extra_headers: Dict[str, str] = field(default_factory=dict)
+    #: Optional path to a Netscape/Mozilla cookie jar loaded for outgoing requests.
+    cookies_file: str = ""
+    #: Explicit feed language override. Empty means auto-detect from the page.
+    default_language: str = ""
+    #: Follow each item link and extract the full article body into ``content``.
+    full_text: bool = False
+    #: Bounded concurrency for full-text fetches.
+    full_text_workers: int = 4
+    #: Optional allow-list of hosts the feed server may fetch. Empty means any
+    #: host is allowed; set it when exposing the server beyond localhost to
+    #: limit the server-side request forgery (SSRF) surface.
+    allowed_hosts: List[str] = field(default_factory=list)
+    #: Directory of user site-bridge YAML files. Empty uses ``~/.newsworker/bridges``.
+    bridges_dir: str = ""
+    #: Use the optional aiohttp transport for ``batch`` concurrent fetches.
+    use_async: bool = False
 
     def to_dict(self):
         return asdict(self)

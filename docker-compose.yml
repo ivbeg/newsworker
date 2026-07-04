@@ -1,0 +1,13 @@
+services:
+  newsworker:
+    build: .
+    image: newsworker:latest
+    ports:
+      - "8787:8787"
+    volumes:
+      # Persist config and caches across container restarts.
+      - newsworker-home:/home/newsworker/.newsworker
+    restart: unless-stopped
+
+volumes:
+  newsworker-home:

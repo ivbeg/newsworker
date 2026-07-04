@@ -2,9 +2,6 @@
 # -*- coding: utf8 -*-
 
 import sys
-import os
-import urllib.request, urllib.parse, urllib.error
-import chardet
 from urllib.parse import urljoin, urlparse
 from bs4 import UnicodeDammit
 from lxml.html import fromstring, etree
@@ -232,6 +229,40 @@ class FeedsFinder:
             res.append(f)
         return res
 
+    def discover_sitemap_feeds(self, base_url, timeout=30):
+        """Discovers feed-like URLs from the site's ``/sitemap.xml``.
+
+        Fetches ``/sitemap.xml`` relative to ``base_url`` and returns entries for
+        ``<loc>`` URLs that look like feeds (ending in ``.rss``/``.atom`` or
+        containing ``/feed``/``/rss``/``/atom``). Missing or malformed sitemaps
+        yield an empty list rather than raising.
+        """
+        sitemap_url = urljoin(base_url, "/sitemap.xml")
+        try:
+            resp = requests.get(sitemap_url, timeout=timeout)
+            resp.raise_for_status()
+            doc = lxml.etree.fromstring(resp.content)
+        except (requests.exceptions.RequestException, lxml.etree.XMLSyntaxError) as e:
+            logging.debug("No usable sitemap at %s: %s", sitemap_url, e)
+            return []
+        locs = [
+            (el.text or "").strip()
+            for el in doc.iter()
+            if isinstance(el.tag, str) and el.tag.rsplit("}", 1)[-1] == "loc"
+        ]
+        feeds = []
+        seen = set()
+        for loc in locs:
+            if not loc or loc in seen:
+                continue
+            low = loc.lower()
+            if low.endswith((".rss", ".atom")) or any(
+                token in low for token in ("/feed", "/rss", "/atom", "feed.xml", "rss.xml")
+            ):
+                seen.add(loc)
+                feeds.append({"title": loc, "url": loc, "feedtype": "rss"})
+        return feeds
+
     def find_feeds(
         self,
         url,
@@ -241,6 +272,7 @@ class FeedsFinder:
         extractrss=False,
         crawl=False,
         timeout=30,
+        include_sitemap=False,
     ):
         """
         :param url: webpage url
@@ -375,9 +407,15 @@ class FeedsFinder:
                             "url": r.url,
                         }
                         if include_entries:
-                            item["entries"] = datafeed["entries"]
+                            item["entries"] = datafeed["items"]
                         items.append(item)
                 results["items"] = items
+        if include_sitemap:
+            existing = {it.get("url") for it in results["items"]}
+            for feed in self.discover_sitemap_feeds(real_url, timeout=timeout):
+                if feed["url"] not in existing:
+                    results["items"].append(feed)
+                    existing.add(feed["url"])
         return results
 
     def find_feeds_deep(self, url, lookin=True):

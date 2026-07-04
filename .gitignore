@@ -63,8 +63,9 @@ instance/
 # Scrapy stuff:
 .scrapy
 
-# Sphinx documentation
+# Static documentation sites
 docs/_build/
+site/
 
 # PyBuilder
 target/
@@ -102,3 +103,10 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# ruff
+.ruff_cache/
+
+# IDE / editor
+.idea/
+.vscode/

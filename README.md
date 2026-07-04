@@ -2,14 +2,13 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/newsworker.svg?style=flat-square)](https://pypi.python.org/pypi/newsworker)
 [![Python versions](https://img.shields.io/pypi/pyversions/newsworker.svg?style=flat-square)](https://pypi.python.org/pypi/newsworker)
-[![Documentation Status](https://readthedocs.org/projects/newsworker/badge/?version=latest)](http://newsworker.readthedocs.org/en/latest/?badge=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
 > Turn any news page into an RSS/Atom feed — even when the site publishes no feed at all.
 
 `newsworker` is a Python 3 library and command-line tool that **extracts news feeds from plain HTML pages**. It is built for the common case where a site publishes fresh news but offers no RSS/ATOM feed, and where generic "page change" monitors are too noisy to be useful.
 
-The extracted feed can be emitted as **JSON, RSS, Atom, CSV or OPML**, so you can plug it straight into a feed reader, a pipeline, or your own storage.
+The extracted feed can be emitted as **JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML, Markdown, YAML or OPML**, so you can plug it straight into a feed reader, a pipeline, or your own storage.
 
 ---
 
@@ -23,6 +22,10 @@ The extracted feed can be emitted as **JSON, RSS, Atom, CSV or OPML**, so you ca
   - [`serve` — local feed server](#serve--local-feed-server)
   - [`scan` — discover existing feeds](#scan--discover-existing-feeds)
   - [`analyze` — generate a reusable spec](#analyze--generate-a-reusable-spec)
+  - [`batch` — extract feeds from many pages](#batch--extract-feeds-from-many-pages)
+  - [Plugins, bridges and async transport](#plugins-bridges-and-async-transport)
+  - [`watch` — poll a page and deliver only new items](#watch--poll-a-page-and-deliver-only-new-items)
+  - [`cache` — inspect and manage caches](#cache--inspect-and-manage-caches)
   - [`parsedate` — inspect date parsing](#parsedate--inspect-date-parsing)
 - [Settings and caching](#settings-and-caching)
 - [Output formats](#output-formats)
@@ -53,16 +56,37 @@ The result is a structured feed you can serialize into whatever format you need.
 
 ## Installation
 
+Requires **Python 3.7+**.
+
 ```bash
-pip install newsworker
+pip install newsworker              # runtime
+pip install -e ".[dev]"             # editable + pytest, ruff, mypy, pre-commit
+pip install newsworker[fulltext]    # optional: trafilatura for --full-text
+pip install newsworker[async]       # optional: aiohttp for batch --async
+pip install newsworker[metrics]     # optional: Prometheus /metrics endpoint
 ```
 
-Requires **Python 3.7+**. Installing from source:
+Installing from source:
 
 ```bash
 git clone https://github.com/ivbeg/newsworker.git
 cd newsworker
-pip install -e .
+pip install -e ".[dev]"
+```
+
+### Docker
+
+Run the feed server in a container (binds to `0.0.0.0:8787`):
+
+```bash
+docker build -t newsworker .
+docker run --rm -p 8787:8787 -v newsworker-home:/home/newsworker/.newsworker newsworker
+```
+
+Or with Compose (persists config/cache in a named volume):
+
+```bash
+docker compose up
 ```
 
 ---
@@ -97,20 +121,24 @@ for item in feed["items"]:
 
 ## Command-line interface
 
-The package installs a single `newsworker` executable exposing five commands:
+The package installs a single `newsworker` executable exposing eight commands:
 
 ```text
 newsworker [COMMAND] [ARGS] [OPTIONS]
 
 Commands:
   extract    Extract feed records from a web page
-  serve      Run a local HTTP server exposing pages as RSS/Atom/JSON/CSV feeds
+  serve      Run a local HTTP server exposing pages as feeds
   scan       Scan a page and find existing feeds
   analyze    Analyze a page and generate a reusable YAML parsing spec
+  batch      Extract feeds from many pages concurrently
+  watch      Poll a page and emit/deliver only new items
+  cache      Inspect and manage the spec and content caches
   parsedate  Parse a date/time string (debugging helper)
 ```
 
-Add `--verbose` / `-v` to any command for detailed execution logs.
+Add `--verbose` / `-v` to any command for detailed execution logs. Run
+`newsworker --version` to print the installed version.
 
 ### `extract` — build a feed from a page
 
@@ -122,13 +150,31 @@ newsworker extract URL [OPTIONS]
 
 | Option | Alias | Default | Description |
 | --- | --- | --- | --- |
-| `--format` | `-f` | `json` | Output format: `json`, `rss`, `atom`, `csv`. |
+| `--format` | `-f` | `json` | Output format: `json`, `jsonfeed`, `rss`, `atom`, `csv`, `html`, `markdown`, `yaml`. |
 | `--output` | `-o` | *(stdout)* | Write the result to a file instead of printing it. |
 | `--spec` | `-s` | — | Path to a YAML spec produced by `analyze`. Uses fast deterministic extraction instead of the dynamic heuristics. |
+| `--limit` | `-n` | — | Maximum number of items to emit. |
+| `--max-pages` | | `1` | Follow up to N "next" links, merging items across pages. |
+| `--since` | | — | Only items on or after this date (`YYYY-MM-DD`). |
+| `--until` | | — | Only items on or before this date (`YYYY-MM-DD`). |
+| `--full-text` | | `false` | Follow each item link and extract the full article body into `content` (needs the `fulltext` extra: `pip install newsworker[fulltext]`). |
+| `--user-agent` | | *(built-in)* | Override the User-Agent used for fetching. |
+| `--language` | | *(auto)* | Override the auto-detected feed language (e.g. `en`, `fr`). |
+| `--proxy` | | — | Proxy URL for outgoing requests (e.g. `http://host:port`). |
+| `--timeout` | | `30` | HTTP request timeout in seconds. |
+| `--header` | | — | Extra HTTP header `Key: Value` (repeatable). |
+| `--cookies` | | — | Path to a Netscape/Mozilla cookie jar file. |
+| `--insecure` | | `false` | Disable TLS certificate verification for this run. |
+| `--ignore-robots` | | `false` | Fetch even when the site's `robots.txt` disallows it. |
+| `--json-logs` | | `false` | Emit logs as structured JSON. |
 | `--no-cache` | | `false` | Bypass the spec and content caches for this run. |
 | `--refresh` | | `false` | Force re-fetching the page, ignoring cached content. |
 | `--config` | `-c` | *(default)* | Path to a settings YAML file (see [Settings and caching](#settings-and-caching)). |
 | `--verbose` | `-v` | `false` | Verbose logging. |
+
+By default `newsworker` verifies TLS certificates and honors the target site's
+`robots.txt`; use `--insecure` / `--ignore-robots` to override per run. Relative
+dates such as "2 hours ago" or "yesterday" are resolved automatically.
 
 By default, `extract` builds a parsing spec **dynamically on the first run** for a
 URL and caches it, along with the fetched page content, under the configured
@@ -181,8 +227,9 @@ Endpoints:
 
 | Route | Description |
 | --- | --- |
-| `GET /feed?url=<page>&format=atom` | Build a feed from `<page>`. `format` is one of `atom` (default), `rss`, `json`, `csv`. Add `&refresh=1` to bypass the caches for one request. |
+| `GET /feed?url=<page>&format=atom` | Build a feed from `<page>`. `format` is one of `atom` (default), `rss`, `json`, `jsonfeed`, `csv`, `html`, `markdown`, `yaml`. Add `&refresh=1` to bypass the caches for one request. Responses include `ETag` / `Last-Modified`; send `If-None-Match` to receive `304 Not Modified`. |
 | `GET /health` | Health check (returns `ok`). |
+| `GET /metrics` | Prometheus metrics when `prometheus_client` is installed (`newsworker[metrics]`); otherwise `404`. |
 | `GET /` | Short usage help. |
 
 Example — start the server and subscribe from a reader:
@@ -201,6 +248,14 @@ The first request for a URL builds and caches a parsing spec dynamically; later
 requests reuse the cached spec and serve the cached page content until its TTL
 expires, so the reader can poll frequently without hammering the source site.
 
+> **Security note:** the server fetches whatever URL is passed to `/feed?url=`,
+> so it is a server-side request forgery (SSRF) surface. It binds to
+> `127.0.0.1` by default. If you expose it on a routable interface (`--host`),
+> restrict what it can fetch with the `allowed_hosts` setting, and place it
+> behind authentication/a reverse proxy. Only `http(s)` URLs are accepted and
+> responses are capped at `max_content_bytes`. TLS certificates are verified and
+> `robots.txt` is honored by default.
+
 ### `scan` — discover existing feeds
 
 Scans a page for already-published RSS/Atom feeds (via autodiscovery links, feed icons and link heuristics) and reports them.
@@ -212,6 +267,7 @@ newsworker scan URL [OPTIONS]
 | Option | Alias | Default | Description |
 | --- | --- | --- | --- |
 | `--format` | `-f` | `json` | Output format: `json`, `rss`, `atom`, `csv`, `opml`. |
+| `--sitemap` | | `false` | Also discover feed URLs from the site's `/sitemap.xml`. |
 | `--output` | `-o` | *(stdout)* | Write the result to a file instead of printing it. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 
@@ -246,6 +302,100 @@ newsworker analyze "https://example.com/news" -o example.yaml
 newsworker extract "https://example.com/news" -s example.yaml -f rss
 ```
 
+### `batch` — extract feeds from many pages
+
+Extracts feeds from a list of pages concurrently, writing one file per URL.
+
+| Option | Alias | Default | Description |
+| --- | --- | --- | --- |
+| `--urls-file` | | — | Text file with one page URL per line. |
+| `--from-opml` | | — | OPML file; each outline's `htmlUrl` (or `xmlUrl`) is used as the page URL. |
+| `--output-dir` | `-d` | `.` | Directory for one output file per URL. |
+| `--format` | `-f` | `json` | Output format (same set as `extract`). |
+| `--max-workers` | | `4` | Concurrent workers (thread pool, or aiohttp when `--async`). |
+| `--async` | | `false` | Use the optional aiohttp transport (`newsworker[async]`). |
+| `--no-cache` | | `false` | Bypass caches for this run. |
+| `--config` | `-c` | *(default)* | Path to settings YAML. |
+| `--verbose` | `-v` | `false` | Verbose logging. |
+
+```bash
+# One URL per line
+newsworker batch --urls-file urls.txt --output-dir out --format rss
+
+# Or reuse an OPML subscription list (uses each feed's htmlUrl as the page)
+newsworker batch --from-opml feeds.opml -d out -f json --max-workers 8
+
+# Optional aiohttp transport for high-throughput fetches (install the async extra)
+pip install 'newsworker[async]'
+newsworker batch --urls-file urls.txt -d out --async
+```
+
+### Plugins, bridges and async transport
+
+**Third-party plugins** register extractors via the `newsworker.extractors` setuptools
+entry-point group. Each plugin implements `matches(url)` and
+`extract(url, data=None, **kwargs)` returning the internal feed dict. Matching plugins
+are consulted before built-in spec/dynamic extraction.
+
+**Site bridges** are YAML files with a `match:` block (`host`, optional `path` fnmatch)
+and a `spec:` body (the same shape as an `analyze` spec). Bundled examples live under
+`newsworker/bridges/`; drop overrides in `~/.newsworker/bridges/` (or set `bridges_dir`
+in config). When a URL matches, the bridge spec is applied without running heuristics.
+
+```yaml
+match:
+  host: example.com
+  path: /news*
+spec:
+  version: 1
+  items:
+    selector: li.news-item
+  fields:
+    date: {selector: span.date, source: text, required: true}
+    title: {selector: a, source: text}
+    link: {selector: a, source: attr:href, absolute: true}
+```
+
+**Async batch fetches** (`batch --async`) use `aiohttp` when the `[async]` extra is
+installed; otherwise the command falls back to the default thread pool.
+
+### `watch` — poll a page and deliver only new items
+
+Polls a page on an interval, tracks which items it has already seen (in a SQLite
+store under the cache dir), and emits or POSTs only new items.
+
+| Option | Alias | Default | Description |
+| --- | --- | --- | --- |
+| `--interval` | `-i` | `300` | Seconds between polls. |
+| `--webhook` | | — | POST new items as JSON to this URL (with retry/backoff). |
+| `--format` | `-f` | `json` | Output format when not using a webhook. |
+| `--max-pages` | | `1` | Pages to follow per poll (pagination). |
+| `--max-iterations` | | `0` | Stop after N polls (`0` = run until interrupted). |
+| `--config` | `-c` | *(default)* | Path to settings YAML. |
+| `--verbose` | `-v` | `false` | Verbose logging. |
+
+```bash
+# Print new items every 5 minutes
+newsworker watch "https://example.com/news" --interval 300
+
+# Deliver new items to a webhook, following pagination
+newsworker watch "https://example.com/news" -i 600 --webhook https://hooks.example/new --max-pages 3
+```
+
+The loop shuts down cleanly on Ctrl-C / SIGTERM. Use `--max-iterations N` to stop
+after N polls (handy for cron-style single runs).
+
+### `cache` — inspect and manage caches
+
+Inspects or clears the spec and content caches (see [Settings and caching](#settings-and-caching)).
+
+```bash
+newsworker cache stats            # entry counts and total size per cache
+newsworker cache list             # list cached entries
+newsworker cache clear            # delete all cached specs and content
+newsworker cache clear --content  # scope to a single cache (--specs / --content)
+```
+
 ### `parsedate` — inspect date parsing
 
 A debugging helper that shows how `qddate` interprets a date string.
@@ -278,6 +428,22 @@ spec_ttl: 0                      # seconds a cached spec is valid (0 = never exp
 host: 127.0.0.1                  # local server bind interface
 port: 8787                       # local server port
 filtered_text_length: 150        # max text length considered for date detection
+max_content_bytes: 10485760      # cap on fetched response size (bytes)
+allowed_hosts: []                # feed-server host allow-list ([] = any host)
+content_cache_max_entries: 0     # max cached pages on disk (0 = unbounded)
+content_cache_max_bytes: 0       # max total cached-page size on disk (0 = unbounded)
+spec_cache_max_entries: 0        # max cached specs on disk (0 = unbounded)
+verify_tls: true                 # verify TLS certificates on outgoing requests
+respect_robots: true             # honor robots.txt before fetching
+request_timeout: 30              # HTTP request timeout (seconds)
+proxy: ""                        # proxy URL for outgoing requests ("" = none)
+extra_headers: {}                # extra HTTP headers sent with every request
+cookies_file: ""                 # optional Netscape/Mozilla cookie jar path
+default_language: ""             # feed language override ("" = auto-detect)
+bridges_dir: ""                  # user site-bridge YAML dir ("" = ~/.newsworker/bridges)
+use_async: false                 # use aiohttp for batch --async (needs [async] extra)
+full_text: false                 # follow item links and populate content (needs [fulltext])
+full_text_workers: 4             # concurrency for --full-text fetches
 ```
 
 Cached specs live under `<cache_dir>/specs/` and cached page content under
@@ -294,9 +460,13 @@ caches for a single run/request.
 | Format | Description |
 | --- | --- |
 | `json` | The raw internal representation (feed metadata + items). Default. |
+| `jsonfeed` | [JSON Feed 1.1](https://jsonfeed.org/version/1.1) document. |
 | `rss`  | RSS 2.0 document generated with [`feedgen`](https://github.com/lkiesow/python-feedgen). |
 | `atom` | Atom 1.0 document generated with `feedgen`. |
 | `csv`  | Flat table of items: `title, link, pubdate, description, image, unique_id`. |
+| `html` | A standalone HTML preview page rendering items as cards. |
+| `markdown` | A Markdown bulleted list (date, title, link per item). |
+| `yaml` | The feed dictionary serialized as YAML (symmetric with the spec format). |
 
 ### `scan`
 
@@ -312,6 +482,20 @@ Dates coming from HTML are timezone-naive; when rendering RSS/Atom they are assu
 ---
 
 ## Library usage
+
+### High-level service (recommended)
+
+`FeedService` ties together caching, spec building, bridges, plugins, enrichment and
+optional pagination — shared by `extract`, `serve`, `batch` and `watch`:
+
+```python
+from newsworker.service import FeedService
+from newsworker.formats import format_feed
+
+service = FeedService()
+feed = service.get_feed("https://example.com/news", max_pages=2)
+print(format_feed(feed, fmt="rss"))
+```
 
 ### Extract a feed dynamically
 
@@ -337,6 +521,9 @@ feed, session = extractor.get_feed(url="https://www.eib.org/en/index.htm")
             "pubdate": datetime.datetime(2018, 6, 18, 0, 0),
             "unique_id": "f9d359f76118076c5331ffec3cdb82eb",
             "link": "https://www.youtube.com/watch?v=YlKa2LZgxhE",
+            "author": "Jane Doe",          # optional, when detected
+            "categories": ["EU", "Finance"], # optional, when detected
+            "content": "...full text...",    # optional, only with --full-text
             "extra": {"links": [...], "images": [...]},
             "raw_html": b"...",
         },
@@ -429,10 +616,15 @@ print(format_scan(results, fmt="opml"))
 
 - Identifies news blocks on arbitrary HTML pages using **date patterns** — 340+ patterns via [qddate](https://github.com/ivbeg/qddate).
 - Very fast pattern matching built on `pyparsing`.
-- Discovers existing RSS/Atom feeds, and falls back to HTML extraction when none exist.
-- Multiple output formats for both `extract` (JSON, RSS, Atom, CSV) and `scan` (JSON, RSS, Atom, CSV, OPML).
-- Reusable YAML **specs** for fast, deterministic re-crawling of known layouts.
-- Pattern caching for repeated extraction from the same site.
+- Discovers existing RSS/Atom feeds (`scan`), including optional **sitemap.xml** lookup, and falls back to HTML extraction when none exist.
+- Multiple output formats for `extract` (JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML, Markdown, YAML) and `scan` (JSON, RSS, Atom, CSV, OPML).
+- Reusable YAML **specs** for fast, deterministic re-crawling of known layouts; **site bridges** for host/path overrides.
+- **Third-party plugins** via the `newsworker.extractors` entry-point group.
+- Local **feed server** with conditional GET (`ETag`/`304`), optional Prometheus metrics, and Docker/Compose deployment.
+- **Batch** and **watch** workflows with deduplication, webhooks, and optional async fetching.
+- Pattern caching, spec/content caches with CLI management (`cache stats|list|clear`).
+- Safe-by-default fetching: TLS verification and `robots.txt` compliance, with per-run overrides, plus proxy/header/cookie/timeout controls.
+- Automatic feed-language detection, fuzzy relative-date parsing, and optional per-item **author**, **categories**, and **full-text** enrichment.
 
 ---
 
@@ -463,7 +655,7 @@ Bulgarian · Czech · English · French · German · Portuguese · Russian · Sp
 
 ## Dependencies
 
-Key runtime dependencies:
+### Runtime
 
 - [qddate](https://pypi.python.org/pypi/qddate) — fast date parsing (the heart of the algorithm).
 - [pyparsing](https://pypi.python.org/pypi/pyparsing) — text pattern matching.
@@ -473,12 +665,27 @@ Key runtime dependencies:
 - [typer](https://typer.tiangolo.com/) — the command-line interface.
 - [requests](https://pypi.python.org/pypi/requests), [pyyaml](https://pypi.python.org/pypi/PyYAML), [beautifulsoup4](https://pypi.python.org/pypi/beautifulsoup4).
 
+### Optional extras
+
+| Extra | Packages | Enables |
+| --- | --- | --- |
+| `fulltext` | trafilatura | `extract --full-text` |
+| `async` | aiohttp | `batch --async` |
+| `metrics` | prometheus_client | `GET /metrics` on the feed server |
+| `dev` | pytest, ruff, mypy, pre-commit, build, twine | local development and CI parity |
+
 ---
 
 ## Documentation
 
-Full documentation is built automatically and hosted on
-[Read the Docs](http://newsworker.readthedocs.org/en/latest/).
+- **Users** — this README (install, CLI, settings, output formats).
+- **Developers** — [`docs/README.md`](docs/README.md) (MkDocs Material bootstrap guide),
+  [`openspec/`](openspec/) (spec-driven change proposals), and module docstrings in
+  `newsworker/`.
+- **Performance notes** — [`docs/PERFORMANCE_ANALYSIS.md`](docs/PERFORMANCE_ANALYSIS.md).
+
+Stale Sphinx/autodoc stubs were removed; the README and OpenSpec specs are canonical until
+a MkDocs site is adopted (see `docs/README.md`).
 
 ---
 
@@ -486,6 +693,21 @@ Full documentation is built automatically and hosted on
 
 Issues and pull requests are welcome. Please open an issue to discuss substantial
 changes before submitting a PR, and keep additions covered by the changelog.
+
+Development setup:
+
+```bash
+pip install -e ".[dev]"     # editable install with dev tools
+# or, for a reproducible pinned environment:
+pip install -r requirements.txt
+
+pre-commit install          # run ruff/format/whitespace hooks on commit
+make test                   # pytest (145+ tests, offline fixtures)
+make lint                   # ruff
+mypy                        # incremental type checking (see [tool.mypy])
+```
+
+Spec-driven changes live under `openspec/`; see `openspec/AGENTS.md` before adding features.
 
 ---
 

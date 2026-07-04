@@ -1,0 +1,32 @@
+# Example site bridge for example.com news listings.
+# Copy to ~/.newsworker/bridges/ and adapt for your target site.
+match:
+  host: example.com
+  path: /news*
+spec:
+  version: 1
+  source:
+    url: https://example.com/news
+  feed:
+    title: Example News Portal
+    language: en
+  items:
+    selector: li.news-item
+    selector_type: css
+    container: /html/body/main/ul
+  fields:
+    date:
+      selector: span.date
+      source: text
+      patterns: ["dt:date:date_9"]
+      required: true
+    title:
+      selector: a
+      source: text
+    description:
+      selector: p
+      source: text
+    link:
+      selector: a
+      source: attr:href
+      absolute: true
