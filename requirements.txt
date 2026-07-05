@@ -3,7 +3,7 @@
 #   pip install -e . && pip freeze | grep -E '<direct-deps>' > requirements.txt
 # or use a lockfile tool (uv/pip-tools) if preferred.
 pyparsing==3.2.5
-lxml==6.0.2
+lxml==6.1.0
 cssselect==1.4.0
 beautifulsoup4==4.14.2
 qddate==1.0.10
