@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-05
+
+Extraction quality, spec analysis, and language detection improvements. See
+[`docs/SPEC.md`](docs/SPEC.md) for the YAML spec format and `analyze` pipeline.
+
+### Added
+- **`docs/SPEC.md`** — parsing spec format, field reference, selector conventions, and
+  the full `analyze` pipeline (also linked from the README and `docs/README.md`).
+- **HTML `<time datetime="...">` support** — dynamic extraction and specs recognize
+  ISO-8601 `datetime` attributes via the `html:time` pattern; `SpecAnalyzer` emits
+  `source: attr:datetime` for these fields.
+- **Text-based feed language detection** — `resolve_feed_language()` infers language from
+  item title samples (Cyrillic, French, Ukrainian, and other heuristics) when page
+  metadata defaults to English but content is localized.
+- **`parse_datetime_attr()`** — shared ISO-8601 parser for `<time>` nodes and spec fields.
+- **`analyze` fetch flags** — the same network/settings options as `extract`:
+  `--user-agent`, `--language`, `--proxy`, `--timeout`, `--header`, `--cookies`,
+  `--insecure`, `--ignore-robots`, `--config`, and `--json-logs`.
+- **`SpecAnalysisError`** — `analyze` fails clearly when no dated news listings are found
+  (`require_items=True` on the CLI path).
+
+### Changed
+- **Spec analyzer** — rejects `<select>`/`<form>` UI clusters (callback time slots),
+  ignores WordPress taxonomy classes (`category-*`, `tag-*`, `post-<id>`), rejects
+  overly broad bare-tag selectors, and falls back to positional `./*` XPath when CSS
+  would match too many nodes.
+- **Title heuristics** — prefer heading tags (`h1`–`h4`) and bold text before generic
+  long-text nodes; category/archive metadata is no longer picked as the item title.
+- **`decode_html`** — passes `is_html=True` to BeautifulSoup's `UnicodeDammit` so UTF-8
+  pages with a `<meta charset>` are not misread (notably Cyrillic news sites).
+- Bumped **qddate** to 1.0.10 in pinned `requirements.txt`.
+- Test suite expanded to **175+** offline tests.
+
+### Fixed
+- WordPress and similar themes with `<time datetime>` and mixed category classes produce
+  correct item counts, dates, and titles.
+- Spec analysis no longer selects callback-form time-slot dropdowns over real news lists.
+- Feed language on Russian/Cyrillic pages no longer stays `en` when `<html lang="en">` is
+  a CMS default.
+
 ## [1.2.0] - 2026-07-04
 
 Platform release closing the audit roadmap (formats, CLI, security, batch/watch,

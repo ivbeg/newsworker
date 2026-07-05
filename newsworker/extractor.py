@@ -26,7 +26,8 @@ from .tools import (
     can_fetch,
     parse_fuzzy_date,
     looks_like_fuzzy_date,
-    detect_html_language,
+    parse_datetime_attr,
+    resolve_feed_language,
     Logger,
 )
 from .tagmapper import TagPath, TagBlock
@@ -36,7 +37,21 @@ from .consts import (
     TAG_TYPE_TEXT,
     TAG_TYPE_HREF,
     TAG_TYPE_IMG,
+    TAG_TYPE_BOLD,
 )
+
+#: Heading tags checked for titles before generic long-text heuristics.
+_HEADING_TAGS = ("h1", "h2", "h3", "h4")
+
+
+def _element_text(node):
+    """Returns visible text from an lxml element."""
+    if node is None:
+        return ""
+    text_content = getattr(node, "text_content", None)
+    if callable(text_content):
+        return text_content()
+    return "".join(node.itertext())
 
 # Default timeout for HTTP requests
 DEFAULT_TIMEOUT = 30
@@ -127,11 +142,10 @@ class FeedExtractor:
             else:
                 feed_title = "News from " + base_url
                 title_extracted = False
-        language = (
-            self.default_language
-            or detect_html_language(document)
-            or self._last_content_language
-            or "en"
+        language = resolve_feed_language(
+            override=self.default_language,
+            document=document,
+            content_language=self._last_content_language,
         )
         feed = {
             "title": feed_title,
@@ -185,6 +199,16 @@ class FeedExtractor:
         """Matches date to regular expressions. Uses  node as parameter"""
         if node is None:
             return None, None, None, None, None
+        if isinstance(getattr(node, "tag", None), str) and node.tag == "time":
+            dt_attr = node.get("datetime")
+            if dt_attr:
+                the_date = parse_datetime_attr(dt_attr)
+                if the_date is not None:
+                    display = (node.text or "").strip() or dt_attr
+                    if self.session:
+                        self.session["debug"]["num_datematched"] += 1
+                        self.session["debug"]["num_matched"] += 1
+                    return True, "html:time", {"key": "html:time"}, display, the_date
         text_1 = None
         text_2 = None
 
@@ -209,6 +233,29 @@ class FeedExtractor:
                     self.session["debug"]["num_datematched"] += 1
                 return results
         return None, None, None, None, None
+
+    def _pick_title_from_anns(self, anns):
+        """Prefers heading text over the first long text node in document order."""
+        by_tag = {tag: [] for tag in _HEADING_TAGS}
+        for ann in anns:
+            if ann.node.tag is etree.Comment:
+                continue
+            tag = ann.tag if isinstance(ann.tag, str) else None
+            if tag in by_tag:
+                text = _element_text(ann.node).strip()
+                if len(text) > 10:
+                    by_tag[tag].append(text)
+        for tag in _HEADING_TAGS:
+            if by_tag[tag]:
+                return by_tag[tag][0]
+        for ann in anns:
+            if ann.node.tag is etree.Comment:
+                continue
+            if TAG_TYPE_BOLD in ann.attrs and TAG_TYPE_DATE not in ann.attrs:
+                text = _element_text(ann.node).strip()
+                if len(text) > 10:
+                    return text
+        return None
 
     def getclusters(self, document, base_url):
         """
@@ -398,7 +445,7 @@ class FeedExtractor:
             (match, key, t_data, the_text, the_date) = self.match_date(ann.node)
             if match:
                 ann.attrs.append(TAG_TYPE_DATE)
-        title = None
+        title = self._pick_title_from_anns(anns)
         description = None
         description_parts = []  # Collect text parts for efficient joining
         url = None
@@ -634,6 +681,18 @@ class FeedExtractor:
         clusters = self.getclusters(document, url)
         self.log.save("get_rss", "Clusters extracted")
         feed = self.process_clusters(url, clusters, feed)
+        if not self.default_language:
+            samples = [
+                item.get("title")
+                for item in feed.get("items", [])
+                if item.get("title")
+            ]
+            feed["language"] = resolve_feed_language(
+                document=document,
+                content_language=self._last_content_language,
+                stored_language=feed.get("language"),
+                text_samples=samples,
+            )
         if cached_p is not None:
             self.indexer.endSession()
         self.log.save("get_rss", "End of log")

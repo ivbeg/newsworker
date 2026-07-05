@@ -38,9 +38,32 @@ from lxml.html import fromstring
 
 from .consts import DATE_CLASSES_KEYWORDS, NEWS_CLASSES_KEYWORDS
 from .extractor import FeedExtractor
-from .tools import clean_url, decode_html, detect_html_language, get_abs_url
+from .tools import (
+    clean_url,
+    decode_html,
+    get_abs_url,
+    parse_datetime_attr,
+    resolve_feed_language,
+)
 
 SPEC_VERSION = 1
+HTML_TIME_PATTERN = "html:time"
+
+# Container tags that hold UI controls, not news listings.
+_FORM_CONTAINER_TAGS = frozenset({"select", "form", "option", "optgroup", "datalist"})
+
+#: Heading tags preferred for item titles (h1 highest priority).
+_HEADING_TAGS = ("h1", "h2", "h3", "h4")
+
+
+def _element_text(node):
+    """Returns visible text from an lxml element."""
+    if node is None:
+        return ""
+    text_content = getattr(node, "text_content", None)
+    if callable(text_content):
+        return text_content()
+    return "".join(node.itertext())
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +75,76 @@ def _element_classes(node):
     """Returns the list of CSS classes for an lxml element."""
     value = node.get("class")
     return value.split() if value else []
+
+
+# WordPress taxonomy / per-post classes are not reliable item markers.
+_TAXONOMY_CLASS_PREFIXES = ("category-", "tag-")
+_STRUCTURAL_ITEM_HINTS = ("item", "grid", "entry", "card", "post-grid")
+
+
+def _is_taxonomy_class(cls):
+    low = cls.lower()
+    return any(low.startswith(prefix) for prefix in _TAXONOMY_CLASS_PREFIXES)
+
+
+def _is_post_id_class(cls):
+    if cls.startswith("post-") and cls[5:].isdigit():
+        return True
+    return False
+
+
+def _item_selector_classes(classes):
+    """Filters out taxonomy and per-post classes unsuitable for item selectors."""
+    return [
+        cls
+        for cls in classes
+        if not _is_taxonomy_class(cls) and not _is_post_id_class(cls)
+    ]
+
+
+def _pick_best_item_class(classes, prefer_keywords=None):
+    """Picks the best shared class for a repeating news item wrapper."""
+    candidates = _item_selector_classes(classes)
+    if not candidates:
+        return None
+    best_cls = None
+    best_score = (-1, -1)
+    for cls in candidates:
+        low = cls.lower()
+        score = 0
+        if prefer_keywords:
+            for keyword in prefer_keywords:
+                if keyword in low:
+                    score = 100
+                    break
+        if score < 100:
+            for hint in _STRUCTURAL_ITEM_HINTS:
+                if hint in low:
+                    score = 10
+                    break
+        rank = (score, len(cls))
+        if rank > best_score:
+            best_score = rank
+            best_cls = cls
+    return best_cls
+
+
+def _shared_item_selector(item_roots, prefer_keywords=None):
+    """Builds a CSS selector from classes shared by every item root."""
+    if not item_roots:
+        return None
+    tag = getattr(item_roots[0], "tag", None)
+    if not isinstance(tag, str):
+        return None
+    if any(getattr(root, "tag", None) != tag for root in item_roots[1:]):
+        return None
+    common = set(_element_classes(item_roots[0]))
+    for root in item_roots[1:]:
+        common &= set(_element_classes(root))
+    cls = _pick_best_item_class(common, prefer_keywords)
+    if cls:
+        return "%s.%s" % (tag, cls)
+    return None
 
 
 def _best_class(node, prefer_keywords=None):
@@ -83,6 +176,34 @@ def css_for_element(node, prefer_keywords=None):
     return tag
 
 
+def css_for_item_element(node, prefer_keywords=None):
+    """Builds an item CSS selector, skipping taxonomy and post-id classes."""
+    tag = getattr(node, "tag", None)
+    if not isinstance(tag, str):
+        return None
+    cls = _pick_best_item_class(_element_classes(node), prefer_keywords)
+    if cls:
+        return "%s.%s" % (tag, cls)
+    return tag
+
+
+def _same_tag_index(node):
+    """Returns the 1-based XPath index of ``node`` among same-tag siblings."""
+    parent = node.getparent()
+    if parent is None:
+        return 1
+    tag = node.tag if isinstance(node.tag, str) else "*"
+    idx = 0
+    for sibling in parent.iterchildren():
+        if not isinstance(sibling.tag, str):
+            continue
+        if sibling.tag == tag:
+            idx += 1
+        if sibling is node:
+            return idx or 1
+    return 1
+
+
 def relative_xpath(root, target):
     """Builds a positional XPath from ``root`` (exclusive) to ``target``."""
     parts = []
@@ -91,12 +212,8 @@ def relative_xpath(root, target):
         parent = node.getparent()
         if parent is None:
             break
-        try:
-            idx = parent.index(node) + 1
-        except (ValueError, TypeError):
-            idx = 1
         tag = node.tag if isinstance(node.tag, str) else "*"
-        parts.append("%s[%d]" % (tag, idx))
+        parts.append("%s[%d]" % (tag, _same_tag_index(node)))
         node = parent
     if not parts:
         return "."
@@ -120,6 +237,17 @@ def relative_selector(item_root, target, prefer_keywords=None):
             matches = []
         if matches and matches[0] is target:
             return css
+        parent = target.getparent()
+        if parent is not None and parent is not item_root:
+            parent_css = css_for_element(parent, prefer_keywords)
+            if parent_css:
+                compound = "%s %s" % (parent_css, css)
+                try:
+                    matches = item_root.cssselect(compound)
+                except Exception:
+                    matches = []
+                if matches and matches[0] is target:
+                    return compound
     return relative_xpath(item_root, target)
 
 
@@ -155,7 +283,7 @@ class FieldRule:
     """Rule describing how to extract a single field from an item element."""
 
     selector: str = ""
-    source: str = "text"  # text | tail | attr:<name>
+    source: str = "text"  # text | tail | content | attr:<name>
     absolute: bool = False  # resolve value as an absolute URL
     patterns: Optional[List[str]] = None  # qddate pattern keys (date field only)
     required: bool = False
@@ -286,6 +414,10 @@ class FeedSpec:
 # ---------------------------------------------------------------------------
 
 
+class SpecAnalysisError(Exception):
+    """Raised when analysis cannot produce a usable parsing spec."""
+
+
 def _walk_elements(node):
     """Yields ``node`` and all descendant elements in document order."""
     yield node
@@ -315,6 +447,63 @@ class SpecAnalyzer:
             current = current.getparent()
         return current
 
+    @staticmethod
+    def _normalize_snode(snode):
+        """Returns ``snode``, descending into ``tbody`` when it is a table."""
+        if snode.tag == "table":
+            for child in snode.getchildren():
+                if child.tag == "tbody":
+                    return child
+        return snode
+
+    def _map_item_roots(self, snode, nodes):
+        """Maps date nodes under ``snode`` to their direct-child item roots."""
+        item_roots = []
+        date_by_root = {}
+        for node_info in nodes:
+            node = node_info["node"]
+            root = self._item_root(snode, node)
+            if root is None:
+                continue
+            if root not in date_by_root:
+                item_roots.append(root)
+                date_by_root[root] = node
+        return item_roots, date_by_root
+
+    def _cluster_score(self, cluster_info):
+        """Scores a date cluster; higher is more likely to be a news listing."""
+        snode = cluster_info["snode"]
+        nodes = cluster_info["nodes"]
+        if snode.tag in _FORM_CONTAINER_TAGS:
+            return (-1, -1, -1, -1)
+        option_dates = sum(
+            1 for info in nodes if getattr(info["node"], "tag", None) == "option"
+        )
+        if option_dates and option_dates >= len(nodes) / 2:
+            return (-1, -1, -1, -1)
+
+        snode = self._normalize_snode(snode)
+        item_roots, date_by_root = self._map_item_roots(snode, nodes)
+        links = titles = 0
+        for root in item_roots[:6]:
+            fields = self._detect_fields(root, date_by_root.get(root))
+            if fields["link"] is not None:
+                links += 1
+            if fields["title"][0] is not None:
+                titles += 1
+
+        news_bonus = 0
+        for cls in _element_classes(snode):
+            low = cls.lower()
+            if any(keyword in low for keyword in NEWS_CLASSES_KEYWORDS):
+                news_bonus = 1
+                break
+        return (links, titles, len(nodes), news_bonus)
+
+    def _pick_best_cluster(self, clusters):
+        """Returns the cluster most likely to contain repeating news items."""
+        return max(clusters.items(), key=lambda kv: self._cluster_score(kv[1]))
+
     def _feed_title(self, document, url):
         nodes = document.xpath("//head/title")
         if nodes and nodes[0].text:
@@ -329,6 +518,17 @@ class SpecAnalyzer:
         description_source = None
         link = None
         image = None
+        for tag in _HEADING_TAGS:
+            for el in _walk_elements(item_root):
+                if el is date_node:
+                    continue
+                if el.tag == tag:
+                    text = _element_text(el).strip()
+                    if len(text) > 10:
+                        title, title_source = el, "content"
+                        break
+            if title is not None:
+                break
         for el in _walk_elements(item_root):
             if el is date_node:
                 continue
@@ -355,21 +555,49 @@ class SpecAnalyzer:
             "image": image,
         }
 
-    def analyze(self, url, data=None, user_agent=None):
-        """Analyzes ``url`` (or provided ``data``) and returns a ``FeedSpec``."""
-        document = self._parse(url, data=data, user_agent=user_agent)
-        language = (
-            getattr(self.ext, "default_language", None)
-            or detect_html_language(document)
-            or getattr(self.ext, "_last_content_language", None)
-            or "en"
+    def _item_text_samples(self, item_roots, date_by_root, limit=12):
+        """Returns title-like text snippets from discovered news items."""
+        samples = []
+        for root in item_roots[:limit]:
+            fields = self._detect_fields(root, date_by_root[root])
+            title_node, title_source = fields["title"]
+            if title_node is None:
+                continue
+            if title_source == "tail":
+                text = (title_node.tail or "").strip()
+            elif title_source == "content":
+                text = _element_text(title_node).strip()
+            else:
+                text = (title_node.text or "").strip()
+            if not text:
+                text = _element_text(title_node).strip()
+            if len(text) >= 10:
+                samples.append(text)
+        return samples
+
+    def _resolve_language(self, document, text_samples=None):
+        return resolve_feed_language(
+            override=getattr(self.ext, "default_language", None),
+            document=document,
+            content_language=getattr(self.ext, "_last_content_language", None),
+            text_samples=text_samples,
         )
+
+    def analyze(self, url, data=None, user_agent=None, require_items=False):
+        """Analyzes ``url`` (or provided ``data``) and returns a ``FeedSpec``.
+
+        When ``require_items`` is true, raises :class:`SpecAnalysisError` if the
+        page does not contain a detectable news listing.
+        """
+        document = self._parse(url, data=data, user_agent=user_agent)
         spec = FeedSpec(
             source_url=url,
             analyzed_at=datetime.datetime.now().isoformat(timespec="seconds"),
-            language=language,
+            language=self._resolve_language(document),
         )
         if document is None:
+            if require_items:
+                raise SpecAnalysisError("Failed to fetch or parse page content")
             return spec
         spec.title = self._feed_title(document, url)
 
@@ -380,18 +608,12 @@ class SpecAnalyzer:
             self.ext.clear_session()
 
         if not clusters:
+            if require_items:
+                raise SpecAnalysisError("No dated news listings detected on this page")
             return spec
 
-        # Pick the cluster with the most date-bearing nodes.
-        best_path, best = max(
-            clusters.items(), key=lambda kv: len(kv[1]["nodes"])
-        )
-        snode = best["snode"]
-        if snode.tag == "table":
-            for child in snode.getchildren():
-                if child.tag == "tbody":
-                    snode = child
-                    break
+        best_path, best = self._pick_best_cluster(clusters)
+        snode = self._normalize_snode(best["snode"])
 
         # Map every date node to its item root (direct child of snode).
         item_roots = []
@@ -410,7 +632,16 @@ class SpecAnalyzer:
                 date_by_root[root] = node
 
         if not item_roots:
+            if require_items:
+                raise SpecAnalysisError(
+                    "Found date patterns but could not group them into individual news items"
+                )
             return spec
+
+        spec.language = self._resolve_language(
+            document,
+            text_samples=self._item_text_samples(item_roots, date_by_root),
+        )
 
         # Item selector: prefer a semantic tag.class shared by item roots.
         spec.items = self._build_items_rule(document, snode, item_roots)
@@ -424,29 +655,85 @@ class SpecAnalyzer:
             if not self._validate(document, spec):
                 # Keep the semantic attempt; extraction may still work partially.
                 pass
+        if require_items:
+            if not spec.fields:
+                raise SpecAnalysisError(
+                    "Could not derive extraction rules for news items on this page"
+                )
+            if "title" not in spec.fields and "link" not in spec.fields:
+                raise SpecAnalysisError(
+                    "Could not derive title or link extraction rules for news items on this page"
+                )
+            if not self._validate(document, spec):
+                raise SpecAnalysisError(
+                    "Built selectors matched fewer than 2 news items on this page"
+                )
+            if not self._validate_dates(document, spec):
+                raise SpecAnalysisError(
+                    "Built selectors could not parse dates from news items on this page"
+                )
         return spec
 
+    def _min_items_matched(self, item_count):
+        """Minimum nodes a CSS item selector must match inside the container."""
+        if item_count <= 2:
+            return item_count
+        return max(2, int(item_count * 0.9 + 0.999))
+
+    def _css_items_rule(self, document, snode, item_roots, selector):
+        container = document.getroottree().getpath(snode)
+        try:
+            matched = snode.cssselect(selector)
+        except Exception:
+            matched = []
+        min_needed = self._min_items_matched(len(item_roots))
+        if len(matched) >= min_needed and self._selector_specific_enough(
+            selector, len(matched), len(item_roots)
+        ):
+            return ItemsRule(
+                selector=selector,
+                selector_type="css",
+                container=container,
+                stride=1,
+            )
+        return None
+
     def _build_items_rule(self, document, snode, item_roots):
+        shared = _shared_item_selector(item_roots, NEWS_CLASSES_KEYWORDS)
+        if shared:
+            rule = self._css_items_rule(document, snode, item_roots, shared)
+            if rule is not None:
+                return rule
+
         counts = {}
         for root in item_roots:
-            css = css_for_element(root, NEWS_CLASSES_KEYWORDS)
+            css = css_for_item_element(root, NEWS_CLASSES_KEYWORDS)
             if css:
                 counts[css] = counts.get(css, 0) + 1
-        container = document.getroottree().getpath(snode)
         if counts:
             selector = max(counts.items(), key=lambda kv: kv[1])[0]
-            try:
-                matched = snode.cssselect(selector)
-            except Exception:
-                matched = []
-            if len(matched) >= max(2, int(len(item_roots) * 0.6)):
-                return ItemsRule(
-                    selector=selector,
-                    selector_type="css",
-                    container=container,
-                    stride=1,
-                )
+            rule = self._css_items_rule(document, snode, item_roots, selector)
+            if rule is not None:
+                return rule
         return self._positional_items_rule(document, snode, item_roots)
+
+    @staticmethod
+    def _selector_specific_enough(selector, matched_count, item_count):
+        """Returns whether a CSS item selector is precise enough to use.
+
+        Bare tag selectors (``div``, ``tr``, …) and selectors that match far
+        more nodes than discovered news items are rejected in favour of a
+        positional fallback.
+        """
+        if item_count <= 0:
+            return False
+        if "." not in selector:
+            return matched_count <= item_count * 1.1
+        if matched_count <= item_count * 1.1:
+            return True
+        # Date clustering can miss an item; allow a small overshoot for
+        # specific class selectors.
+        return matched_count <= item_count + 1
 
     def _positional_items_rule(self, document, snode, item_roots):
         container = document.getroottree().getpath(snode)
@@ -491,6 +778,13 @@ class SpecAnalyzer:
             date_source = "text"
             if not (date_node.text and date_node.text.strip()):
                 date_source = "tail"
+            if patterns and HTML_TIME_PATTERN in patterns:
+                if (
+                    isinstance(getattr(date_node, "tag", None), str)
+                    and date_node.tag == "time"
+                    and date_node.get("datetime")
+                ):
+                    date_source = "attr:datetime"
             fields["date"] = FieldRule(
                 selector=relative_selector(
                     sample_root, date_node, DATE_CLASSES_KEYWORDS
@@ -540,6 +834,23 @@ class SpecAnalyzer:
             return False
         return len(scopes) >= 2
 
+    def _validate_dates(self, document, spec):
+        """Returns whether at least one item scope yields a parseable date."""
+        date_rule = spec.fields.get("date")
+        if date_rule is None:
+            return True
+        try:
+            scopes = _select_item_scopes(document, spec.items)
+        except Exception:
+            return False
+        for scope in scopes[:3]:
+            _, pubdate = extract_date_from_scope(
+                self.ext, scope, date_rule, date_rule.patterns
+            )
+            if pubdate is not None:
+                return True
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Extraction: FeedSpec -> feed dict
@@ -581,9 +892,68 @@ def _read_source(node, source):
         return node.text
     if source == "tail":
         return node.tail
+    if source == "content":
+        return _element_text(node)
     if source.startswith("attr:"):
         return node.get(source[len("attr:") :])
     return node.text
+
+
+def _qddate_patterns(patterns):
+    """Returns qddate pattern keys, dropping the non-regex ``html:time`` marker."""
+    if not patterns:
+        return None
+    filtered = [p for p in patterns if p != HTML_TIME_PATTERN]
+    return filtered or None
+
+
+def _date_target_nodes(scope, date_rule):
+    nodes = []
+    for node in scope:
+        nodes.extend(select_nodes(node, date_rule.selector))
+    return nodes
+
+
+def extract_date_from_scope(ext, scope, date_rule, patterns):
+    """Extracts ``(date_text, pubdate)`` from an item scope.
+
+    ``html:time`` patterns are resolved via :meth:`FeedExtractor.match_date`
+    (or ``datetime`` attributes) rather than qddate text matching alone.
+    """
+    if date_rule is None:
+        return None, None
+
+    use_html_time = patterns and HTML_TIME_PATTERN in patterns
+    if use_html_time:
+        for node in _date_target_nodes(scope, date_rule):
+            matched, _key, _data, matched_text, the_date = ext.match_date(node)
+            if matched:
+                return matched_text, the_date
+
+    date_text = _extract_value(scope, date_rule)
+    if date_text:
+        if date_rule.source == "attr:datetime" or use_html_time:
+            the_date = parse_datetime_attr(date_text)
+            if the_date is not None:
+                return date_text, the_date
+
+    the_date = _parse_date_text(ext, date_text, _qddate_patterns(patterns))
+    return date_text, the_date
+
+
+def _parse_date_text(ext, text, patterns):
+    if not text:
+        return None
+    if patterns:
+        ext.indexer.startSession(patterns)
+    try:
+        match, _key, _data, _matched_text, the_date = ext.match_text(text)
+    finally:
+        if patterns:
+            ext.indexer.endSession()
+    if match:
+        return the_date
+    return None
 
 
 class SpecExtractor:
@@ -598,20 +968,6 @@ class SpecExtractor:
         edata = decode_html(data)
         parser = etree.HTMLParser(remove_blank_text=True)
         return fromstring(edata, parser=parser)
-
-    def _parse_date(self, text, patterns):
-        if not text:
-            return None
-        if patterns:
-            self.ext.indexer.startSession(patterns)
-        try:
-            match, key, data, matched_text, the_date = self.ext.match_text(text)
-        finally:
-            if patterns:
-                self.ext.indexer.endSession()
-        if match:
-            return the_date
-        return None
 
     def extract(self, url, spec, data=None, user_agent=None):
         """Extracts a feed from ``url`` using ``spec``."""
@@ -635,14 +991,25 @@ class SpecExtractor:
             item = self._extract_item(url, scope, spec, date_rule, patterns)
             if item is not None:
                 feed["items"].append(item)
+        if not getattr(self.ext, "default_language", None):
+            samples = [
+                item.get("title") for item in feed["items"] if item.get("title")
+            ]
+            feed["language"] = resolve_feed_language(
+                document=document,
+                content_language=getattr(self.ext, "_last_content_language", None),
+                stored_language=spec.language,
+                text_samples=samples,
+            )
         return feed
 
     def _extract_item(self, base_url, scope, spec, date_rule, patterns):
-        pubdate = None
         date_text = None
+        pubdate = None
         if date_rule is not None:
-            date_text = _extract_value(scope, date_rule)
-            pubdate = self._parse_date(date_text, patterns)
+            date_text, pubdate = extract_date_from_scope(
+                self.ext, scope, date_rule, patterns
+            )
             if date_rule.required and pubdate is None:
                 return None
 

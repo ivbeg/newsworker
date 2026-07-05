@@ -101,6 +101,7 @@ Add a CI job that runs `mkdocs build --strict` on pull requests (after `pip inst
 
 | File | Description |
 |------|-------------|
+| [`SPEC.md`](SPEC.md) | YAML parsing spec format, `analyze` pipeline, selector conventions |
 | [`PERFORMANCE_ANALYSIS.md`](PERFORMANCE_ANALYSIS.md) | Historical performance notes and profiling ideas |
 
 When MkDocs is adopted, move `PERFORMANCE_ANALYSIS.md` under `nav` as shown above and

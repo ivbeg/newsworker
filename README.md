@@ -293,9 +293,30 @@ newsworker scan "https://www.dta.gov.au/news/" -f rss
 
 Runs the dynamic heuristics once and distills them into a portable **YAML parsing spec**. Feeding that spec back into `extract --spec` skips the expensive analysis step and runs deterministic selectors, which is far faster on repeat crawls of the same layout.
 
+Full spec format, field reference, and analysis pipeline: [`docs/SPEC.md`](docs/SPEC.md).
+
 ```bash
-newsworker analyze URL [--output spec.yaml]
+newsworker analyze URL [OPTIONS]
 ```
+
+| Option | Alias | Default | Description |
+| --- | --- | --- | --- |
+| `--output` | `-o` | *(stdout)* | Path to write the YAML spec. |
+| `--user-agent` | | *(built-in)* | Override the User-Agent used for fetching. |
+| `--language` | | *(auto)* | Override the auto-detected feed language (e.g. `en`, `fr`). |
+| `--proxy` | | — | Proxy URL for outgoing requests (e.g. `http://host:port`). |
+| `--timeout` | | `30` | HTTP request timeout in seconds. |
+| `--header` | | — | Extra HTTP header `Key: Value` (repeatable). |
+| `--cookies` | | — | Path to a Netscape/Mozilla cookie jar file. |
+| `--insecure` | | `false` | Disable TLS certificate verification for this run. |
+| `--ignore-robots` | | `false` | Fetch even when the site's `robots.txt` disallows it. |
+| `--json-logs` | | `false` | Emit logs as structured JSON. |
+| `--config` | `-c` | *(default)* | Path to a settings YAML file. |
+| `--verbose` | `-v` | `false` | Verbose logging. |
+
+`analyze` uses the same fetch settings as `extract`. It records what the dynamic
+extractor would choose — including `<time datetime="...">` dates and heading-based
+titles — and fails with a clear error when no dated news listings are found.
 
 ```bash
 newsworker analyze "https://example.com/news" -o example.yaml
@@ -614,17 +635,17 @@ print(format_scan(results, fmt="opml"))
 
 ## Features
 
-- Identifies news blocks on arbitrary HTML pages using **date patterns** — 340+ patterns via [qddate](https://github.com/ivbeg/qddate).
+- Identifies news blocks on arbitrary HTML pages using **date patterns** — 340+ patterns via [qddate](https://github.com/ivbeg/qddate), plus HTML `<time datetime="...">` attributes.
 - Very fast pattern matching built on `pyparsing`.
 - Discovers existing RSS/Atom feeds (`scan`), including optional **sitemap.xml** lookup, and falls back to HTML extraction when none exist.
 - Multiple output formats for `extract` (JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML, Markdown, YAML) and `scan` (JSON, RSS, Atom, CSV, OPML).
-- Reusable YAML **specs** for fast, deterministic re-crawling of known layouts; **site bridges** for host/path overrides.
+- Reusable YAML **specs** for fast, deterministic re-crawling of known layouts (documented in [`docs/SPEC.md`](docs/SPEC.md)); **site bridges** for host/path overrides.
 - **Third-party plugins** via the `newsworker.extractors` entry-point group.
 - Local **feed server** with conditional GET (`ETag`/`304`), optional Prometheus metrics, and Docker/Compose deployment.
 - **Batch** and **watch** workflows with deduplication, webhooks, and optional async fetching.
 - Pattern caching, spec/content caches with CLI management (`cache stats|list|clear`).
 - Safe-by-default fetching: TLS verification and `robots.txt` compliance, with per-run overrides, plus proxy/header/cookie/timeout controls.
-- Automatic feed-language detection, fuzzy relative-date parsing, and optional per-item **author**, **categories**, and **full-text** enrichment.
+- Automatic feed-language detection from page metadata and item text, fuzzy relative-date parsing, and optional per-item **author**, **categories**, and **full-text** enrichment.
 
 ---
 
@@ -632,7 +653,7 @@ print(format_scan(results, fmt="opml"))
 
 Language-specific date recognition currently covers:
 
-Bulgarian · Czech · English · French · German · Portuguese · Russian · Spanish
+Bulgarian · Czech · English · French · German · Portuguese · Russian · Spanish · Ukrainian
 
 ---
 
@@ -679,6 +700,7 @@ Bulgarian · Czech · English · French · German · Portuguese · Russian · Sp
 ## Documentation
 
 - **Users** — this README (install, CLI, settings, output formats).
+- **Parsing specs** — [`docs/SPEC.md`](docs/SPEC.md) (YAML format, field reference, `analyze` pipeline).
 - **Developers** — [`docs/README.md`](docs/README.md) (MkDocs Material bootstrap guide),
   [`openspec/`](openspec/) (spec-driven change proposals), and module docstrings in
   `newsworker/`.
@@ -702,7 +724,7 @@ pip install -e ".[dev]"     # editable install with dev tools
 pip install -r requirements.txt
 
 pre-commit install          # run ruff/format/whitespace hooks on commit
-make test                   # pytest (145+ tests, offline fixtures)
+make test                   # pytest (175+ tests, offline fixtures)
 make lint                   # ruff
 mypy                        # incremental type checking (see [tool.mypy])
 ```

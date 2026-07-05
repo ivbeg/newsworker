@@ -28,7 +28,7 @@ _ROBOTS_LOCK = threading.Lock()
 
 
 def decode_html(html_string):
-    return UnicodeDammit(html_string).unicode_markup
+    return UnicodeDammit(html_string, is_html=True).unicode_markup
 
 
 #: Seconds per relative-date unit (approximate for month/year).
@@ -91,6 +91,45 @@ def parse_fuzzy_date(text, now=None):
     return None
 
 
+_DATETIME_ATTR_RE = re.compile(
+    r"(?P<year>\d{4})-(?P<month>\d{1,2})-(?P<day>\d{1,2})"
+    r"(?:T(?P<hour>\d{1,2}):(?P<minute>\d{1,2})(?::(?P<second>\d{1,2}))?)?"
+)
+
+
+def parse_datetime_attr(value):
+    """Parses an HTML ``datetime`` attribute to a naive ``datetime``, or ``None``.
+
+    Handles ISO-8601 date and date-time strings as emitted by WordPress and
+    other CMSes (including timezone offsets, which are stripped).
+    """
+    if not value:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+    except ValueError:
+        pass
+    m = _DATETIME_ATTR_RE.match(value)
+    if not m:
+        return None
+    parts = {key: int(m.group(key)) for key in ("year", "month", "day") if m.group(key)}
+    if m.group("hour") is not None:
+        parts["hour"] = int(m.group("hour"))
+        parts["minute"] = int(m.group("minute"))
+        if m.group("second") is not None:
+            parts["second"] = int(m.group("second"))
+    try:
+        return datetime.datetime(**parts)
+    except ValueError:
+        return None
+
+
 def find_next_link(document, base_url):
     """Returns the absolute URL of the "next page" link in ``document`` or ``None``.
 
@@ -119,6 +158,17 @@ def find_next_link(document, base_url):
     return None
 
 
+def normalize_language_tag(value):
+    """Returns the primary language subtag from a BCP 47 tag, or ``None``."""
+    if not value:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    primary = re.split(r"[-_]", value, maxsplit=1)[0].lower()
+    return primary or None
+
+
 def detect_html_language(document):
     """Returns the primary language subtag from ``<html lang>``, or ``None``.
 
@@ -128,15 +178,194 @@ def detect_html_language(document):
     if document is None:
         return None
     try:
-        langs = document.xpath("//html/@lang") or document.xpath("//@lang")
+        langs = document.xpath("//html/@lang")
     except Exception:
         return None
     if not langs:
         return None
-    value = (langs[0] or "").strip()
-    if not value:
+    return normalize_language_tag(langs[0])
+
+
+def detect_page_language_metadata(document):
+    """Returns a language subtag from common HTML metadata, or ``None``.
+
+    Checks ``<html lang>``, ``<meta http-equiv="content-language">``,
+    ``og:locale``, and ``<meta name="language">`` in that order.
+    """
+    if document is None:
         return None
-    return value.split("-")[0].lower()
+    queries = (
+        "//html/@lang",
+        (
+            "//meta[translate(@http-equiv, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+            "'abcdefghijklmnopqrstuvwxyz')='content-language']/@content"
+        ),
+        "//meta[@property='og:locale']/@content",
+        "//meta[@name='og:locale']/@content",
+        "//meta[@name='language']/@content",
+    )
+    for query in queries:
+        try:
+            values = document.xpath(query)
+        except Exception:
+            continue
+        for value in values:
+            lang = normalize_language_tag(value)
+            if lang:
+                return lang
+    return None
+
+
+#: Distinctive letters used to guess Latin-script languages from item text.
+_LATIN_LANGUAGE_HINTS = {
+    "de": "äöüßÄÖÜ",
+    "fr": "àâæçéèêëïîôùûüÿœÀÂÆÇÉÈÊËÏÎÔÙÛÜŸŒ",
+    "es": "áéíóúñü¿¡ÁÉÍÓÚÑ",
+    "pt": "ãõáâàçéêíóôúÃÕÁÂÀÇÉÊÍÓÔÚ",
+    "it": "àèéìíîòóùúÀÈÉÌÍÎÒÓÙÚ",
+}
+
+#: Ukrainian-specific Cyrillic letters (vs Russian/Belarusian defaults).
+_UKRAINIAN_CHARS = set("іїєґІЇЄҐ")
+
+
+def _script_counts(text):
+    """Returns rough script counts for ``text``."""
+    counts = {
+        "cyrillic": 0,
+        "greek": 0,
+        "arabic": 0,
+        "hebrew": 0,
+        "hiragana_katakana": 0,
+        "hangul": 0,
+        "cjk": 0,
+        "thai": 0,
+        "devanagari": 0,
+        "latin": 0,
+    }
+    for ch in text:
+        if not ch.isalpha():
+            continue
+        code = ord(ch)
+        if 0x0400 <= code <= 0x04FF:
+            counts["cyrillic"] += 1
+        elif 0x0370 <= code <= 0x03FF:
+            counts["greek"] += 1
+        elif 0x0600 <= code <= 0x06FF:
+            counts["arabic"] += 1
+        elif 0x0590 <= code <= 0x05FF:
+            counts["hebrew"] += 1
+        elif 0x3040 <= code <= 0x30FF:
+            counts["hiragana_katakana"] += 1
+        elif 0xAC00 <= code <= 0xD7AF:
+            counts["hangul"] += 1
+        elif 0x4E00 <= code <= 0x9FFF:
+            counts["cjk"] += 1
+        elif 0x0E00 <= code <= 0x0E7F:
+            counts["thai"] += 1
+        elif 0x0900 <= code <= 0x097F:
+            counts["devanagari"] += 1
+        else:
+            counts["latin"] += 1
+    return counts
+
+
+def _detect_latin_language(text):
+    """Guesses a Latin-script language from distinctive letters in ``text``."""
+    scores = {lang: 0 for lang in _LATIN_LANGUAGE_HINTS}
+    for lang, chars in _LATIN_LANGUAGE_HINTS.items():
+        scores[lang] = sum(text.count(ch) for ch in chars)
+    best_lang, best_score = max(scores.items(), key=lambda item: item[1])
+    if best_score < 2:
+        return None
+    return best_lang
+
+
+def detect_text_language(text):
+    """Guesses a language subtag from visible text, or ``None`` when unsure."""
+    if not text:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    counts = _script_counts(text)
+    letters = sum(counts.values())
+    if letters < 8:
+        return None
+
+    dominant = max(counts, key=counts.get)
+    dominant_count = counts[dominant]
+    if dominant_count < max(8, int(letters * 0.25)):
+        return _detect_latin_language(text)
+
+    if dominant == "cyrillic":
+        if any(ch in _UKRAINIAN_CHARS for ch in text):
+            return "uk"
+        return "ru"
+    if dominant == "greek":
+        return "el"
+    if dominant == "arabic":
+        return "ar"
+    if dominant == "hebrew":
+        return "he"
+    if dominant == "thai":
+        return "th"
+    if dominant == "devanagari":
+        return "hi"
+    if dominant == "hangul":
+        return "ko"
+    if dominant == "hiragana_katakana":
+        return "ja"
+    if dominant == "cjk":
+        if counts["hiragana_katakana"] or counts["hangul"]:
+            return "ja" if counts["hiragana_katakana"] >= counts["hangul"] else "ko"
+        return "zh"
+    return _detect_latin_language(text)
+
+
+def detect_text_language_from_samples(samples):
+    """Votes across multiple text samples and returns the winning language."""
+    votes = {}
+    for sample in samples or []:
+        lang = detect_text_language(sample)
+        if lang:
+            votes[lang] = votes.get(lang, 0) + 1
+    if not votes:
+        return None
+    return max(votes, key=votes.get)
+
+
+def resolve_feed_language(
+    override=None,
+    document=None,
+    content_language=None,
+    stored_language=None,
+    text_samples=None,
+):
+    """Resolves the feed language from overrides, metadata, headers, and text.
+
+    When metadata only declares English (or is absent) but extracted item text
+    clearly indicates another language, the text-based guess wins.
+    """
+    override_lang = normalize_language_tag(override)
+    if override_lang:
+        return override_lang
+
+    meta_lang = detect_page_language_metadata(document)
+    header_lang = normalize_language_tag(content_language)
+    stored_lang = normalize_language_tag(stored_language)
+    text_lang = detect_text_language_from_samples(text_samples)
+
+    if text_lang and text_lang != "en":
+        weak_metadata = meta_lang in (None, "en") and header_lang in (None, "en")
+        weak_stored = stored_lang in (None, "en")
+        if weak_metadata and weak_stored:
+            return text_lang
+
+    for lang in (meta_lang, header_lang, stored_lang, text_lang):
+        if lang:
+            return lang
+    return "en"
 
 
 def _robots_parser_for(root):

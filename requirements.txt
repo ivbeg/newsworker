@@ -6,7 +6,7 @@ pyparsing==3.2.5
 lxml==6.0.2
 cssselect==1.4.0
 beautifulsoup4==4.14.2
-qddate==1.0.4
+qddate==1.0.10
 typer==0.20.0
 feedgen==1.0.0
 PyYAML==6.0.3

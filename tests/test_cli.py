@@ -8,10 +8,14 @@ from typer.testing import CliRunner
 from newsworker import __version__
 from newsworker.core import (
     _apply_item_filters,
+    _configure_fetch_settings,
+    _extractor_from_settings,
     _parse_headers,
     app,
 )
 from newsworker.extractor import FeedExtractor
+from newsworker.settings import Settings
+from newsworker.spec import SpecAnalyzer
 
 
 runner = CliRunner()
@@ -65,6 +69,69 @@ def test_version_flag_prints_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert __version__ in result.stdout
+
+
+def test_analyze_command_fails_when_no_news_items(monkeypatch, caplog):
+    def fake_analyze(self, url, data=None, user_agent=None, require_items=False):
+        if require_items:
+            from newsworker.spec import SpecAnalysisError
+
+            raise SpecAnalysisError("No dated news listings detected on this page")
+        return None
+
+    monkeypatch.setattr(SpecAnalyzer, "analyze", fake_analyze)
+    with caplog.at_level("ERROR"):
+        result = runner.invoke(app, ["analyze", "https://example.com/about"])
+    assert result.exit_code == 1
+    assert "No dated news listings detected on this page" in caplog.text
+
+
+def test_configure_fetch_settings_applies_ignore_robots():
+    settings = Settings()
+    _configure_fetch_settings(settings, ignore_robots=True)
+    assert settings.respect_robots is False
+
+
+def test_extractor_from_settings_respects_fetch_flags():
+    settings = Settings()
+    _configure_fetch_settings(
+        settings,
+        user_agent="MyBot/1.0",
+        ignore_robots=True,
+        insecure=True,
+        timeout=7,
+        proxy="http://proxy:3128",
+        header=["X-Env: test"],
+        language="fr",
+    )
+    ext = _extractor_from_settings(settings)
+    assert ext.respect_robots is False
+    assert ext.verify_tls is False
+    assert ext.timeout == 7
+    assert ext.proxy == "http://proxy:3128"
+    assert ext.extra_headers["X-Env"] == "test"
+    assert ext.default_language == "fr"
+
+
+def test_analyze_command_forwards_ignore_robots(monkeypatch):
+    captured = {}
+
+    def fake_init(self, extractor=None, filtered_text_length=150):
+        captured["respect_robots"] = extractor.respect_robots
+
+    def fake_analyze(self, url, data=None, user_agent=None, require_items=False):
+        from newsworker.spec import FeedSpec
+
+        return FeedSpec(source_url=url)
+
+    monkeypatch.setattr(SpecAnalyzer, "__init__", fake_init)
+    monkeypatch.setattr(SpecAnalyzer, "analyze", fake_analyze)
+
+    result = runner.invoke(
+        app, ["analyze", "https://example.com/news", "--ignore-robots"]
+    )
+    assert result.exit_code == 0
+    assert captured["respect_robots"] is False
 
 
 class _FakeResponse:

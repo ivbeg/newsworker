@@ -13,6 +13,7 @@ import typer
 from newsworker import __version__
 from newsworker.cache import ContentCache, SpecCache
 from newsworker.finder import FeedsFinder
+from newsworker.extractor import FeedExtractor
 from newsworker.spec import FeedSpec, SpecAnalyzer
 from newsworker.service import FeedService
 from newsworker.settings import Settings
@@ -81,6 +82,53 @@ def _item_date(item):
     if isinstance(pubdate, datetime.date):
         return pubdate
     return None
+
+
+def _configure_fetch_settings(
+    settings,
+    *,
+    user_agent=None,
+    insecure=False,
+    ignore_robots=False,
+    timeout=None,
+    proxy=None,
+    header=None,
+    cookies=None,
+    language=None,
+):
+    """Applies CLI fetch flags to ``settings`` (shared by ``extract`` and ``analyze``)."""
+    settings.user_agent = user_agent or USER_AGENT
+    settings.filtered_text_length = DEFAULT_FILTERED_TEXT_URL
+    if insecure:
+        settings.verify_tls = False
+    if ignore_robots:
+        settings.respect_robots = False
+    if timeout is not None:
+        settings.request_timeout = timeout
+    if proxy:
+        settings.proxy = proxy
+    if header:
+        settings.extra_headers = {**settings.extra_headers, **_parse_headers(header)}
+    if cookies:
+        settings.cookies_file = cookies
+    if language:
+        settings.default_language = language
+    return settings
+
+
+def _extractor_from_settings(settings):
+    """Builds a :class:`FeedExtractor` from resolved :class:`Settings`."""
+    return FeedExtractor(
+        filtered_text_length=settings.filtered_text_length,
+        max_bytes=settings.max_content_bytes,
+        verify_tls=settings.verify_tls,
+        respect_robots=settings.respect_robots,
+        timeout=settings.request_timeout,
+        proxy=settings.proxy,
+        extra_headers=settings.extra_headers,
+        cookies_file=settings.cookies_file,
+        default_language=settings.default_language,
+    )
 
 
 def _apply_item_filters(feed, since=None, until=None, limit=None):
@@ -196,6 +244,57 @@ def analyze(
         "-o",
         help="Path to write the YAML spec to. Prints to stdout when omitted.",
     ),
+    user_agent: Optional[str] = typer.Option(
+        None,
+        "--user-agent",
+        help="Override the User-Agent used for fetching.",
+    ),
+    language: Optional[str] = typer.Option(
+        None,
+        "--language",
+        help="Override the auto-detected feed language (e.g. 'en', 'fr').",
+    ),
+    proxy: Optional[str] = typer.Option(
+        None,
+        "--proxy",
+        help="Proxy URL for outgoing requests (e.g. http://host:port).",
+    ),
+    timeout: Optional[int] = typer.Option(
+        None,
+        "--timeout",
+        help="HTTP request timeout in seconds.",
+    ),
+    header: Optional[List[str]] = typer.Option(
+        None,
+        "--header",
+        help="Extra HTTP header 'Key: Value' (repeatable).",
+    ),
+    cookies: Optional[str] = typer.Option(
+        None,
+        "--cookies",
+        help="Path to a Netscape/Mozilla cookie jar file.",
+    ),
+    insecure: bool = typer.Option(
+        False,
+        "--insecure",
+        help="Disable TLS certificate verification for this run (not recommended).",
+    ),
+    ignore_robots: bool = typer.Option(
+        False,
+        "--ignore-robots",
+        help="Fetch even when the site's robots.txt disallows it.",
+    ),
+    config: Optional[str] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to a settings YAML file. Defaults to ~/.newsworker/config.yaml.",
+    ),
+    json_logs: bool = typer.Option(
+        False,
+        "--json-logs",
+        help="Emit logs as structured JSON.",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -206,9 +305,23 @@ def analyze(
     """Analyze a web page and generate a reusable YAML parsing spec"""
     if verbose:
         enableVerbose()
+    if json_logs:
+        enableJsonLogs()
     try:
-        analyzer = SpecAnalyzer(filtered_text_length=DEFAULT_FILTERED_TEXT_URL)
-        spec = analyzer.analyze(url, user_agent=USER_AGENT)
+        settings = Settings.load(config)
+        _configure_fetch_settings(
+            settings,
+            user_agent=user_agent,
+            insecure=insecure,
+            ignore_robots=ignore_robots,
+            timeout=timeout,
+            proxy=proxy,
+            header=header,
+            cookies=cookies,
+            language=language,
+        )
+        analyzer = SpecAnalyzer(extractor=_extractor_from_settings(settings))
+        spec = analyzer.analyze(url, user_agent=settings.user_agent, require_items=True)
         yaml_text = spec.to_yaml()
         if output:
             spec.save(output)
@@ -359,22 +472,17 @@ def extract(
         sys.exit(2)
     try:
         settings = Settings.load(config)
-        settings.user_agent = user_agent or USER_AGENT
-        settings.filtered_text_length = DEFAULT_FILTERED_TEXT_URL
-        if insecure:
-            settings.verify_tls = False
-        if ignore_robots:
-            settings.respect_robots = False
-        if timeout is not None:
-            settings.request_timeout = timeout
-        if proxy:
-            settings.proxy = proxy
-        if header:
-            settings.extra_headers = {**settings.extra_headers, **_parse_headers(header)}
-        if cookies:
-            settings.cookies_file = cookies
-        if language:
-            settings.default_language = language
+        _configure_fetch_settings(
+            settings,
+            user_agent=user_agent,
+            insecure=insecure,
+            ignore_robots=ignore_robots,
+            timeout=timeout,
+            proxy=proxy,
+            header=header,
+            cookies=cookies,
+            language=language,
+        )
         if full_text:
             settings.full_text = True
         service = FeedService(settings=settings, use_cache=not no_cache)

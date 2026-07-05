@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def decode_html(html_string):
-    converted = UnicodeDammit(html_string)
+    converted = UnicodeDammit(html_string, is_html=True)
     return converted.unicode_markup
 
 

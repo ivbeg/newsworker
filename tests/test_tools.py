@@ -1,4 +1,15 @@
-from newsworker.tools import clean_url, clean_urlquery, get_abs_url
+from newsworker.tools import clean_url, clean_urlquery, decode_html, get_abs_url
+
+# UTF-8 Russian news page (meta charset must be honored; byte-sniffing alone
+# misdetects Cyrillic as macroman).
+_CYRILLIC_NEWS_HTML = b"""<!doctype html>
+<html lang="ru-RU">
+<head>
+\t<meta charset="UTF-8">
+\t<title>\xd0\x9d\xd0\xbe\xd0\xb2\xd0\xbe\xd1\x81\xd1\x82\xd0\xb8</title>
+</head>
+<body><h1>\xd0\x9d\xd0\xbe\xd0\xb2\xd0\xbe\xd1\x81\xd1\x82\xd0\xb8</h1></body>
+</html>"""
 
 
 def test_clean_url_strips_tracking_params():
@@ -50,3 +61,10 @@ def test_get_abs_url_keeps_absolute_url():
 
 def test_get_abs_url_scheme_less_base():
     assert get_abs_url("example.com/news", "/1") == "http://example.com/1"
+
+
+def test_decode_html_honors_utf8_meta_charset():
+    """Regression: Cyrillic UTF-8 pages must not be misread as macroman."""
+    decoded = decode_html(_CYRILLIC_NEWS_HTML)
+    assert "Новости" in decoded
+    assert "–ù–æ–²–æ" not in decoded
