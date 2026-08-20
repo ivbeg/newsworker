@@ -65,6 +65,8 @@ instance/
 
 # Static documentation sites
 docs/_build/
+docs/node_modules/
+docs/.docusaurus/
 site/
 
 # PyBuilder

@@ -26,6 +26,7 @@ The extracted feed can be emitted as **JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML
   - [Plugins, bridges and async transport](#plugins-bridges-and-async-transport)
   - [`watch` — poll a page and deliver only new items](#watch--poll-a-page-and-deliver-only-new-items)
   - [`cache` — inspect and manage caches](#cache--inspect-and-manage-caches)
+  - [`spec` — validate a parsing spec](#spec--validate-a-parsing-spec)
   - [`parsedate` — inspect date parsing](#parsedate--inspect-date-parsing)
 - [Settings and caching](#settings-and-caching)
 - [Output formats](#output-formats)
@@ -56,13 +57,14 @@ The result is a structured feed you can serialize into whatever format you need.
 
 ## Installation
 
-Requires **Python 3.7+**.
+Requires **Python 3.9+**.
 
 ```bash
 pip install newsworker              # runtime
 pip install -e ".[dev]"             # editable + pytest, ruff, mypy, pre-commit
 pip install newsworker[fulltext]    # optional: trafilatura for --full-text
 pip install newsworker[async]       # optional: aiohttp for batch --async
+pip install newsworker[browser]     # optional: Playwright rendering via --render
 pip install newsworker[metrics]     # optional: Prometheus /metrics endpoint
 ```
 
@@ -121,7 +123,7 @@ for item in feed["items"]:
 
 ## Command-line interface
 
-The package installs a single `newsworker` executable exposing eight commands:
+The package installs a single `newsworker` executable exposing these commands:
 
 ```text
 newsworker [COMMAND] [ARGS] [OPTIONS]
@@ -134,6 +136,7 @@ Commands:
   batch      Extract feeds from many pages concurrently
   watch      Poll a page and emit/deliver only new items
   cache      Inspect and manage the spec and content caches
+  spec       Validate a parsing spec without fetching
   parsedate  Parse a date/time string (debugging helper)
 ```
 
@@ -293,7 +296,7 @@ newsworker scan "https://www.dta.gov.au/news/" -f rss
 
 Runs the dynamic heuristics once and distills them into a portable **YAML parsing spec**. Feeding that spec back into `extract --spec` skips the expensive analysis step and runs deterministic selectors, which is far faster on repeat crawls of the same layout.
 
-Full spec format, field reference, and analysis pipeline: [`docs/SPEC.md`](docs/SPEC.md).
+Full spec format, field reference, and analysis pipeline: [parsing specs](docs/docs/guides/parsing-specs.md).
 
 ```bash
 newsworker analyze URL [OPTIONS]
@@ -415,6 +418,14 @@ newsworker cache stats            # entry counts and total size per cache
 newsworker cache list             # list cached entries
 newsworker cache clear            # delete all cached specs and content
 newsworker cache clear --content  # scope to a single cache (--specs / --content)
+```
+
+### `spec` — validate a parsing spec
+
+Validates a YAML parsing spec without fetching its source URL.
+
+```bash
+newsworker spec validate example.yaml
 ```
 
 ### `parsedate` — inspect date parsing
@@ -639,7 +650,7 @@ print(format_scan(results, fmt="opml"))
 - Very fast pattern matching built on `pyparsing`.
 - Discovers existing RSS/Atom feeds (`scan`), including optional **sitemap.xml** lookup, and falls back to HTML extraction when none exist.
 - Multiple output formats for `extract` (JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML, Markdown, YAML) and `scan` (JSON, RSS, Atom, CSV, OPML).
-- Reusable YAML **specs** for fast, deterministic re-crawling of known layouts (documented in [`docs/SPEC.md`](docs/SPEC.md)); **site bridges** for host/path overrides.
+- Reusable YAML **specs** for fast, deterministic re-crawling of known layouts (documented in [parsing specs](docs/docs/guides/parsing-specs.md)); **site bridges** for host/path overrides.
 - **Third-party plugins** via the `newsworker.extractors` entry-point group.
 - Local **feed server** with conditional GET (`ETag`/`304`), optional Prometheus metrics, and Docker/Compose deployment.
 - **Batch** and **watch** workflows with deduplication, webhooks, and optional async fetching.
@@ -651,9 +662,9 @@ print(format_scan(results, fmt="opml"))
 
 ## Supported languages
 
-Language-specific date recognition currently covers:
-
-Bulgarian · Czech · English · French · German · Portuguese · Russian · Spanish · Ukrainian
+Fixture-backed full date/extraction support currently covers English, French, German,
+Italian, Portuguese, Russian, and Spanish. Bulgarian, Czech, Ukrainian, and additional
+script detectors are partial; see [language support](docs/docs/guides/language-support.md).
 
 ---
 
@@ -692,6 +703,7 @@ Bulgarian · Czech · English · French · German · Portuguese · Russian · Sp
 | --- | --- | --- |
 | `fulltext` | trafilatura | `extract --full-text` |
 | `async` | aiohttp | `batch --async` |
+| `browser` | playwright | `extract --render` |
 | `metrics` | prometheus_client | `GET /metrics` on the feed server |
 | `dev` | pytest, ruff, mypy, pre-commit, build, twine | local development and CI parity |
 
@@ -699,15 +711,22 @@ Bulgarian · Czech · English · French · German · Portuguese · Russian · Sp
 
 ## Documentation
 
-- **Users** — this README (install, CLI, settings, output formats).
-- **Parsing specs** — [`docs/SPEC.md`](docs/SPEC.md) (YAML format, field reference, `analyze` pipeline).
-- **Developers** — [`docs/README.md`](docs/README.md) (MkDocs Material bootstrap guide),
-  [`openspec/`](openspec/) (spec-driven change proposals), and module docstrings in
-  `newsworker/`.
-- **Performance notes** — [`docs/PERFORMANCE_ANALYSIS.md`](docs/PERFORMANCE_ANALYSIS.md).
+The full documentation site lives in [`docs/`](docs/) (Docusaurus) and is published at
+[ivbeg.github.io/newsworker](https://ivbeg.github.io/newsworker/).
 
-Stale Sphinx/autodoc stubs were removed; the README and OpenSpec specs are canonical until
-a MkDocs site is adopted (see `docs/README.md`).
+```bash
+make docs-serve    # local preview (Node.js 18+)
+make docs          # production build
+```
+
+- [Getting started](docs/docs/getting-started/quick-start.md) — install, first extract, cookbook
+- [CLI reference](docs/docs/commands/index.md) — `extract`, `serve`, `scan`, `analyze`, `batch`, `watch`
+- [Parsing specs](docs/docs/guides/parsing-specs.md) — YAML format, field reference, `analyze` pipeline
+- [Runtime configuration](docs/docs/guides/runtime-configuration.md) — CLI / env / YAML precedence
+- [Security](docs/docs/guides/security.md) — fetch policy and server access controls
+- [Contributing](docs/docs/development/contributing.md) — local checks and OpenSpec workflow
+
+Spec-driven change proposals remain in [`openspec/`](openspec/).
 
 ---
 
@@ -730,6 +749,7 @@ mypy                        # incremental type checking (see [tool.mypy])
 ```
 
 Spec-driven changes live under `openspec/`; see `openspec/AGENTS.md` before adding features.
+Documentation changes belong under `docs/docs/`; preview with `make docs-serve`.
 
 ---
 

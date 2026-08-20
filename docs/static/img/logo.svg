@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="newsworker">
+  <rect width="64" height="64" rx="14" fill="#0e7490"/>
+  <rect x="14" y="16" width="36" height="32" rx="3" fill="#ecfeff"/>
+  <rect x="18" y="21" width="16" height="3" rx="1.5" fill="#0e7490"/>
+  <rect x="18" y="28" width="28" height="2" rx="1" fill="#67e8f9"/>
+  <rect x="18" y="33" width="28" height="2" rx="1" fill="#67e8f9"/>
+  <rect x="18" y="38" width="20" height="2" rx="1" fill="#67e8f9"/>
+</svg>

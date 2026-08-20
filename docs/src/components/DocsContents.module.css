@@ -1,0 +1,46 @@
+.contents {
+  padding: 2.5rem 0 4rem;
+}
+
+.heading {
+  margin-bottom: 0.5rem;
+}
+
+.intro {
+  margin-bottom: 1.75rem;
+  max-width: 46rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.card {
+  padding: 1.25rem 1.35rem 1.1rem;
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 10px;
+}
+
+.cardTitle {
+  margin-bottom: 0.4rem;
+  font-size: 1.2rem;
+}
+
+.cardDescription {
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.linkList {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.linkList li {
+  margin: 0.2rem 0;
+}

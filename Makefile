@@ -1,4 +1,4 @@
-.PHONY: help clean clean-pyc clean-build clean-test lint test coverage release dist
+.PHONY: help clean clean-pyc clean-build clean-test lint test coverage release dist docs docs-serve
 SHELL := /bin/bash
 
 help:
@@ -11,6 +11,8 @@ help:
 	@echo "coverage - run tests and report coverage"
 	@echo "release - build and upload a release with twine"
 	@echo "dist - build sdist and wheel"
+	@echo "docs - build the Docusaurus documentation site"
+	@echo "docs-serve - run the Docusaurus development server"
 
 clean: clean-build clean-pyc clean-test
 
@@ -48,3 +50,9 @@ release: dist
 dist: clean
 	python -m build
 	ls -l dist
+
+docs:
+	cd docs && npm ci && npm run build
+
+docs-serve:
+	cd docs && npm start

@@ -7,14 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Reorganized documentation into a Docusaurus site under `docs/` (Getting
+  Started, Use Cases, CLI Reference, Guides, Integrations, Development), with a
+  GitHub Pages workflow at `.github/workflows/deploy-docs.yml`.
+
 ## [1.3.0] - 2026-07-05
 
 Extraction quality, spec analysis, and language detection improvements. See
-[`docs/SPEC.md`](docs/SPEC.md) for the YAML spec format and `analyze` pipeline.
+[parsing specs](docs/docs/guides/parsing-specs.md) for the YAML spec format and `analyze` pipeline.
 
 ### Added
-- **`docs/SPEC.md`** — parsing spec format, field reference, selector conventions, and
-  the full `analyze` pipeline (also linked from the README and `docs/README.md`).
+- **Parsing spec docs** — YAML format, field reference, selector conventions, and
+  the full `analyze` pipeline (now at `docs/docs/guides/parsing-specs.md`).
 - **HTML `<time datetime="...">` support** — dynamic extraction and specs recognize
   ISO-8601 `datetime` attributes via the `html:time` pattern; `SpecAnalyzer` emits
   `source: attr:datetime` for these fields.
