@@ -37,32 +37,11 @@ def decode_html(html_string):
     return UnicodeDammit(html_string, is_html=True).unicode_markup
 
 
-#: Seconds per relative-date unit (approximate for month/year).
-_FUZZY_UNIT_SECONDS = {
-    "second": 1,
-    "sec": 1,
-    "minute": 60,
-    "min": 60,
-    "hour": 3600,
-    "hr": 3600,
-    "day": 86400,
-    "week": 604800,
-    "month": 2592000,
-    "year": 31536000,
-}
-
-_FUZZY_UNIT_ALT = "|".join(sorted(_FUZZY_UNIT_SECONDS, key=len, reverse=True))
-_FUZZY_NUMERIC_RE = re.compile(r"\b(\d+)\s+(%s)s?\s+ago\b" % _FUZZY_UNIT_ALT, re.IGNORECASE)
-_FUZZY_ARTICLE_RE = re.compile(r"\b(?:a|an)\s+(%s)\s+ago\b" % _FUZZY_UNIT_ALT, re.IGNORECASE)
-_FUZZY_KEYWORDS = ("ago", "yesterday", "today", "just now", "moments ago", "a moment ago")
-
-
 def looks_like_fuzzy_date(text):
-    """Cheap check: does ``text`` plausibly contain a relative date phrase?"""
-    if not text:
-        return False
-    low = text.lower()
-    return any(kw in low for kw in _FUZZY_KEYWORDS)
+    """Cheap check for a relative date keyword ("ago", "вчера", "hace", ...)."""
+    from .relative import looks_relative
+
+    return looks_relative(text)
 
 
 def normalize_datetime(value, default_timezone="UTC"):
@@ -83,30 +62,13 @@ def normalize_datetime(value, default_timezone="UTC"):
 def parse_fuzzy_date(text, now=None, default_timezone="UTC"):
     """Resolves a relative date expression to a ``datetime``, or ``None``.
 
-    Handles "just now"/"now", "today", "yesterday", "N <unit> ago" and
-    "a/an <unit> ago" for seconds through years. ``now`` is injectable for tests.
+    Understands "just now", "today", "yesterday [at 14:30]" and "N <unit> ago"
+    in English, Russian, Ukrainian, German, French, Spanish, Italian and
+    Portuguese. ``now`` is injectable for tests.
     """
-    if not text:
-        return None
-    if now is None:
-        now = datetime.datetime.now(datetime.timezone.utc)
-    s = text.strip().lower()
-    if s in ("just now", "now", "moments ago", "a moment ago"):
-        return now
-    if s == "today":
-        return now
-    if s == "yesterday":
-        return now - datetime.timedelta(days=1)
-    m = _FUZZY_NUMERIC_RE.search(s)
-    if m:
-        amount = int(m.group(1))
-        unit = m.group(2).lower()
-        return now - datetime.timedelta(seconds=amount * _FUZZY_UNIT_SECONDS[unit])
-    m = _FUZZY_ARTICLE_RE.search(s)
-    if m:
-        unit = m.group(1).lower()
-        return now - datetime.timedelta(seconds=_FUZZY_UNIT_SECONDS[unit])
-    return None
+    from .relative import parse_relative
+
+    return parse_relative(text, now=now, default_timezone=default_timezone)
 
 
 _DATETIME_ATTR_RE = re.compile(

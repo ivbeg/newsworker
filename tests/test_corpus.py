@@ -18,10 +18,20 @@ CORPUS = pathlib.Path(__file__).parent / "corpus"
 FULLY_SUPPORTED = {"en", "ru", "de", "fr", "es", "it", "pt"}
 
 
-def _qddate_reads_ukrainian_months():
-    from qddate import DateParser
+def _qddate_reads(case, parser):
+    """Whether the installed qddate understands every printed date of a case.
 
-    return DateParser(generate=True).match("16 жовтня 2025") is not None
+    Cases whose dates qddate cannot read (Ukrainian month names before qddate
+    1.0.13, Portuguese "maio" before 1.0.16) measure qddate, not newsworker,
+    so they count in the totals but are not required to be exact.
+    """
+    from newsworker.relative import parse_relative
+
+    for want in case["expected"]:
+        text = want.get("date_text")
+        if text and parser.match(text) is None and parse_relative(text) is None:
+            return False
+    return True
 
 
 @pytest.fixture(scope="module")
@@ -31,7 +41,7 @@ def corpus_score():
 
 def test_corpus_totals_meet_the_quality_floor(corpus_score):
     summary = corpus_score.summary()
-    assert summary["cases"] >= 180
+    assert summary["cases"] >= 200
     assert summary["precision"] >= 0.98, corpus_score.to_markdown()
     assert summary["recall"] >= 0.92, corpus_score.to_markdown()
     assert summary["title_accuracy"] >= 0.98, corpus_score.to_markdown()
@@ -39,19 +49,25 @@ def test_corpus_totals_meet_the_quality_floor(corpus_score):
 
 
 def test_fully_supported_languages_extract_every_case_exactly(corpus_score):
-    cases = json.loads((CORPUS / "cases.json").read_text(encoding="utf-8"))["cases"]
-    language = {case["name"]: case["language"] for case in cases}
-    style = {case["name"]: case["date_style"] for case in cases}
-    ukrainian_words = _qddate_reads_ukrainian_months()
+    from qddate import DateParser
+
+    parser = DateParser(generate=True)
+    cases = {
+        case["name"]: case
+        for case in json.loads((CORPUS / "cases.json").read_text(encoding="utf-8"))["cases"]
+    }
     failures = [
         f"{case.name}: precision {case.precision:.2f}, recall {case.recall:.2f}, "
         f"missing {case.missing[:2]}, unexpected {case.unexpected[:2]}"
         for case in corpus_score.cases
-        if (
-            language[case.name] in FULLY_SUPPORTED
-            or (language[case.name] == "uk" and (style[case.name] != "long" or ukrainian_words))
+        if cases[case.name]["language"] in FULLY_SUPPORTED | {"uk"}
+        and _qddate_reads(cases[case.name], parser)
+        and (
+            case.precision < 1.0
+            or case.recall < 1.0
+            or case.titles_correct < case.matched
+            or case.dates_correct < case.dates_expected
         )
-        and (case.precision < 1.0 or case.recall < 1.0 or case.titles_correct < case.matched)
     ]
     assert not failures, "\n".join(failures)
 

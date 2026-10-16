@@ -107,6 +107,8 @@ class Settings:
     # Optional extraction strategies.
     render: bool = False
     render_fallback: bool = False
+    # Use JSON-LD / microdata article lists (exact dates) when present.
+    structured_data: bool = True
     render_timeout: int = 15
     render_concurrency: int = 1
     render_max_bytes: int = 10 * 1024 * 1024
