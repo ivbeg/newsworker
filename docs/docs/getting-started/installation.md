@@ -5,7 +5,7 @@ description: "Install newsworker with pip or from source, including optional ext
 
 # Installation
 
-Requires **Python 3.9+**.
+Requires **Python 3.10+**.
 
 ### Using pip
 
@@ -56,7 +56,7 @@ Run the feed server in a container (binds to `0.0.0.0:8787`):
 
 ```bash
 docker build -t newsworker .
-docker run --rm -p 8787:8787 -v newsworker-home:/home/newsworker/.newsworker newsworker
+docker run --rm -p 127.0.0.1:8787:8787 -v newsworker-home:/home/newsworker/.newsworker newsworker
 ```
 
 Or with Compose (persists config/cache in a named volume):
@@ -69,7 +69,7 @@ See [Docker](/integrations/docker) for security notes on publishing the port.
 
 ### Requirements
 
-- Python 3.9 or greater
+- Python 3.10 or greater
 - An outbound HTTP(S) path to the pages you extract (unless you use [local input](/guides/local-input))
 
 ## Next steps

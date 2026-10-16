@@ -29,10 +29,19 @@ from newsworker.spec import FeedSpec, SpecAnalyzer
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11"
 DEFAULT_FILTERED_TEXT_URL = 150
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.WARNING,
-)
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+
+def configure_logging():
+    """Install the CLI's root log handler; library imports leave logging alone."""
+    logging.basicConfig(format=LOG_FORMAT, level=logging.WARNING)
+
+
+def _silence_insecure_warnings():
+    """``--insecure`` is an explicit choice, so do not warn on every request."""
+    import urllib3
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def enableVerbose():
@@ -136,6 +145,7 @@ def _resolve_fetch_settings(
         cli["user_agent"] = user_agent
     if insecure:
         cli["verify_tls"] = False
+        _silence_insecure_warnings()
     if ignore_robots:
         cli["respect_robots"] = False
     if timeout is not None:
@@ -1200,8 +1210,5 @@ def parsedate(
 
 def cli():
     """Main CLI entry point"""
+    configure_logging()
     app()
-
-
-# if __name__ == '__main__':
-#    cli()

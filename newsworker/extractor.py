@@ -1,21 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-""" """
+"""Dynamic, date-driven news extraction from HTML pages (the original algorithm)."""
 
 import contextvars
-import datetime
 import hashlib
 from copy import copy
 
 import requests
-import urllib3
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-# Suppress InsecureRequestWarning for unverified HTTPS requests
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from lxml import etree
 from lxml.html import fromstring
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .consts import (
     TAG_TYPE_BOLD,
@@ -25,6 +20,7 @@ from .consts import (
     TAG_TYPE_TAIL,
     TAG_TYPE_TEXT,
 )
+from .dates import build_match_datetime, end_session, start_session
 from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport
 from .runtime import ExtractionContext
 from .tagmapper import TagBlock, TagPath
@@ -34,7 +30,6 @@ from .tools import (
     decode_html,
     get_abs_url,
     looks_like_fuzzy_date,
-    normalize_datetime,
     parse_datetime_attr,
     parse_fuzzy_date,
     resolve_feed_language,
@@ -214,28 +209,22 @@ class FeedExtractor:
         if text is None:
             return False, None, None, None, None
         res = self.indexer.match(text)
-        #        print('Compare %s ' % (text))
         if self.session:
             self.session["debug"]["num_textcompared"] += 1
-        #        self.log.save('match_text', 'Text %s against patterns, result %s' % (text, str(p)))
         if res:
-            r = res["values"]
             p = res["pattern"]
-            d = {"month": 0, "day": 0, "year": 0}
-            if "noyear" in p and p["noyear"] == True:
-                d["year"] = datetime.datetime.now().year
-            for k, v in list(r.items()):
-                d[k] = int(v)
-            try:
-                the_date = normalize_datetime(
-                    datetime.datetime(**d), self._context().default_timezone
-                )
-                if self.session:
-                    self.session["debug"]["num_matched"] += 1
-                return True, p["key"], p, text, the_date
-            except (ValueError, TypeError, KeyError) as e:
-                self.log.save("match_text", f"Failed to create datetime: {e}")
+            the_date = build_match_datetime(
+                res,
+                text,
+                now=self._context().clock(),
+                default_timezone=self._context().default_timezone,
+            )
+            if the_date is None:
+                self.log.save("match_text", "Rejected implausible or invalid date %r" % text)
                 return False, None, None, None, None
+            if self.session:
+                self.session["debug"]["num_matched"] += 1
+            return True, p["key"], p, text, the_date
         fuzzy_date = parse_fuzzy_date(
             text, now=self._context().clock(), default_timezone=self._context().default_timezone
         )
@@ -270,8 +259,6 @@ class FeedExtractor:
             text_2 = str(node.tail.strip("/\\«[]»").strip().replace("\xa0", " "))
         if text_1 is None and text_2 is None:
             return None, None, None, None, None
-        #        self.log.save('match_date', 'Matching date text: ' + unicode(text_1))
-        #        self.log.save('match_date', 'Matching date tail: ' + unicode(text_2))
         if text_1 is not None:
             results = self.match_text(text_1)
             if results[0] is True:
@@ -389,7 +376,7 @@ class FeedExtractor:
             snode = node_info["snode"]
             nodes = node_info["nodes"]
             if snode.tag == "table":
-                for ch in snode.getchildren():
+                for ch in list(snode):
                     if ch.tag == "tbody":
                         snode = ch
                         break
@@ -434,7 +421,7 @@ class FeedExtractor:
                     )
                     res.append(block)
             else:
-                diff = len(snode.getchildren()) - data[i]
+                diff = len(list(snode)) - data[i]
                 if len(data) > 1:
                     block = TagBlock(snode, snode_path, data[i], diff)
                 else:
@@ -727,8 +714,15 @@ class FeedExtractor:
     def _get_feed_active(self, url, data=None, user_agent=None, cached_p=None):
         """Return feed from url"""
         self.init_session()
-        if cached_p is not None:
-            self.indexer.startSession(cached_p)
+        if cached_p is None:
+            return self._build_feed(url, data, user_agent)
+        start_session(self.indexer, cached_p)
+        try:
+            return self._build_feed(url, data, user_agent)
+        finally:
+            end_session(self.indexer)
+
+    def _build_feed(self, url, data, user_agent):
         if data is None:
             data = self.fetch(url, user_agent)
             self.log.save("get_rss", "Url fetched %s" % (url))
@@ -761,8 +755,6 @@ class FeedExtractor:
                 stored_language=feed.get("language"),
                 text_samples=samples,
             )
-        if cached_p is not None:
-            self.indexer.endSession()
         self.log.save("get_rss", "End of log")
         session = self.clear_session()
         return feed, session

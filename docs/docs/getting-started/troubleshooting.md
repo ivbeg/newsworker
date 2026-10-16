@@ -50,7 +50,7 @@ newsworker spec validate example.yaml
 
 - HTML offsets are converted to timezone-aware UTC instants.
 - Naive qddate/fuzzy values use `default_timezone` (UTC by default).
-- RSS/Atom require UTC; timezone-naive HTML dates are treated as UTC.
+- Publication dates are UTC instants. Offsets written on the page (`+0300`, `GMT+3`, `<time datetime>`) are honoured; other dates use the `default_timezone` setting.
 
 See [migration notes](/guides/migration-1-4).
 

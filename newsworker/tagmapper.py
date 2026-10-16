@@ -183,10 +183,10 @@ class TagBlock:
 
     def as_html(self):
         if self.shift is None:
-            return etree.tostring(self.__root_node.getchildren()[self.position], encoding="utf8")
+            return etree.tostring(list(self.__root_node)[self.position], encoding="utf8")
         else:
             s = None
-            ch = self.__root_node.getchildren()
+            ch = list(self.__root_node)
             wlen = len(ch)
             for i in range(0, self.shift):
                 if self.position + i < wlen:
@@ -199,22 +199,15 @@ class TagBlock:
     def identify_entities(self, node=None, parent_id=None):
         """Identifies tag entries as different data types"""
         annotations = []
-        #        logging.info('Node: %s' %(str(node)))
         if node is None and self.shift is None:
             node = self.__root_node[self.position]
         elif node is None:
-            #            logging.info(u'Root node: %s' %(unicode(self.__root_node)))
-            #            logging.info(u'Position %d shift %d' %(self.position, self.shift))
-            #            logging.info(u'Ch nodes: %s' %(unicode(self.__root_node.getchildren())))
-            #            print len(self.__root_node.getchildren()[1].getchildren())
-            for node in self.__root_node.getchildren()[self.position : self.position + self.shift]:
-                #            print node
+            for node in list(self.__root_node)[self.position : self.position + self.shift]:
                 if node is not None:
                     annotations.extend(self.identify_entities(node))
             return annotations
-        #        logging.info('Node cor: %s' %(str(node)))
         ch = node
-        ch_childs = ch.getchildren()
+        ch_childs = list(ch)
         attrs = []
         if (
             ch.text
@@ -268,19 +261,16 @@ class TagBlock:
                 htmlattrs,
             )
         )
-        #       print 'Childs', ch_childs, ch
-        #    logging.info('Node childs: %s' %(ch_childs))
         for child in ch_childs:
             if child is not None:
                 annotations.extend(self.identify_entities(child, aid))
-            #                print 'Anns', annotations
         return annotations
 
     def print_block(self):
         """Prints this tag block"""
         if self.shift is None:
-            print(etree.tostring(self.__root_node.getchildren()[self.position], encoding="utf8"))
+            print(etree.tostring(list(self.__root_node)[self.position], encoding="utf8"))
         else:
-            ch = self.__root_node.getchildren()
+            ch = list(self.__root_node)
             for i in range(0, self.shift):
                 print(etree.tostring(ch[self.position + i], encoding="utf8"))
