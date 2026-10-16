@@ -92,8 +92,13 @@ def run_watch_iteration(
     max_pages,
     *,
     channels=None,
+    deliver_updates=False,
 ):
     """One watch tick: drain due deliveries, poll the page, deliver new items.
+
+    Every item seen is recorded in the item history. With ``deliver_updates``
+    an item whose visible content changed is delivered again, once per
+    version, marked ``updated``.
 
     Deliveries already queued are attempted before the page is fetched, so a
     source outage does not hold back items discovered earlier.
@@ -162,6 +167,13 @@ def run_watch_iteration(
         fetch_error = f"{type(exc).__name__}: {exc}"
         logging.error("Watch fetch failed for %s: %s", url, exc)
     items = (feed or {}).get("items", [])
+    if dedup is not None and feed is not None:
+        updated = dedup.record_items(url, items)
+        if deliver_updates:
+            # A distinct identity per version: the outbox delivers each once.
+            items = items + [
+                {**item, "unique_id": f"{dedup._uid(item)}@v{item['version']}"} for item in updated
+            ]
 
     if dedup is None:
         for channel in channels:

@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowed qddate session active for later requests.
 
 ### Added
+- **Item history and update notifications** — `watch` records every item with
+  first/last-seen times and a version that grows when its title, text, link or
+  date changes. `newsworker history` exports it as JSON Lines or CSV;
+  `watch --deliver-updates` delivers each new version once, marked `updated`.
+  History is pruned after `history_retention_days` (365).
 - **Release automation** — pushing a `vX.Y.Z` tag checks the version, builds
   and validates the distributions, creates the GitHub release from the
   CHANGELOG, and publishes a multi-arch image to `ghcr.io/ivbeg/newsworker`.

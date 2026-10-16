@@ -112,6 +112,8 @@ class Settings:
     delivery_retries: int = 3
     delivery_backoff: float = 1.0
     delivered_retention_days: int = 30
+    # Item history kept by watch (0 = keep forever).
+    history_retention_days: int = 365
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -244,6 +246,7 @@ class Settings:
             "per_host_concurrency": self.per_host_concurrency,
             "per_host_delay": self.per_host_delay,
             "max_host_wait": self.max_host_wait,
+            "history_retention_days": self.history_retention_days,
         }
         for name, value in nonnegative.items():
             if value < 0:

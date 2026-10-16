@@ -58,6 +58,14 @@ class DedupStore:
             "UNIQUE(feed, uid, channel, destination))"
         )
         self._conn.execute("CREATE INDEX IF NOT EXISTS outbox_due ON outbox(status, next_attempt)")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS items ("
+            "feed TEXT NOT NULL, uid TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, "
+            "content_hash TEXT NOT NULL, title TEXT, link TEXT, pubdate TEXT, "
+            "first_seen REAL NOT NULL, last_seen REAL NOT NULL, updated_at REAL, "
+            "PRIMARY KEY (feed, uid))"
+        )
+        self._conn.execute("CREATE INDEX IF NOT EXISTS items_seen ON items(feed, first_seen)")
         columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(outbox)")}
         if "claim_token" not in columns:
             self._conn.execute("ALTER TABLE outbox ADD COLUMN claim_token TEXT")
@@ -265,7 +273,9 @@ class DedupStore:
             )
             return cursor.rowcount
 
-    def prune(self, retention_days: int = 30) -> int:
+    def prune(self, retention_days: int = 30, history_days: int = 0) -> int:
+        """Drop delivered outbox rows older than ``retention_days`` and, when
+        ``history_days`` is positive, history entries not seen for that long."""
         cutoff = self.clock() - retention_days * 86400
         with self._lock, self._conn:
             cursor = self._conn.execute(
@@ -273,7 +283,84 @@ class DedupStore:
                 (cutoff,),
             )
             self._conn.execute("DELETE FROM seen WHERE ts < ?", (cutoff,))
+            if history_days > 0:
+                self._conn.execute(
+                    "DELETE FROM items WHERE last_seen < ?",
+                    (self.clock() - history_days * 86400,),
+                )
             return cursor.rowcount
+
+    # -- item history -----------------------------------------------------
+
+    @staticmethod
+    def content_hash(item: Dict[str, Any]) -> str:
+        """What a reader sees of an item; a change makes a new version."""
+        visible = {
+            key: item.get(key) for key in ("title", "description", "link", "pubdate", "content")
+        }
+        payload = json.dumps(visible, sort_keys=True, ensure_ascii=False, default=_json_default)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def record_items(self, feed: str, items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Remember every item seen on ``feed``; return the ones that changed.
+
+        Each returned item is a copy with ``version`` (2, 3, ...) and
+        ``updated: True``. Items seen for the first time are recorded as
+        version 1 and not returned: they are new, not updated.
+        """
+        now = self.clock()
+        changed = []
+        with self._lock, self._conn:
+            for item in items:
+                uid = self._uid(item)
+                if not uid:
+                    continue
+                digest = self.content_hash(item)
+                pubdate = item.get("pubdate")
+                fields = (
+                    item.get("title"),
+                    item.get("link"),
+                    pubdate.isoformat() if hasattr(pubdate, "isoformat") else pubdate,
+                )
+                row = self._conn.execute(
+                    "SELECT version, content_hash FROM items WHERE feed=? AND uid=?", (feed, uid)
+                ).fetchone()
+                if row is None:
+                    self._conn.execute(
+                        "INSERT INTO items (feed, uid, version, content_hash, title, link, "
+                        "pubdate, first_seen, last_seen) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)",
+                        (feed, uid, digest, *fields, now, now),
+                    )
+                elif row["content_hash"] == digest:
+                    self._conn.execute(
+                        "UPDATE items SET last_seen=? WHERE feed=? AND uid=?", (now, feed, uid)
+                    )
+                else:
+                    version = row["version"] + 1
+                    self._conn.execute(
+                        "UPDATE items SET version=?, content_hash=?, title=?, link=?, pubdate=?, "
+                        "last_seen=?, updated_at=? WHERE feed=? AND uid=?",
+                        (version, digest, *fields, now, now, feed, uid),
+                    )
+                    changed.append({**item, "version": version, "updated": True})
+        return changed
+
+    def history(
+        self, feed: Optional[str] = None, *, since: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """Recorded items, newest first; ``since`` filters on ``first_seen``."""
+        where, params = [], []
+        if feed is not None:
+            where.append("feed = ?")
+            params.append(feed)
+        if since is not None:
+            where.append("first_seen >= ?")
+            params.append(since)
+        sql = "SELECT * FROM items"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY first_seen DESC, uid"
+        return [dict(row) for row in self._conn.execute(sql, params).fetchall()]
 
     def counts(
         self,

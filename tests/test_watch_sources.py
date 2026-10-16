@@ -17,7 +17,7 @@ def test_watch_polls_every_source_and_isolates_failures(tmp_path, monkeypatch):
     sources.write_text("# news sites\nhttps://a.example/news\nhttps://b.example/news\n")
     calls = []
 
-    def fake_iteration(service, url, fmt, dedup, webhook, max_pages, channels=None):
+    def fake_iteration(service, url, fmt, dedup, webhook, max_pages, **kwargs):
         calls.append(url)
         if url.startswith("https://a."):
             raise ConnectionError("a is down")

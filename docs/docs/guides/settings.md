@@ -48,6 +48,7 @@ full_text_workers: 4             # concurrency for --full-text fetches
 structured_data: true            # use JSON-LD / microdata article lists when present
 native_feeds: true               # read RSS/Atom/JSON Feed responses as feeds
 trust_env_proxy: false           # honor HTTP(S)_PROXY / NO_PROXY / .netrc
+history_retention_days: 365      # item history kept by watch (0 = forever)
 ```
 
 Cached specs live under `<cache_dir>/specs/` and cached page content under
