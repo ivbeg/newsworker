@@ -658,6 +658,74 @@ def extract(
         sys.exit(1)
 
 
+@app.command()
+def explain(
+    url: Optional[str] = typer.Argument(None, help="Page to explain."),
+    source_file: Optional[str] = typer.Option(
+        None, "--file", help="Explain a local HTML file (use '-' for stdin)."
+    ),
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url", help="Base URL used to resolve links in local HTML."
+    ),
+    format: str = typer.Option("text", "--format", "-f", help="Report format: text, html, json."),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write the report here."),
+    undated: bool = typer.Option(False, "--undated", help="Allow the undated-listing fallback."),
+    render: bool = typer.Option(False, "--render", help="Render the page with the browser extra."),
+    user_agent: Optional[str] = typer.Option(None, "--user-agent"),
+    ignore_robots: bool = typer.Option(False, "--ignore-robots"),
+    no_cache: bool = typer.Option(False, "--no-cache", help="Ignore cached specs and pages."),
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Explain why a page yields the items it does (date groups, strategies, hints)."""
+    from newsworker import explain as explaining
+    from newsworker.sources import DocumentSource
+
+    if verbose:
+        enableVerbose()
+    renderers = {"text": explaining.to_text, "html": explaining.to_html, "json": explaining.to_json}
+    if format.lower() not in renderers:
+        raise typer.BadParameter("format must be text, html or json", param_hint="--format")
+    if bool(url) == bool(source_file):
+        raise typer.BadParameter("supply exactly one URL or --file source")
+    settings = _resolve_fetch_settings(
+        config,
+        user_agent=user_agent,
+        ignore_robots=ignore_robots,
+        extra={
+            "render": True if render else None,
+            "undated_fallback": True if undated else None,
+        },
+    )
+    try:
+        if source_file:
+            source = (
+                DocumentSource.stdin(
+                    base_url=base_url or "",
+                    stream=sys.stdin.buffer,
+                    max_bytes=settings.max_content_bytes,
+                )
+                if source_file == "-"
+                else DocumentSource.file(
+                    source_file, base_url=base_url or "", max_bytes=settings.max_content_bytes
+                )
+            )
+        else:
+            source = DocumentSource.url(url or "")
+        service = FeedService(settings=settings, use_cache=not no_cache)
+        report = explaining.explain(service, source.base_url, data=source.data, source=source.kind)
+    except Exception as exc:  # noqa: BLE001
+        logging.error("Failed to explain %s: %s", url or source_file, exc)
+        sys.exit(1)
+    rendered = renderers[format.lower()](report)
+    if output:
+        with open(output, "w", encoding="utf-8") as handle:
+            handle.write(rendered)
+        typer.echo(f"Report written to {output}", err=True)
+    else:
+        typer.echo(rendered)
+
+
 @app.command("feed-url")
 def feed_url(
     url: str = typer.Argument(..., help="Source page to subscribe to."),

@@ -21,6 +21,7 @@ The extracted feed can be emitted as **JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML
   - [`extract` — build a feed from a page](#extract--build-a-feed-from-a-page)
   - [`serve` — local feed server](#serve--local-feed-server)
   - [`scan` — discover existing feeds](#scan--discover-existing-feeds)
+  - [`explain` — why a page yields what it does](#explain--why-a-page-yields-what-it-does)
   - [`analyze` — generate a reusable spec](#analyze--generate-a-reusable-spec)
   - [`batch` — extract feeds from many pages](#batch--extract-feeds-from-many-pages)
   - [Plugins, bridges and async transport](#plugins-bridges-and-async-transport)
@@ -134,6 +135,7 @@ Commands:
   extract    Extract feed records from a web page
   serve      Run a local HTTP server exposing pages as feeds
   feed-url   Print a (signed) subscription URL for the feed server
+  explain    Explain why a page yields the items it does (text/HTML report)
   scan       Scan a page and find existing feeds
   analyze    Analyze a page and generate a reusable YAML parsing spec
   batch      Extract feeds from many pages concurrently
@@ -300,6 +302,18 @@ newsworker scan "https://www.dta.gov.au/news/" -f rss
 ```
 
 > **Note:** `scan` verifies every candidate feed by parsing it, so it may take longer than a raw link scan. `feedtype`, `num_entries` and `language` metadata are included where available.
+
+### `explain` — why a page yields what it does
+
+When a feed comes out empty, short or with wrong links, `explain` shows the
+evidence: every repeated group of dates on the page and which one won, the
+strategies that were tried, the spec a fresh analysis would write, and hints
+such as "items link to the listing page itself" or "try --render".
+
+```bash
+newsworker explain "https://example.com/news"                  # text summary
+newsworker explain "https://example.com/news" -f html -o r.html  # standalone report
+```
 
 ### `analyze` — generate a reusable spec
 
