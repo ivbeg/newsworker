@@ -4,6 +4,8 @@ on:
   push:
     branches: [master, main]
   pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
 
 jobs:
   test:
@@ -11,66 +13,107 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[test]'
+      - name: Tests and coverage gate
+        run: pytest -q --cov=newsworker --cov-branch --cov-report=term-missing --cov-fail-under=85
 
-      - name: Install package and test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest
-
-      - name: Run tests
-        run: pytest -q
-
-  lint:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: pip
+      - run: pip install -e '.[dev]'
+      - run: ruff format --check newsworker tests
+      - run: ruff check newsworker tests
+      - run: mypy
 
-      - name: Install ruff
-        run: pip install ruff
+  optional-extras:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        extra: [async, fulltext, metrics, browser]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e ".[test,${{ matrix.extra }}]"
+      - name: Install browser runtime
+        if: matrix.extra == 'browser'
+        run: python -m playwright install --with-deps chromium
+      - name: Optional-extra tests
+        env:
+          NEWSWORKER_BROWSER_TESTS: ${{ matrix.extra == 'browser' && '1' || '0' }}
+        run: pytest -q tests/test_optional_transports.py tests/test_enrich.py tests/test_http_caching.py
 
-      - name: Lint
-        run: ruff check newsworker tests
-
-  typecheck:
+  network-smoke:
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: pip
+      - run: pip install -e '.[test]'
+      - name: Public HTTPS extraction smoke
+        run: newsworker extract https://example.com --format json --no-cache --ignore-robots
 
-      - name: Install package and mypy
+  artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - name: Clean wheel install and package-data smoke
         run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-          pip install mypy
+          python -m venv /tmp/newsworker-wheel
+          /tmp/newsworker-wheel/bin/pip install dist/*.whl
+          /tmp/newsworker-wheel/bin/newsworker --version
+          /tmp/newsworker-wheel/bin/python -c "import importlib.resources as r; assert r.files('newsworker').joinpath('py.typed').is_file(); assert r.files('newsworker').joinpath('bridges').is_dir()"
 
-      - name: Type check
-        run: mypy
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: docs/package-lock.json
+      - name: Install and build documentation
+        working-directory: ./docs
+        run: |
+          npm ci
+          npm run build
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build image
-        run: docker build -t newsworker:ci .
+      - run: docker build -t newsworker:ci .
+      - name: Run and probe image
+        run: |
+          docker run -d --name newsworker-ci -p 127.0.0.1:8787:8787 newsworker:ci
+          for i in $(seq 1 20); do
+            curl --fail --silent http://127.0.0.1:8787/health/live && exit 0
+            sleep 1
+          done
+          docker logs newsworker-ci
+          exit 1
