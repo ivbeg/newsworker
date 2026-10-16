@@ -2,11 +2,11 @@
 
 import pytest
 
+from newsworker.async_fetch import aiohttp_available, fetch_urls_concurrent
 from newsworker.bridges import SiteBridge, load_bridge_file, select_bridge
-from newsworker.plugins import BaseExtractorPlugin, select_plugin
+from newsworker.plugins import BaseExtractorPlugin, _load_entry_point, load_plugins, select_plugin
 from newsworker.service import FeedService
 from newsworker.spec import FeedSpec, FieldRule, ItemsRule, SpecExtractor
-from newsworker.async_fetch import aiohttp_available, fetch_urls_concurrent
 
 
 class _EchoPlugin(BaseExtractorPlugin):
@@ -86,9 +86,7 @@ spec:
     bridge = load_bridge_file(str(bridge_path))
     spec = select_bridge("https://example.com/news", [bridge])
     assert spec is not None
-    feed = SpecExtractor().extract(
-        "https://example.com/news", spec, data=news_list_html
-    )
+    feed = SpecExtractor().extract("https://example.com/news", spec, data=news_list_html)
     assert len(feed["items"]) == 4
 
 
@@ -144,3 +142,57 @@ def test_get_feeds_async_falls_back_without_aiohttp(monkeypatch):
     results = svc.get_feeds(["https://example.com/news"], use_async=True)
     assert calls["sync"] == 1
     assert "https://example.com/news" in results
+
+
+def test_plugin_loading_failure_instantiation_and_selection_errors(monkeypatch):
+    base = BaseExtractorPlugin()
+    with pytest.raises(NotImplementedError):
+        base.matches("https://example.com")
+    with pytest.raises(NotImplementedError):
+        base.extract("https://example.com")
+
+    class Point:
+        name = "point"
+
+        def __init__(self, loaded=None, error=None):
+            self.loaded = loaded
+            self.error = error
+
+        def load(self):
+            if self.error:
+                raise self.error
+            return self.loaded
+
+    assert _load_entry_point("bad", Point(error=RuntimeError("bad"))) is None
+
+    class Broken:
+        def __init__(self):
+            raise RuntimeError("broken")
+
+    assert _load_entry_point("broken", Point(loaded=Broken)) is None
+    instance = _EchoPlugin()
+    assert _load_entry_point("instance", Point(loaded=instance)) is instance
+
+    class Points(list):
+        def select(self, **kwargs):
+            return self
+
+    monkeypatch.setattr(
+        "importlib.metadata.entry_points",
+        lambda: Points([Point(loaded=_EchoPlugin)]),
+    )
+    extra = object()
+    loaded = load_plugins([extra])
+    assert loaded[0] is extra and isinstance(loaded[1], _EchoPlugin)
+
+    monkeypatch.setattr(
+        "importlib.metadata.entry_points",
+        lambda: (_ for _ in ()).throw(RuntimeError("metadata unavailable")),
+    )
+    assert load_plugins([extra]) == [extra]
+
+    class BadMatcher:
+        def matches(self, url):
+            raise RuntimeError("bad matcher")
+
+    assert select_plugin("https://example.com", [BadMatcher()]) is None

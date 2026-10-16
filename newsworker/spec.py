@@ -88,18 +88,12 @@ def _is_taxonomy_class(cls):
 
 
 def _is_post_id_class(cls):
-    if cls.startswith("post-") and cls[5:].isdigit():
-        return True
-    return False
+    return bool(cls.startswith("post-") and cls[5:].isdigit())
 
 
 def _item_selector_classes(classes):
     """Filters out taxonomy and per-post classes unsuitable for item selectors."""
-    return [
-        cls
-        for cls in classes
-        if not _is_taxonomy_class(cls) and not _is_post_id_class(cls)
-    ]
+    return [cls for cls in classes if not _is_taxonomy_class(cls) and not _is_post_id_class(cls)]
 
 
 def _pick_best_item_class(classes, prefer_keywords=None):
@@ -353,6 +347,7 @@ class FeedSpec:
     items: ItemsRule = field(default_factory=ItemsRule)
     fields: dict = field(default_factory=dict)  # name -> FieldRule
     version: int = SPEC_VERSION
+    input_kind: str = "network"
 
     def to_dict(self):
         return {
@@ -360,15 +355,14 @@ class FeedSpec:
             "source": {
                 "url": self.source_url,
                 "analyzed_at": self.analyzed_at,
+                "input_kind": self.input_kind,
             },
             "feed": {
                 "title": self.title,
                 "language": self.language,
             },
             "items": self.items.to_dict(),
-            "fields": {
-                name: rule.to_dict() for name, rule in self.fields.items()
-            },
+            "fields": {name: rule.to_dict() for name, rule in self.fields.items()},
         }
 
     def to_yaml(self):
@@ -378,6 +372,7 @@ class FeedSpec:
 
     @classmethod
     def from_dict(cls, data):
+        validate_spec_dict(data)
         source = data.get("source", {}) or {}
         feed = data.get("feed", {}) or {}
         fields = {}
@@ -393,6 +388,7 @@ class FeedSpec:
             items=ItemsRule.from_dict(data.get("items")),
             fields=fields,
             version=int(data.get("version", SPEC_VERSION)),
+            input_kind=source.get("input_kind", "network"),
         )
 
     @classmethod
@@ -407,6 +403,86 @@ class FeedSpec:
     def load(cls, path):
         with open(path, "r", encoding="utf-8") as handle:
             return cls.from_yaml(handle.read())
+
+    def validate(self):
+        """Validate this spec and return it for fluent library use."""
+        validate_spec_dict(self.to_dict())
+        return self
+
+
+class SpecValidationError(ValueError):
+    """A parsing-spec schema error with a precise configuration path."""
+
+    def __init__(self, path, message):
+        self.path = path
+        self.message = message
+        super().__init__(f"{path}: {message}")
+
+
+def validate_spec_dict(data):
+    """Validate a serialized parsing spec without fetching its source."""
+    if not isinstance(data, dict):
+        raise SpecValidationError("$", "spec root must be a mapping")
+    raw_version = data.get("version", SPEC_VERSION)
+    try:
+        version = int(raw_version)
+    except (TypeError, ValueError) as exc:
+        raise SpecValidationError("version", "must be an integer") from exc
+    if version != SPEC_VERSION:
+        raise SpecValidationError(
+            "version",
+            f"unsupported spec version {version}; migrate to version {SPEC_VERSION}",
+        )
+    items = data.get("items", {}) or {}
+    if not isinstance(items, dict):
+        raise SpecValidationError("items", "must be a mapping")
+    selector_type = items.get("selector_type", "css")
+    if selector_type not in {"css", "xpath"}:
+        raise SpecValidationError("items.selector_type", "must be 'css' or 'xpath'")
+    selector = items.get("selector", "./*")
+    if not isinstance(selector, str) or not selector.strip():
+        raise SpecValidationError("items.selector", "must be a non-empty string")
+    _validate_selector("items.selector", selector)
+    try:
+        stride = int(items.get("stride", 1))
+    except (TypeError, ValueError) as exc:
+        raise SpecValidationError("items.stride", "must be an integer") from exc
+    if stride < 1:
+        raise SpecValidationError("items.stride", "must be at least 1")
+    fields = data.get("fields", {}) or {}
+    if not isinstance(fields, dict):
+        raise SpecValidationError("fields", "must be a mapping")
+    valid_sources = {"text", "tail", "href", "src", "datetime", "content"}
+    for name, rule in fields.items():
+        path = f"fields.{name}"
+        if not isinstance(rule, dict):
+            raise SpecValidationError(path, "must be a mapping")
+        field_selector = rule.get("selector", "")
+        if not isinstance(field_selector, str):
+            raise SpecValidationError(path + ".selector", "must be a string")
+        if field_selector:
+            _validate_selector(path + ".selector", field_selector)
+        source = rule.get("source", "text")
+        if source not in valid_sources and not (
+            isinstance(source, str) and source.startswith("attr:") and source[5:]
+        ):
+            raise SpecValidationError(path + ".source", f"must be one of {sorted(valid_sources)}")
+        for boolean_name in ("absolute", "required"):
+            if boolean_name in rule and not isinstance(rule[boolean_name], bool):
+                raise SpecValidationError(path + "." + boolean_name, "must be boolean")
+    return True
+
+
+def _validate_selector(path, selector):
+    try:
+        if _is_xpath(selector):
+            etree.XPath(selector)
+        else:
+            from lxml.cssselect import CSSSelector
+
+            CSSSelector(selector)
+    except Exception as exc:
+        raise SpecValidationError(path, f"invalid selector: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -476,9 +552,7 @@ class SpecAnalyzer:
         nodes = cluster_info["nodes"]
         if snode.tag in _FORM_CONTAINER_TAGS:
             return (-1, -1, -1, -1)
-        option_dates = sum(
-            1 for info in nodes if getattr(info["node"], "tag", None) == "option"
-        )
+        option_dates = sum(1 for info in nodes if getattr(info["node"], "tag", None) == "option")
         if option_dates and option_dates >= len(nodes) / 2:
             return (-1, -1, -1, -1)
 
@@ -583,7 +657,17 @@ class SpecAnalyzer:
             text_samples=text_samples,
         )
 
-    def analyze(self, url, data=None, user_agent=None, require_items=False):
+    def analyze(self, url, data=None, user_agent=None, require_items=False, context=None):
+        if context is None:
+            return self._analyze_active(
+                url, data=data, user_agent=user_agent, require_items=require_items
+            )
+        with self.ext.activate_context(context):
+            return self._analyze_active(
+                url, data=data, user_agent=user_agent, require_items=require_items
+            )
+
+    def _analyze_active(self, url, data=None, user_agent=None, require_items=False):
         """Analyzes ``url`` (or provided ``data``) and returns a ``FeedSpec``.
 
         When ``require_items`` is true, raises :class:`SpecAnalysisError` if the
@@ -786,9 +870,7 @@ class SpecAnalyzer:
                 ):
                     date_source = "attr:datetime"
             fields["date"] = FieldRule(
-                selector=relative_selector(
-                    sample_root, date_node, DATE_CLASSES_KEYWORDS
-                ),
+                selector=relative_selector(sample_root, date_node, DATE_CLASSES_KEYWORDS),
                 source=date_source,
                 patterns=patterns or None,
                 required=True,
@@ -844,9 +926,7 @@ class SpecAnalyzer:
         except Exception:
             return False
         for scope in scopes[:3]:
-            _, pubdate = extract_date_from_scope(
-                self.ext, scope, date_rule, date_rule.patterns
-            )
+            _, pubdate = extract_date_from_scope(self.ext, scope, date_rule, date_rule.patterns)
             if pubdate is not None:
                 return True
         return False
@@ -969,7 +1049,13 @@ class SpecExtractor:
         parser = etree.HTMLParser(remove_blank_text=True)
         return fromstring(edata, parser=parser)
 
-    def extract(self, url, spec, data=None, user_agent=None):
+    def extract(self, url, spec, data=None, user_agent=None, context=None):
+        if context is None:
+            return self._extract_active(url, spec, data=data, user_agent=user_agent)
+        with self.ext.activate_context(context):
+            return self._extract_active(url, spec, data=data, user_agent=user_agent)
+
+    def _extract_active(self, url, spec, data=None, user_agent=None):
         """Extracts a feed from ``url`` using ``spec``."""
         document = self._parse(url, data=data, user_agent=user_agent)
         feed = {
@@ -992,9 +1078,7 @@ class SpecExtractor:
             if item is not None:
                 feed["items"].append(item)
         if not getattr(self.ext, "default_language", None):
-            samples = [
-                item.get("title") for item in feed["items"] if item.get("title")
-            ]
+            samples = [item.get("title") for item in feed["items"] if item.get("title")]
             feed["language"] = resolve_feed_language(
                 document=document,
                 content_language=getattr(self.ext, "_last_content_language", None),
@@ -1007,9 +1091,7 @@ class SpecExtractor:
         date_text = None
         pubdate = None
         if date_rule is not None:
-            date_text, pubdate = extract_date_from_scope(
-                self.ext, scope, date_rule, patterns
-            )
+            date_text, pubdate = extract_date_from_scope(self.ext, scope, date_rule, patterns)
             if date_rule.required and pubdate is None:
                 return None
 
@@ -1023,9 +1105,7 @@ class SpecExtractor:
         if description is None and title is not None:
             description = title
 
-        raw_html = b"".join(
-            etree.tostring(node, encoding="utf8") for node in scope
-        )
+        raw_html = b"".join(etree.tostring(node, encoding="utf8") for node in scope)
 
         md = hashlib.md5()
         for part in (date_text, title, description, link):

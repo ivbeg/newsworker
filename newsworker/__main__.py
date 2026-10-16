@@ -1,7 +1,6 @@
 #!/usr/bin/env python
-"""The main entry point.
+"""The main entry point."""
 
-"""
 import sys
 
 
@@ -14,9 +13,10 @@ def main():
     except KeyboardInterrupt:
         print("\nCtrl-C pressed. Aborting")
         sys.exit(130)  # Standard exit code for SIGINT
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except Exception as error:
+        print(f"Error: {error}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

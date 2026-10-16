@@ -10,13 +10,12 @@ from newsworker.tools import (
     detect_page_language_metadata,
     detect_text_language,
     detect_text_language_from_samples,
-    normalize_language_tag,
-    resolve_feed_language,
     looks_like_fuzzy_date,
-    parse_fuzzy_date,
+    normalize_language_tag,
     parse_datetime_attr,
+    parse_fuzzy_date,
+    resolve_feed_language,
 )
-
 
 NOW = datetime.datetime(2026, 7, 4, 12, 0, 0)
 
@@ -42,7 +41,9 @@ def test_fuzzy_article_form():
 
 
 def test_fuzzy_embedded_in_sentence():
-    assert parse_fuzzy_date("Published 5 minutes ago", now=NOW) == NOW - datetime.timedelta(minutes=5)
+    assert parse_fuzzy_date("Published 5 minutes ago", now=NOW) == NOW - datetime.timedelta(
+        minutes=5
+    )
 
 
 def test_fuzzy_returns_none_for_non_relative():
@@ -53,9 +54,11 @@ def test_fuzzy_returns_none_for_non_relative():
 
 def test_parse_datetime_attr_iso():
     assert parse_datetime_attr("2026-07-04T20:30:32-03:00") == datetime.datetime(
-        2026, 7, 4, 20, 30, 32
+        2026, 7, 4, 23, 30, 32, tzinfo=datetime.timezone.utc
     )
-    assert parse_datetime_attr("2026-07-04") == datetime.datetime(2026, 7, 4)
+    assert parse_datetime_attr("2026-07-04") == datetime.datetime(
+        2026, 7, 4, tzinfo=datetime.timezone.utc
+    )
 
 
 def test_parse_datetime_attr_invalid():
@@ -101,9 +104,7 @@ def test_detect_page_language_from_meta_content_language():
 
 def test_detect_page_language_from_og_locale():
     doc = fromstring(
-        "<html><head>"
-        '<meta property="og:locale" content="pt_BR">'
-        "</head><body></body></html>"
+        '<html><head><meta property="og:locale" content="pt_BR"></head><body></body></html>'
     )
     assert detect_page_language_metadata(doc) == "pt"
 
@@ -117,9 +118,9 @@ def test_detect_text_language_ukrainian():
 
 
 def test_detect_text_language_french():
-    assert detect_text_language(
-        "Une décision importante sur l'économie française aujourd'hui"
-    ) == "fr"
+    assert (
+        detect_text_language("Une décision importante sur l'économie française aujourd'hui") == "fr"
+    )
 
 
 def test_detect_text_language_from_samples_votes():
@@ -158,17 +159,15 @@ def test_resolve_feed_language_uses_content_language_header():
 
 def test_analyzer_detects_language_from_item_text():
     html = (
-        "<!DOCTYPE html><html lang=\"en\"><head><title>Press</title></head><body>"
+        '<!DOCTYPE html><html lang="en"><head><title>Press</title></head><body>'
         "<main><ul>"
-        "<li><span class=\"date\">03.07.2026</span>"
-        "<a href=\"/a\">Важная новость о экономике страны сегодня</a></li>"
-        "<li><span class=\"date\">02.07.2026</span>"
-        "<a href=\"/b\">Вторая важная новость о политике региона</a></li>"
-        "<li><span class=\"date\">01.07.2026</span>"
-        "<a href=\"/c\">Третья важная новость о спорте и культуре</a></li>"
+        '<li><span class="date">03.07.2026</span>'
+        '<a href="/a">Важная новость о экономике страны сегодня</a></li>'
+        '<li><span class="date">02.07.2026</span>'
+        '<a href="/b">Вторая важная новость о политике региона</a></li>'
+        '<li><span class="date">01.07.2026</span>'
+        '<a href="/c">Третья важная новость о спорте и культуре</a></li>'
         "</ul></main></body></html>"
     ).encode("utf-8")
-    spec = SpecAnalyzer(filtered_text_length=150).analyze(
-        "https://example.com/press", data=html
-    )
+    spec = SpecAnalyzer(filtered_text_length=150).analyze("https://example.com/press", data=html)
     assert spec.language == "ru"

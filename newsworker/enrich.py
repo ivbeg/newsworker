@@ -33,22 +33,16 @@ def extract_author(html):
     doc = _parse(html)
     if doc is None:
         return None
-    metas = doc.xpath(
-        "//meta[translate(@name,'AUTHOR','author')='author']/@content"
-    )
+    metas = doc.xpath("//meta[translate(@name,'AUTHOR','author')='author']/@content")
     for meta in metas:
         if meta and meta.strip():
             return meta.strip()
-    rel_nodes = doc.xpath(
-        "//a[contains(concat(' ', normalize-space(@rel), ' '), ' author ')]"
-    )
+    rel_nodes = doc.xpath("//a[contains(concat(' ', normalize-space(@rel), ' '), ' author ')]")
     for node in rel_nodes:
         text = node.text_content().strip()
         if text:
             return text
-    class_nodes = doc.xpath(
-        "//*[contains(concat(' ', normalize-space(@class), ' '), ' author ')]"
-    )
+    class_nodes = doc.xpath("//*[contains(concat(' ', normalize-space(@class), ' '), ' author ')]")
     for node in class_nodes:
         text = node.text_content().strip()
         if text:
@@ -62,9 +56,7 @@ def extract_categories(html):
     if doc is None:
         return []
     categories = []
-    for node in doc.xpath(
-        "//a[contains(concat(' ', normalize-space(@rel), ' '), ' tag ')]"
-    ):
+    for node in doc.xpath("//a[contains(concat(' ', normalize-space(@rel), ' '), ' tag ')]"):
         text = node.text_content().strip()
         if text:
             categories.append(text)
@@ -92,6 +84,36 @@ def extract_categories(html):
     return unique
 
 
+def extract_enclosure_metadata(html):
+    """Return truthful ``(media_type, length)`` metadata present in item HTML.
+
+    The listing document itself is fetched through the bounded source policy. We
+    accept only explicit metadata on an enclosure link or image and never infer a
+    media type from a filename or fabricate a byte length.
+    """
+    doc = _parse(html)
+    if doc is None:
+        return None, None
+    nodes = doc.xpath(
+        ".//a[contains(concat(' ', normalize-space(@rel), ' '), ' enclosure ')] | .//img"
+    )
+    for node in nodes:
+        media_type = node.get("type") or node.get("data-media-type")
+        raw_length = (
+            node.get("length")
+            or node.get("data-length")
+            or node.get("data-size")
+            or node.get("filesize")
+        )
+        try:
+            length = int(raw_length) if raw_length is not None else None
+        except (TypeError, ValueError):
+            length = None
+        if media_type and length is not None and length >= 0:
+            return media_type.strip().lower(), length
+    return None, None
+
+
 def enrich_item(item):
     """Adds ``author``/``categories`` to ``item`` from its ``raw_html`` in place."""
     html = item.get("raw_html")
@@ -103,6 +125,17 @@ def enrich_item(item):
         categories = extract_categories(html)
         if categories:
             item["categories"] = categories
+    extra = item.get("extra")
+    if not isinstance(extra, dict):
+        extra = {}
+        item["extra"] = extra
+    if extra.get("images") and not (
+        extra.get("enclosure_type") and extra.get("enclosure_length") is not None
+    ):
+        media_type, length = extract_enclosure_metadata(html)
+        if media_type and length is not None:
+            extra["enclosure_type"] = media_type
+            extra["enclosure_length"] = length
     return item
 
 

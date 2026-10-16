@@ -1,58 +1,57 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "newsworker"
 description = "Advanced news feeds extractor and finder library. Helps to automatically extract news from websites without RSS/ATOM feeds"
 readme = "README.md"
-requires-python = ">=3.7"
-license = { text = "MIT" }
+requires-python = ">=3.9"
+license = "MIT"
 authors = [{ name = "Ivan Begtin", email = "ivan@begtin.tech" }]
 keywords = ["news", "parsing", "extraction", "feeds", "rss", "atom"]
 dynamic = ["version"]
 
 dependencies = [
-    "pyparsing",
-    "lxml",
-    "cssselect",
-    "bs4",
-    "qddate",
-    "typer",
-    "feedgen",
-    "pyyaml",
-    "requests",
-    "urllib3",
-    "feedparser",
+    "pyparsing>=3,<4",
+    "lxml>=4.9,<7",
+    "cssselect>=1.2,<2",
+    "beautifulsoup4>=4.12,<5",
+    "qddate>=1.0.4,<2",
+    "typer>=0.9,<1",
+    "feedgen>=1.0,<2",
+    "pyyaml>=6,<7",
+    "requests>=2.31,<3",
+    "urllib3>=1.26,<3",
+    "feedparser>=6,<7",
 ]
 
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 
 [project.urls]
 Homepage = "https://github.com/ivbeg/newsworker"
-Documentation = "https://github.com/ivbeg/newsworker/blob/master/docs/README.md"
+Documentation = "https://ivbeg.github.io/newsworker/"
 Repository = "https://github.com/ivbeg/newsworker"
 
 [project.optional-dependencies]
-test = ["pytest"]
-dev = ["pytest", "ruff", "build", "twine", "mypy", "pre-commit"]
+test = ["pytest>=8,<9", "pytest-cov>=5,<7"]
+dev = ["pytest>=8,<9", "pytest-cov>=5,<7", "ruff==0.14.9", "build>=1,<2", "twine>=5,<7", "mypy>=1.11,<2", "pre-commit>=3,<5", "pip-tools>=7,<8"]
 metrics = ["prometheus_client"]
 fulltext = ["trafilatura"]
 async = ["aiohttp"]
+browser = ["playwright>=1.45,<2"]
 
 [project.scripts]
 newsworker = "newsworker.__main__:main"
@@ -68,7 +67,7 @@ include = ["newsworker*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-newsworker = ["bridges/*.yaml", "bridges/*.yml"]
+newsworker = ["bridges/*.yaml", "bridges/*.yml", "py.typed"]
 
 # ---------------------------------------------------------------------------
 # Tooling configuration (single source of truth)
@@ -78,12 +77,13 @@ newsworker = ["bridges/*.yaml", "bridges/*.yml"]
 # Scope linting to the high-signal rule sets that catch real defects
 # (pyflakes + syntax/runtime errors) rather than churning stylistic issues
 # across this legacy codebase. Style rules can be enabled incrementally later.
-target-version = "py38"
+target-version = "py39"
 line-length = 100
 extend-exclude = ["build", "dist", "docs", "*.egg-info"]
 
 [tool.ruff.lint]
-select = ["E9", "F"]
+select = ["E9", "F", "I", "B", "UP037", "SIM103", "RUF013"]
+ignore = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -101,4 +101,23 @@ python_version = "3.9"
 ignore_missing_imports = true
 follow_imports = "silent"
 disable_error_code = ["import-untyped"]
-files = ["newsworker/settings.py", "newsworker/cache.py"]
+files = [
+    "newsworker/settings.py",
+    "newsworker/cache.py",
+    "newsworker/fetch.py",
+    "newsworker/runtime.py",
+    "newsworker/diagnostics.py",
+    "newsworker/sources.py",
+    "newsworker/batch.py",
+    "newsworker/delivery.py",
+]
+check_untyped_defs = true
+
+[tool.coverage.run]
+branch = true
+source = ["newsworker"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true

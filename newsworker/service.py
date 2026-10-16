@@ -1,48 +1,47 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-High level feed service combining caching with extraction.
+"""High-level, concurrent-safe feed extraction service."""
 
-:class:`FeedService` is the shared building block used by both the ``extract``
-CLI command and the local HTTP server. It ties together:
-
-* :class:`newsworker.cache.ContentCache` -- avoids re-fetching a page while its
-  cached copy is fresh;
-* :class:`newsworker.cache.SpecCache` -- reuses a previously built parsing spec,
-  building one dynamically on the first request for a URL;
-* extraction -- applies the spec with :class:`newsworker.spec.SpecExtractor`, or
-  falls back to the fully dynamic :class:`newsworker.extractor.FeedExtractor`
-  when no usable spec could be produced.
-
-Cached page content is threaded through the ``data=`` parameter of both
-extractors so a single fetch serves both spec building and extraction.
-"""
+from __future__ import annotations
 
 import concurrent.futures
 import logging
-import threading
+import time
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 from .bridges import default_bridge_dirs, load_bridges, select_bridge
-from .cache import ContentCache, SpecCache
+from .cache import ContentCache, SpecCache, key_for
+from .diagnostics import ExtractionDiagnostics
 from .enrich import enrich_feed, extract_fulltext
 from .extractor import FeedExtractor
+from .fetch import policy_from_settings
 from .plugins import load_plugins, select_plugin
+from .runtime import ExtractionContext, SingleFlight, closing_context
 from .settings import Settings
-from .spec import SpecAnalyzer, SpecExtractor
+from .sources import DocumentSource
+from .spec import FeedSpec, SpecAnalyzer, SpecExtractor
 from .tools import decode_html, find_next_link
 
 log = logging.getLogger(__name__)
 
 
 class FeedService:
-    """Builds feeds from URLs with spec and content caching."""
+    """Build feeds while isolating each request and reusing safe resources."""
 
-    def __init__(self, settings=None, use_cache=True, plugins=None, bridges=None):
+    def __init__(
+        self,
+        settings: Optional[Settings] = None,
+        use_cache: bool = True,
+        plugins: Optional[list] = None,
+        bridges: Optional[list] = None,
+        *,
+        extensions_loaded: bool = False,
+    ):
         self.settings = settings or Settings()
+        self.settings.validate()
         self.use_cache = use_cache
-        self.plugins = load_plugins(extra=plugins)
+        self.plugins = list(plugins or []) if extensions_loaded else load_plugins(extra=plugins)
         if bridges is not None:
-            self.bridges = bridges
+            self.bridges = list(bridges)
         else:
             self.bridges = load_bridges(*default_bridge_dirs(self.settings))
         cache_dir = self.settings.resolved_cache_dir()
@@ -68,117 +67,305 @@ class FeedService:
             cookies_file=self.settings.cookies_file,
             default_language=self.settings.default_language,
         )
+        self.extractor.default_timezone = self.settings.default_timezone
+        self.extractor.redirect_limit = self.settings.redirect_limit
+        self.extractor.allowed_hosts = tuple(self.settings.allowed_hosts)
+        self.extractor.block_private_hosts = self.settings.block_private_hosts
+        self.extractor.allow_private_hosts = self.settings.allow_private_hosts
+        self.extractor.trusted_proxy = self.settings.trusted_proxy
+        self._content_flights = SingleFlight()
+        self._spec_flights = SingleFlight()
+        self._renderer = None
 
-    def _fetch(self, url, force_refresh=False):
-        """Returns page bytes, honoring the content cache unless refreshing.
+    def new_context(self, *, source: str = "network", base_url: Optional[str] = None):
+        diagnostics = ExtractionDiagnostics(source=source, requested_url=base_url)
+        return ExtractionContext(
+            source=source,
+            base_url=base_url,
+            default_timezone=self.settings.default_timezone,
+            diagnostics=diagnostics,
+        )
 
-        A fresh cache entry is returned directly. A stale-but-present entry is
-        revalidated conditionally against the upstream (``If-None-Match`` /
-        ``If-Modified-Since``); a ``304`` reuses the cached bytes and refreshes
-        their freshness clock, saving bandwidth.
-        """
-        if self.use_cache and not force_refresh:
-            cached = self.content_cache.get(url)
-            if cached is not None:
-                log.debug("Content cache hit for %s", url)
-                return cached
-            stale = self.content_cache.get_stale(url)
-            if stale is not None:
-                meta = self.content_cache.get_meta(url)
-                if meta:
-                    revalidated = self.extractor.fetch(
-                        url, self.settings.user_agent, conditional=meta
-                    )
-                    if revalidated is None:
-                        log.debug("Upstream 304 for %s, reusing cached content", url)
-                        self.content_cache.touch(url)
-                        return stale
-                    self._store_content(url, revalidated)
-                    return revalidated
-        data = self.extractor.fetch(url, self.settings.user_agent)
-        if self.use_cache:
-            self._store_content(url, data)
+    def _fetch(
+        self,
+        url: str,
+        force_refresh: bool = False,
+        *,
+        revalidate: bool = False,
+        context: Optional[ExtractionContext] = None,
+    ) -> bytes:
+        """Return bytes, optionally contacting upstream even while cache is fresh."""
+        context = context or self.new_context(base_url=url)
+
+        def populate() -> Tuple[bytes, Dict[str, Any]]:
+            stale, meta = self.content_cache.get_generation(url, fresh_only=False)
+            if self.use_cache and not force_refresh and not revalidate:
+                fresh, fresh_meta = self.content_cache.get_generation(url, fresh_only=True)
+                if fresh is not None:
+                    log.debug("Content cache hit for %s", url)
+                    return fresh, fresh_meta
+            conditional = meta if self.use_cache and stale is not None and meta else None
+            if force_refresh:
+                conditional = None
+            with self.extractor.activate_context(context):
+                data = self.extractor.fetch(
+                    url,
+                    self.settings.user_agent,
+                    conditional=conditional,
+                )
+            response_meta = dict(context.response_meta)
+            if data is None:
+                if stale is None:
+                    raise RuntimeError("upstream returned 304 without a cached body")
+                self.content_cache.touch(url)
+                response_meta.update(meta)
+                response_meta["cache_state"] = "revalidated"
+                return stale, response_meta
+            response_meta["cache_state"] = "miss" if stale is None else "changed"
+            if self.use_cache:
+                self._store_content(url, data, response_meta)
+            return data, response_meta
+
+        data, response_meta = self._content_flights.call(key_for(url), populate)
+        context.response_meta = dict(response_meta)
+        context.content_language = context.content_language or _header_language(response_meta)
+        diagnostics = context.diagnostics
+        if diagnostics is not None:
+            diagnostics.effective_url = response_meta.get("effective_url") or url
+            diagnostics.metadata.update(
+                {
+                    "status": response_meta.get("status"),
+                    "cache_state": response_meta.get("cache_state", "hit"),
+                }
+            )
         return data
 
-    def _store_content(self, url, data):
+    def _store_content(self, url: str, data: bytes, meta: MappingLike = None) -> None:
         try:
-            self.content_cache.set(
-                url, data, meta=getattr(self.extractor, "last_response_meta", None)
-            )
-        except OSError as e:
-            log.warning("Failed to cache content for %s: %s", url, e)
+            self.content_cache.set(url, data, meta=dict(meta or {}))
+        except OSError as exc:
+            log.warning("Failed to cache content for %s: %s", url, exc)
 
-    def _get_or_build_spec(self, url, data):
-        """Returns a cached spec, or builds and caches one dynamically."""
+    def _get_or_build_spec(
+        self, url: str, data: bytes, context: ExtractionContext
+    ) -> Optional[FeedSpec]:
         if self.use_cache:
             spec = self.spec_cache.get(url)
             if spec is not None:
-                log.debug("Spec cache hit for %s", url)
+                if context.diagnostics:
+                    context.diagnostics.add_attempt("cached_spec", "selected")
                 return spec
-        analyzer = SpecAnalyzer(extractor=self.extractor)
-        spec = analyzer.analyze(url, data=data, user_agent=self.settings.user_agent)
-        if self.use_cache and spec is not None and spec.fields:
-            try:
-                self.spec_cache.set(url, spec)
-                log.debug("Spec cached for %s", url)
-            except OSError as e:
-                log.warning("Failed to cache spec for %s: %s", url, e)
-        return spec
+
+        def build():
+            if self.use_cache:
+                cached = self.spec_cache.get(url)
+                if cached is not None:
+                    return cached
+            analyzer = SpecAnalyzer(extractor=self.extractor)
+            spec = analyzer.analyze(url, data=data, user_agent=self.settings.user_agent)
+            if self.use_cache and spec is not None and spec.fields:
+                try:
+                    self.spec_cache.set(url, spec)
+                except OSError as exc:
+                    log.warning("Failed to cache spec for %s: %s", url, exc)
+            return spec
+
+        return self._spec_flights.call(key_for(url), build)
 
     def get_feed(
-        self, url, force_refresh=False, explicit_spec=None, max_pages=1, data=None
-    ):
-        """Returns the internal feed dictionary for ``url``.
-
-        :param force_refresh: bypass the content cache and re-fetch the page.
-        :param explicit_spec: use this :class:`FeedSpec` instead of the cache.
-        :param max_pages: follow up to this many "next" links, merging items.
-        :param data: optional pre-fetched page bytes (skips the fetch step).
-        """
-        if data is None:
-            data = self._fetch(url, force_refresh=force_refresh)
-
-        plugin = select_plugin(url, self.plugins)
-        if plugin is not None:
-            feed = plugin.extract(
-                url, data=data, user_agent=self.settings.user_agent
+        self,
+        url: str,
+        force_refresh: bool = False,
+        explicit_spec: Optional[FeedSpec] = None,
+        max_pages: int = 1,
+        data: Optional[bytes] = None,
+        *,
+        context: Optional[ExtractionContext] = None,
+        revalidate: bool = False,
+        render: Optional[bool] = None,
+    ) -> dict:
+        context = context or self.new_context(
+            source="network" if data is None else "prefetched", base_url=url
+        )
+        diagnostics = context.diagnostics
+        if diagnostics:
+            diagnostics.start("total")
+        with self.extractor.activate_context(context), closing_context(context):
+            if render is True or (render is None and self.settings.render):
+                data = self._render(url, context)
+            if data is None:
+                data = self._fetch(
+                    url,
+                    force_refresh=force_refresh,
+                    revalidate=revalidate,
+                    context=context,
+                )
+            extraction_url = context.response_meta.get("effective_url") or url
+            feed = self._extract(
+                extraction_url,
+                data,
+                explicit_spec=explicit_spec,
+                context=context,
             )
+            if max_pages and max_pages > 1:
+                self._follow_pagination(
+                    extraction_url,
+                    data,
+                    explicit_spec,
+                    feed,
+                    max_pages,
+                    context=context,
+                    revalidate=revalidate,
+                )
+            if not feed.get("items") and self.settings.undated_fallback:
+                feed = self._extract_undated(data, extraction_url, context)
+            if (
+                not feed.get("items")
+                and self.settings.render_fallback
+                and not context.metadata_get("rendered", False)
+                and _looks_client_rendered(data)
+            ):
+                try:
+                    rendered = self._render(url, context)
+                except Exception as exc:
+                    if diagnostics:
+                        diagnostics.warnings.append(
+                            f"Browser fallback failed: {type(exc).__name__}"
+                        )
+                else:
+                    feed = self._extract(extraction_url, rendered, context=context)
             enrich_feed(feed)
             if self.settings.full_text:
                 self._add_full_text(feed)
+            provenance = feed.setdefault("provenance", {})
+            provenance["source"] = context.source
+            if diagnostics:
+                diagnostics.score(feed)
+                diagnostics.stop("total")
+                provenance.update(
+                    {
+                        "strategy": diagnostics.chosen_strategy,
+                        "confidence": diagnostics.confidence,
+                        "warnings": list(diagnostics.warnings),
+                        "elapsed_ms": diagnostics.timings_ms.get("total", 0.0),
+                        "cache_state": context.response_meta.get("cache_state"),
+                        "effective_url": diagnostics.effective_url or extraction_url,
+                    }
+                )
+            return feed
+
+    def _extract(
+        self,
+        url: str,
+        data: bytes,
+        *,
+        explicit_spec: Optional[FeedSpec] = None,
+        context: ExtractionContext,
+    ) -> dict:
+        diagnostics = context.diagnostics
+        plugin = select_plugin(url, self.plugins)
+        if plugin is not None:
+            started = time.monotonic()
+            feed = plugin.extract(url, data=data, user_agent=self.settings.user_agent)
+            if diagnostics:
+                diagnostics.chosen_strategy = "plugin"
+                diagnostics.add_attempt(
+                    "plugin",
+                    "success",
+                    item_count=len(feed.get("items", [])),
+                    elapsed_ms=(time.monotonic() - started) * 1000,
+                )
             return feed
 
         spec = explicit_spec
+        strategy = "explicit_spec" if spec is not None else None
         if spec is None:
             bridge_spec = select_bridge(url, self.bridges)
             if bridge_spec is not None:
-                spec = bridge_spec
+                spec, strategy = bridge_spec, "bridge"
             else:
-                spec = self._get_or_build_spec(url, data)
-
-        feed = self._extract_page(url, data, spec)
-        if max_pages and max_pages > 1:
-            self._follow_pagination(url, data, spec, feed, max_pages)
-
-        enrich_feed(feed)
-        if self.settings.full_text:
-            self._add_full_text(feed)
-        return feed
-
-    def _extract_page(self, url, data, spec):
-        """Extracts a single page using ``spec`` when usable, else dynamically."""
+                spec, strategy = self._get_or_build_spec(url, data, context), "spec"
+        started = time.monotonic()
         if spec is not None and spec.fields:
-            return SpecExtractor(extractor=self.extractor).extract(
+            feed = SpecExtractor(extractor=self.extractor).extract(
                 url, spec, data=data, user_agent=self.settings.user_agent
             )
-        log.debug("No usable spec for %s, using dynamic extraction", url)
+            if diagnostics:
+                diagnostics.add_attempt(
+                    strategy or "spec",
+                    "success" if feed.get("items") else "empty",
+                    item_count=len(feed.get("items", [])),
+                    elapsed_ms=(time.monotonic() - started) * 1000,
+                    selectors={"items": spec.items.selector},
+                )
+                diagnostics.chosen_strategy = strategy or "spec"
+            return feed
         feed, _session = self.extractor.get_feed(
-            url, data=data, user_agent=self.settings.user_agent
+            url,
+            data=data,
+            user_agent=self.settings.user_agent,
+            context=context,
         )
+        if diagnostics:
+            diagnostics.add_attempt(
+                "dynamic",
+                "success" if feed.get("items") else "empty",
+                item_count=len(feed.get("items", [])),
+                elapsed_ms=(time.monotonic() - started) * 1000,
+            )
+            diagnostics.chosen_strategy = "dynamic"
         return feed
 
-    def _follow_pagination(self, url, data, spec, feed, max_pages):
-        """Follows "next" links up to ``max_pages``, merging their items in place."""
+    def _extract_undated(self, data: bytes, url: str, context: ExtractionContext) -> dict:
+        from .undated import extract_undated_listing
+
+        started = time.monotonic()
+        feed, details = extract_undated_listing(
+            data,
+            url,
+            min_items=self.settings.undated_min_items,
+            min_confidence=self.settings.undated_min_confidence,
+        )
+        if context.diagnostics:
+            context.diagnostics.add_attempt(
+                "undated",
+                "success" if feed.get("items") else "rejected",
+                item_count=len(feed.get("items", [])),
+                elapsed_ms=(time.monotonic() - started) * 1000,
+            )
+            if feed.get("items"):
+                context.diagnostics.chosen_strategy = "undated"
+                context.diagnostics.metadata["undated"] = details
+        return feed
+
+    def _render(self, url: str, context: ExtractionContext) -> bytes:
+        from .jsrender import PlaywrightRenderer
+
+        if self._renderer is None:
+            self._renderer = PlaywrightRenderer(
+                policy_from_settings(self.settings),
+                timeout=self.settings.render_timeout,
+                max_bytes=self.settings.render_max_bytes,
+                concurrency=self.settings.render_concurrency,
+            )
+        result = self._renderer.render(url)
+        context.response_meta.update({"effective_url": result.effective_url, "rendered": True})
+        if context.diagnostics:
+            context.diagnostics.metadata["rendered"] = True
+            context.diagnostics.add_attempt("browser", "rendered", elapsed_ms=result.elapsed_ms)
+        return result.body
+
+    def _follow_pagination(
+        self,
+        url: str,
+        data: bytes,
+        spec: Optional[FeedSpec],
+        feed: dict,
+        max_pages: int,
+        *,
+        context: ExtractionContext,
+        revalidate: bool = False,
+    ) -> None:
         from lxml import etree
         from lxml.html import fromstring
 
@@ -191,89 +378,88 @@ class FeedService:
                     decode_html(current_data),
                     parser=etree.HTMLParser(remove_blank_text=True),
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 break
-            nxt = find_next_link(doc, current_url)
-            if not nxt or nxt in visited:
+            next_url = find_next_link(doc, current_url)
+            if not next_url or next_url in visited:
                 break
-            visited.add(nxt)
+            visited.add(next_url)
             try:
-                next_data = self._fetch(nxt)
-            except Exception as e:  # noqa: BLE001
-                log.debug("Pagination fetch failed for %s: %s", nxt, e)
+                next_data = self._fetch(next_url, revalidate=revalidate, context=context)
+            except Exception as exc:
+                log.debug("Pagination fetch failed for %s: %s", next_url, exc)
                 break
-            page_spec = spec
-            if page_spec is None or not page_spec.fields:
-                page_spec = self._get_or_build_spec(nxt, next_data)
-            page_feed = self._extract_page(nxt, next_data, page_spec)
+            page_spec = spec or self._get_or_build_spec(next_url, next_data, context)
+            page_feed = self._extract(next_url, next_data, explicit_spec=page_spec, context=context)
             feed.setdefault("items", []).extend(page_feed.get("items", []))
-            current_url, current_data = nxt, next_data
+            current_url, current_data = next_url, next_data
             pages += 1
 
-    def _add_full_text(self, feed):
-        """Fetches each item link and populates ``content`` with the main body.
-
-        Uses bounded concurrency and degrades gracefully when the optional
-        full-text dependency is missing or a fetch fails.
-        """
-        items = [i for i in feed.get("items", []) if i.get("link")]
+    def _add_full_text(self, feed: dict) -> None:
+        items = [item for item in feed.get("items", []) if item.get("link")]
         if not items:
             return
 
         def worker(item):
+            context = self.new_context(source="fulltext", base_url=item["link"])
             try:
-                html = self.extractor.fetch(item["link"], self.settings.user_agent)
-            except Exception as e:  # noqa: BLE001
-                log.debug("Full-text fetch failed for %s: %s", item["link"], e)
-                return
-            if html is None:
+                html = self.extractor.fetch(item["link"], self.settings.user_agent, context=context)
+            except Exception as exc:
+                log.debug("Full-text fetch failed for %s: %s", item["link"], exc)
                 return
             text = extract_fulltext(html, url=item["link"])
             if text:
                 item["content"] = text
+                item["content_kind"] = "text"
 
         workers = max(1, min(self.settings.full_text_workers, len(items)))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             list(pool.map(worker, items))
 
     def _worker_service(self):
-        """Creates an independent service for use inside a worker thread.
+        """Compatibility helper preserving explicitly configured extensions."""
+        return FeedService(
+            settings=self.settings,
+            use_cache=self.use_cache,
+            plugins=self.plugins,
+            bridges=self.bridges,
+            extensions_loaded=True,
+        )
 
-        A :class:`FeedExtractor` keeps per-run mutable state (the debug session
-        and the date-parser session), so it is not safe to share one across
-        threads. Each worker therefore gets its own service instance.
-        """
-        return FeedService(settings=self.settings, use_cache=self.use_cache)
-
-    def get_feeds(self, urls, max_workers=4, force_refresh=False, use_async=None):
-        """Builds feeds for many URLs concurrently.
-
-        Returns a ``{url: feed}`` mapping. A URL that fails is mapped to an
-        ``{"error": <message>}`` dict instead of aborting the whole batch. Each
-        worker thread uses its own :class:`FeedService` (see
-        :meth:`_worker_service`).
-
-        When ``use_async`` is true (or :attr:`Settings.use_async`), pages are
-        fetched with the optional aiohttp transport before extraction.
-        """
-        urls = list(dict.fromkeys(urls))  # de-duplicate, preserve order
+    def get_feeds(
+        self,
+        urls: Iterable[str],
+        max_workers: int = 4,
+        force_refresh: bool = False,
+        use_async: Optional[bool] = None,
+    ) -> Dict[str, dict]:
+        urls = list(dict.fromkeys(urls))
         if not urls:
             return {}
-
         async_enabled = self.settings.use_async if use_async is None else use_async
         if async_enabled:
             return self._get_feeds_async(urls, max_workers, force_refresh)
 
+        import threading
+
+        results: Dict[str, dict] = {}
         local = threading.local()
 
         def worker(url):
+            started = time.monotonic()
             service = getattr(local, "service", None)
             if service is None:
                 service = self._worker_service()
                 local.service = service
-            return service.get_feed(url, force_refresh=force_refresh)
+            try:
+                return service.get_feed(url, force_refresh=force_refresh)
+            except Exception as exc:
+                return {
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "elapsed_ms": (time.monotonic() - started) * 1000,
+                }
 
-        results = {}
         workers = max(1, min(max_workers, len(urls)))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_url = {pool.submit(worker, url): url for url in urls}
@@ -281,43 +467,79 @@ class FeedService:
                 url = future_to_url[future]
                 try:
                     results[url] = future.result()
-                except Exception as e:  # noqa: BLE001 - report per-URL failures
-                    log.warning("Failed to build feed for %s: %s", url, e)
-                    results[url] = {"error": str(e)}
-        return results
+                except Exception as exc:
+                    log.warning("Failed to build feed for %s: %s", url, exc)
+                    results[url] = {"error": str(exc), "error_type": type(exc).__name__}
+        return {url: results[url] for url in urls}
 
     def _get_feeds_async(self, urls, max_workers, force_refresh):
         from .async_fetch import aiohttp_available, fetch_urls_concurrent
 
         if not aiohttp_available():
-            log.warning(
-                "Async transport requested but aiohttp is not installed; "
-                "falling back to threads. Install with: pip install 'newsworker[async]'"
-            )
-            return self.get_feeds(
-                urls, max_workers=max_workers, force_refresh=force_refresh, use_async=False
-            )
-
-        try:
-            fetched = fetch_urls_concurrent(urls, self.settings, max_workers=max_workers)
-        except Exception as e:  # noqa: BLE001
-            log.warning("Async batch fetch failed (%s); falling back to threads", e)
-            return self.get_feeds(
-                urls, max_workers=max_workers, force_refresh=force_refresh, use_async=False
-            )
-
+            log.warning("aiohttp unavailable; falling back to threaded transport")
+            return self.get_feeds(urls, max_workers, force_refresh, use_async=False)
+        fetched = fetch_urls_concurrent(urls, self.settings, max_workers=max_workers)
         results = {}
         for url in urls:
+            started = time.monotonic()
             payload = fetched.get(url)
             if isinstance(payload, Exception):
-                results[url] = {"error": str(payload)}
+                results[url] = {
+                    "error": str(payload),
+                    "error_type": type(payload).__name__,
+                    "elapsed_ms": (time.monotonic() - started) * 1000,
+                }
                 continue
             try:
-                worker = self._worker_service()
-                results[url] = worker.get_feed(
-                    url, force_refresh=force_refresh, data=payload
-                )
-            except Exception as e:  # noqa: BLE001
-                log.warning("Failed to build feed for %s: %s", url, e)
-                results[url] = {"error": str(e)}
+                body = payload.body if hasattr(payload, "body") else payload
+                context = self.new_context(source="network", base_url=url)
+                if hasattr(payload, "effective_url"):
+                    context.response_meta = {
+                        "effective_url": payload.effective_url,
+                        "status": payload.status,
+                        "headers": dict(payload.headers),
+                        "cache_state": "async_fetch",
+                    }
+                results[url] = self.get_feed(url, data=body, context=context)
+            except Exception as exc:
+                results[url] = {
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "elapsed_ms": (time.monotonic() - started) * 1000,
+                }
         return results
+
+    def get_feed_with_diagnostics(self, url: str, **kwargs):
+        context = kwargs.pop("context", None) or self.new_context(base_url=url)
+        feed = self.get_feed(url, context=context, **kwargs)
+        return feed, context.diagnostics
+
+    def get_feed_source(self, source: DocumentSource, **kwargs):
+        context = self.new_context(source=source.kind, base_url=source.base_url)
+        if context.diagnostics:
+            context.diagnostics.metadata["location"] = source.location
+        return self.get_feed(
+            source.base_url,
+            data=source.data if source.is_local else None,
+            context=context,
+            **kwargs,
+        )
+
+
+MappingLike = Optional[Dict[str, Any]]
+
+
+def _header_language(meta: Dict[str, Any]) -> Optional[str]:
+    headers = meta.get("headers") or {}
+    value = headers.get("Content-Language") or headers.get("content-language")
+    return value.split(",", 1)[0].split("-", 1)[0].strip().lower() if value else None
+
+
+def _looks_client_rendered(data: bytes) -> bool:
+    sample = data[:512_000].lower()
+    has_bundle = b"<script" in sample and any(
+        marker in sample
+        for marker in (b"webpack", b"__next_data__", b"/_next/", b"vite", b"main.js")
+    )
+    has_root = any(marker in sample for marker in (b'id="root"', b'id="app"', b'id="__next"'))
+    return has_bundle and has_root

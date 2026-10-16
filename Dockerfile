@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Install the package first (leveraging Docker layer caching for deps).
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY newsworker ./newsworker
 RUN pip install --no-cache-dir .
 

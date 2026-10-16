@@ -42,7 +42,7 @@ def test_content_cache_expiry(tmp_path):
 def test_spec_cache_never_expires_with_zero_ttl(tmp_path):
     cache = SpecCache(str(tmp_path), ttl=0)
     url = "https://example.com/news"
-    spec = FeedSpec(source_url=url, title="T", fields={"date": FieldRule(selector=".d")})
+    spec = FeedSpec(source_url=url, title="T", fields={"date": FieldRule(selector="span.d")})
     cache.set(url, spec)
     path = cache.path_for(url)
     old = time.time() - 10_000_000

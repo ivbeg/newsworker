@@ -1,0 +1,12 @@
+{
+  "minimum_qddate": "1.0.4",
+  "languages": [
+    {"code": "en", "positive": "4 July 2026", "ambiguous": "July update", "negative": "4 products", "headline": "A complete English news headline"},
+    {"code": "fr", "positive": "4 juillet 2026", "ambiguous": "mise à jour juillet", "negative": "4 produits", "headline": "Un titre d’actualité français complet"},
+    {"code": "de", "positive": "4. Juli 2026", "ambiguous": "Juli Meldung", "negative": "4 Produkte", "headline": "Eine vollständige deutsche Nachricht"},
+    {"code": "it", "positive": "4 luglio 2026", "ambiguous": "aggiornamento luglio", "negative": "4 prodotti", "headline": "Un titolo completo di notizie italiane"},
+    {"code": "es", "positive": "4 de julio de 2026", "ambiguous": "actualización de julio", "negative": "4 productos", "headline": "Un titular completo de noticias españolas"},
+    {"code": "pt", "positive": "4 de julho de 2026", "ambiguous": "atualização de julho", "negative": "4 produtos", "headline": "Uma manchete completa de notícias portuguesas"},
+    {"code": "ru", "positive": "4 июля 2026", "ambiguous": "июльские новости", "negative": "4 товара", "headline": "Полный заголовок новости на русском языке"}
+  ]
+}

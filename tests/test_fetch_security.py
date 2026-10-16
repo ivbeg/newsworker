@@ -9,7 +9,6 @@ from newsworker.extractor import FeedExtractor
 from newsworker.settings import Settings
 from newsworker.tools import can_fetch, clear_robots_cache
 
-
 ROBOTS_TXT = """
 User-agent: *
 Disallow: /private/

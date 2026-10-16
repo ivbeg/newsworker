@@ -68,9 +68,7 @@ def test_analyzer_builds_usable_spec(news_list_html):
 def test_analyzer_returns_empty_spec_without_require_items():
     html = b"""<!DOCTYPE html><html><head><title>About</title></head>
     <body><h1>About Us</h1><p>No news here.</p></body></html>"""
-    spec = SpecAnalyzer(filtered_text_length=150).analyze(
-        "https://example.com/about", data=html
-    )
+    spec = SpecAnalyzer(filtered_text_length=150).analyze("https://example.com/about", data=html)
     assert spec.title == "About"
     assert spec.fields == {}
 
@@ -85,9 +83,7 @@ def test_analyzer_raises_when_no_news_items():
 
 def test_spec_extractor_offline(news_list_html):
     spec = _build_manual_spec()
-    feed = SpecExtractor().extract(
-        "https://example.com/news", spec, data=news_list_html
-    )
+    feed = SpecExtractor().extract("https://example.com/news", spec, data=news_list_html)
     assert len(feed["items"]) == 4
     first = feed["items"][0]
     assert first["pubdate"] is not None
@@ -100,9 +96,7 @@ def test_spec_extractor_respects_required_date(news_list_html):
     # Point the date selector at something that never matches a date so the
     # required-date rule drops every item.
     spec.fields["date"].selector = "a"
-    feed = SpecExtractor().extract(
-        "https://example.com/news", spec, data=news_list_html
-    )
+    feed = SpecExtractor().extract("https://example.com/news", spec, data=news_list_html)
     assert feed["items"] == []
 
 
@@ -151,13 +145,9 @@ def test_analyzer_rejects_bare_tag_item_selector():
       <div><div class="x-card"><div class="x-card-subhead">01.07.2026</div>
         <a class="stretched-link" href="/c">Third headline long enough here</a></div></div>
     </div></main></body></html>"""
-    spec = SpecAnalyzer(filtered_text_length=150).analyze(
-        "https://example.com/press", data=html
-    )
+    spec = SpecAnalyzer(filtered_text_length=150).analyze("https://example.com/press", data=html)
     assert spec.items.selector == "./*"
-    feed = SpecExtractor().extract(
-        "https://example.com/press", spec, data=html
-    )
+    feed = SpecExtractor().extract("https://example.com/press", spec, data=html)
     assert len(feed["items"]) == 3
     assert feed["items"][0]["link"] == "https://example.com/a"
 
@@ -201,9 +191,7 @@ def test_analyzer_prefers_news_list_over_form_select():
     )
     assert spec.items.selector == "div.one-news"
     assert set(spec.fields) >= {"date", "title", "link"}
-    feed = SpecExtractor().extract(
-        "https://example.com/press", spec, data=html
-    )
+    feed = SpecExtractor().extract("https://example.com/press", spec, data=html)
     assert len(feed["items"]) == 3
     assert feed["items"][0]["link"] == "https://example.com/about/news/15514/"
 
@@ -242,9 +230,7 @@ def _wordpress_mixed_category_html():
         "Fifth headline long enough for the analyzer here",
         "Sixth headline long enough for the analyzer here",
     ]
-    for idx, (category, date, title) in enumerate(
-        zip(categories, dates, titles), start=1
-    ):
+    for idx, (category, date, title) in enumerate(zip(categories, dates, titles), start=1):
         articles.append(
             """
       <article class="fusion-post-grid post-%d type-post status-publish hentry %s">
@@ -257,9 +243,7 @@ def _wordpress_mixed_category_html():
     <div class="fusion-posts-container">
       %s
     </div>
-    """ % (
-        "\n".join(articles)
-    )
+    """ % ("\n".join(articles))
     return (
         b"""<!DOCTYPE html><html><head><title>Latest News</title></head><body>"""
         + body.encode("utf-8")
@@ -274,9 +258,7 @@ def test_analyzer_ignores_wordpress_taxonomy_classes_for_items():
         "https://example.com/latest-news/", data=html, require_items=True
     )
     assert spec.items.selector == "article.fusion-post-grid"
-    feed = SpecExtractor().extract(
-        "https://example.com/latest-news/", spec, data=html
-    )
+    feed = SpecExtractor().extract("https://example.com/latest-news/", spec, data=html)
     assert len(feed["items"]) == 6
 
 

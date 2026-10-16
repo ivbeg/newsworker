@@ -1,267 +1,312 @@
 #!/usr/bin/env python
-# -*- coding: utf8 -*-
+"""Modern, bounded RSS/Atom/JSON Feed and sitemap discovery."""
 
-import sys
-from urllib.parse import urljoin, urlparse
-from bs4 import UnicodeDammit
-from lxml.html import fromstring, etree
-import lxml.etree
-import feedparser
+from __future__ import annotations
+
+import concurrent.futures
+import json
 import logging
-import requests
-import urllib3
-from .extractor import FeedExtractor
-from .consts import FEED_CONTENT_TYPES
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
-# Suppress InsecureRequestWarning for unverified HTTPS requests
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import feedparser
+import lxml.etree
+from lxml import etree
+from lxml.html import fromstring
+
+from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport
+from .settings import Settings
+
+log = logging.getLogger(__name__)
+_FEED_TYPES = {
+    "application/rss+xml": "rss",
+    "application/atom+xml": "atom",
+    "application/feed+json": "jsonfeed",
+    "application/json": "jsonfeed",
+}
 
 
-def decode_html(html_string):
-    converted = UnicodeDammit(html_string, is_html=True)
-    return converted.unicode_markup
+@dataclass
+class FeedCandidate:
+    url: str
+    feedtype: str = "undefined"
+    title: Optional[str] = None
+    source: List[str] = field(default_factory=list)
+    confidence: float = 0.5
+    verification: str = "unverified"
+    verification_error: Optional[str] = None
+    num_entries: Optional[int] = None
+    language: Optional[str] = None
+    hubs: List[str] = field(default_factory=list)
+    self_url: Optional[str] = None
+    entries: Optional[list] = None
+
+    def to_dict(self):
+        data = {
+            "title": self.title or self.url,
+            "url": self.url,
+            "feedtype": self.feedtype,
+            "source": list(self.source),
+            "confidence": self.confidence,
+            "verification": self.verification,
+        }
+        for name in (
+            "verification_error",
+            "num_entries",
+            "language",
+            "hubs",
+            "self_url",
+            "entries",
+        ):
+            value = getattr(self, name)
+            if value not in (None, [], ""):
+                data[name] = value
+        return data
 
 
-def get_url_data(url):
-    """Extract HTML data from URL"""
-    try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()  # Raise an exception for bad status codes
-        realurl = r.url
-        data = r.content  # Use this instead of urllib
-        data = decode_html(data)
-        # Use memory-efficient parser that removes blank text nodes
-        parser = etree.HTMLParser(remove_blank_text=True)
-        root = fromstring(data, parser=parser)
-        return root, realurl
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except requests.exceptions.RequestException as e:
-        logging.warning(f"Request error while fetching {url}: {e}")
-        return None, None
-    except (ValueError, lxml.etree.ParserError, lxml.etree.XMLSyntaxError) as e:
-        logging.warning(f"Failed to parse HTML from {url}: {e}")
-        return None, None
-    except Exception as e:
-        logging.warning(f"Unexpected error while processing {url}: {e}")
-        return None, None
+def _normalized(url):
+    parsed = urlsplit(url)
+    return urlunsplit(
+        (
+            parsed.scheme.lower(),
+            (parsed.hostname or "").lower() + ((":" + str(parsed.port)) if parsed.port else ""),
+            parsed.path or "/",
+            parsed.query,
+            "",
+        )
+    )
+
+
+def _feedlike(url):
+    low = url.lower()
+    return low.endswith((".rss", ".atom", ".xml", ".json")) or any(
+        marker in low for marker in ("/feed", "/rss", "/atom", "jsonfeed")
+    )
 
 
 class FeedsFinder:
-    """Look up for feeds on website pages"""
+    def __init__(self, settings=None, transport=None):
+        self.settings = settings or Settings()
+        self.transport = transport or RequestsTransport()
+        self.policy = FetchPolicy(
+            timeout=self.settings.request_timeout,
+            max_bytes=self.settings.max_content_bytes,
+            verify_tls=self.settings.verify_tls,
+            redirect_limit=self.settings.redirect_limit,
+            allowed_hosts=tuple(self.settings.allowed_hosts),
+            block_private_hosts=self.settings.block_private_hosts,
+            allow_private_hosts=self.settings.allow_private_hosts,
+            trusted_proxy=self.settings.trusted_proxy,
+            proxy=self.settings.proxy or None,
+            user_agent=self.settings.user_agent,
+            extra_headers=self.settings.extra_headers,
+        )
 
-    def __init__(self):
-        self.feedext = FeedExtractor()
-        pass
+    def _fetch(self, url, *, max_bytes=None):
+        policy = self.policy
+        if max_bytes is not None:
+            from dataclasses import replace
 
-    def __find_rss_autodiscover(self, root, url):
-        """Autodiscover feeds by link"""
-        feeds = []
-        links = root.xpath("//link")
-        logging.info(links)
-        for link in links:
-            if "rel" in link.attrib and link.attrib["rel"].lower() == "alternate":
-                item = {}
-                item["url"] = link.attrib["href"]
-                if "type" in link.attrib:
-                    ltype = link.attrib["type"].lower()
-                    if ltype == "application/atom+xml":
-                        item["feedtype"] = "atom"
-                    elif ltype == "application/rss+xml":
-                        item["feedtype"] = "rss"
-                    else:
-                        continue
-                if "title" in link.attrib:
-                    item["title"] = link.attrib["title"]
-                item["confidence"] = 1
-                feeds.append(item)
-        return feeds
-
-    def __find_feed_img(self, root, url):
-        """Find by RSS image"""
-        feeds = []
-        for img in root.xpath("//img"):
-            if "src" in img.attrib:
-                href = img.attrib["src"]
-                up = urlparse(href)
-                ipath = up.path
-                parts = ipath.split("/")
-                parts.reverse()
-                if len(parts) > 1:
-                    name = parts[0] if len(parts[0]) > 0 else parts[1]
-                else:
-                    name = parts[0]
-                name = name.lower()
-                for k in ["rss", "feed"]:
-                    if name.find(k) == 0 and name.find("feedback") == -1:
-                        atag = img.getparent()
-                        if atag.tag == "a":
-                            u = atag.attrib["href"]
-                            if u not in feeds:
-                                item = {"url": u}
-                                text = None
-                                if "title" in atag.attrib:
-                                    text = atag.attrib["title"]
-                                if not text and "alt" in atag.attrib:
-                                    text = atag.attrib["alt"]
-                                if not text and "title" in img.attrib:
-                                    text = img.attrib["title"]
-                                if not text and "alt" in img.attrib:
-                                    text = img.attrib["alt"]
-                                if text is not None:
-                                    item["title"] = text
-                                if k == "rss":
-                                    item["feedtype"] = "rss"
-                                else:
-                                    item["feedtype"] = "undefined"
-                                item["confidence"] = 0.5
-                                feeds.append(item)
-        return feeds
-
-    def __find_feed_by_urls(self, root, url):
-        "Find feeds by related urls"
-        feeds = []
-        for olink in root.xpath("//a"):
-            item = {}
-            feedfound = False
-            if "href" in olink.attrib:
-                href = olink.attrib["href"]
-                up = urlparse(href)
-                ipath = up.path
-                parts = ipath.split("/")
-                parts.reverse()
-                if len(parts) > 1:
-                    name = parts[0] if len(parts[0]) > 0 else parts[1]
-                else:
-                    name = parts[0]
-                name = name.lower()
-                if name.find(".") > -1:
-                    name, ext = name.rsplit(".", 1)
-                else:
-                    ext = ""
-                for k in ["rss", "feed"]:
-                    if name.find(k) == 0 and name.find("feedback") == -1:
-                        u = olink.attrib["href"]
-                        if u not in feeds:
-                            item["url"] = u
-                            if k == "rss":
-                                item["feedtype"] = "rss"
-                            else:
-                                item["feedtype"] = "undefined"
-                            item["confidence"] = 0.5
-                            feeds.append(item)
-                            feedfound = True
-                            break
-                if feedfound:
-                    continue
-                for p in parts:
-                    if p in ["rss", "feed"]:
-                        u = olink.attrib["href"]
-                        if u not in feeds:
-                            item["url"] = u
-                            if p == "rss":
-                                item["feedtype"] = "rss"
-                            else:
-                                item["feedtype"] = "undefined"
-                            item["confidence"] = 0.5
-                            feeds.append(item)
-                            feedfound = True
-                            break
-                if feedfound:
-                    continue
-                try:
-                    text = olink.text if olink.text else None
-                except (AttributeError, TypeError) as e:
-                    logging.debug(f"Error accessing link text: {e}")
-                    text = None
-                if text:
-                    if text.lower().find("rss") > -1:
-                        u = olink.attrib["href"]
-                        if u not in feeds:
-                            item["url"] = u
-                            item["confidence"] = 0.5
-                            item["feedtype"] = "rss"
-                            feeds.append(item)
-                            feedfound = True
-                            break
-                if feedfound:
-                    continue
-                for k in ["rss", "xml"]:
-                    if ext.find(k) == 0:
-                        if olink.getparent().tag == "a":
-                            u = olink.attrib["href"]
-                            if u not in feeds:
-                                item["url"] = u
-                                if k == "rss":
-                                    item["feedtype"] = "rss"
-                                else:
-                                    item["feedtype"] = "undefined"
-                                item["confidence"] = 0.5
-                                feeds.append(item)
-                                feedfound = True
-                                break
-                if feedfound:
-                    continue
-        return feeds
+            policy = replace(policy, max_bytes=max_bytes)
+        return self.transport.fetch(FetchRequest(url), policy)
 
     def collect_feeds(self, root, url):
-        url_set = set()  # Use set for O(1) lookups
-        feeds = []
-        
-        for f in self.__find_rss_autodiscover(root, url):
-            if f["url"] not in url_set:
-                url_set.add(f["url"])
-                feeds.append(f)
-        
-        for u in self.__find_feed_img(root, url):
-            if u["url"] not in url_set:  # O(1) lookup
-                url_set.add(u["url"])
-                feeds.append(u)
-        
-        for u in self.__find_feed_by_urls(root, url):
-            if u["url"] not in url_set:  # O(1) lookup
-                url_set.add(u["url"])
-                feeds.append(u)
-        
-        res = []
-        for f in feeds:
-            f["url"] = urljoin(url, f["url"])
-            res.append(f)
-        return res
+        candidates: Dict[str, FeedCandidate] = {}
+        page_hubs = []
+        page_self = None
+        for relation in root.xpath("//link[@href]"):
+            rels = {part.lower() for part in (relation.get("rel") or "").split()}
+            if "hub" in rels:
+                page_hubs.append(urljoin(url, relation.get("href")))
+            if "self" in rels:
+                page_self = urljoin(url, relation.get("href"))
 
-    def discover_sitemap_feeds(self, base_url, timeout=30):
-        """Discovers feed-like URLs from the site's ``/sitemap.xml``.
+        def add(raw_url, feedtype="undefined", source="heuristic", confidence=0.5, title=None):
+            if not raw_url:
+                return
+            absolute = urljoin(url, raw_url.strip())
+            if urlsplit(absolute).scheme not in {"http", "https"}:
+                return
+            key = _normalized(absolute)
+            candidate = candidates.get(key)
+            if candidate is None:
+                candidate = FeedCandidate(
+                    absolute,
+                    feedtype=feedtype,
+                    title=title,
+                    source=[source],
+                    confidence=confidence,
+                    hubs=list(dict.fromkeys(page_hubs)),
+                    self_url=page_self,
+                )
+                candidates[key] = candidate
+            else:
+                if source not in candidate.source:
+                    candidate.source.append(source)
+                if candidate.feedtype == "undefined" and feedtype != "undefined":
+                    candidate.feedtype = feedtype
+                candidate.confidence = max(candidate.confidence, confidence)
+                candidate.title = candidate.title or title
 
-        Fetches ``/sitemap.xml`` relative to ``base_url`` and returns entries for
-        ``<loc>`` URLs that look like feeds (ending in ``.rss``/``.atom`` or
-        containing ``/feed``/``/rss``/``/atom``). Missing or malformed sitemaps
-        yield an empty list rather than raising.
-        """
-        sitemap_url = urljoin(base_url, "/sitemap.xml")
-        try:
-            resp = requests.get(sitemap_url, timeout=timeout)
-            resp.raise_for_status()
-            doc = lxml.etree.fromstring(resp.content)
-        except (requests.exceptions.RequestException, lxml.etree.XMLSyntaxError) as e:
-            logging.debug("No usable sitemap at %s: %s", sitemap_url, e)
-            return []
-        locs = [
-            (el.text or "").strip()
-            for el in doc.iter()
-            if isinstance(el.tag, str) and el.tag.rsplit("}", 1)[-1] == "loc"
-        ]
-        feeds = []
-        seen = set()
-        for loc in locs:
-            if not loc or loc in seen:
+        for link in root.xpath("//link[@href]"):
+            rels = {part.lower() for part in (link.get("rel") or "").split()}
+            media_type = (link.get("type") or "").split(";", 1)[0].strip().lower()
+            if "alternate" in rels and media_type in _FEED_TYPES:
+                add(
+                    link.get("href"),
+                    _FEED_TYPES[media_type],
+                    "autodiscovery",
+                    1.0,
+                    link.get("title"),
+                )
+        for anchor in root.xpath("//a[@href]"):
+            href = anchor.get("href") or ""
+            text = " ".join("".join(anchor.itertext()).split()).lower()
+            if _feedlike(href) or "rss" in text or text == "feed":
+                kind = (
+                    "atom"
+                    if "atom" in href.lower()
+                    else "rss"
+                    if "rss" in (href + text).lower()
+                    else "undefined"
+                )
+                add(href, kind, "link-heuristic", 0.5, anchor.get("title"))
+        for image in root.xpath("//a[@href]/img[@src]"):
+            marker = ((image.get("src") or "") + " " + (image.get("alt") or "")).lower()
+            if "rss" in marker or "feed" in marker:
+                add(image.getparent().get("href"), "rss", "feed-icon", 0.6, image.get("alt"))
+        return [candidate.to_dict() for candidate in candidates.values()]
+
+    def discover_sitemap_feeds(
+        self,
+        base_url,
+        timeout=30,
+        *,
+        max_depth=3,
+        max_documents=25,
+        max_urls=5000,
+        max_bytes=2 * 1024 * 1024,
+    ):
+        start = urljoin(base_url, "/sitemap.xml")
+        queue = [(start, 0)]
+        visited = set()
+        candidates: Dict[str, FeedCandidate] = {}
+        urls_seen = 0
+        while queue and len(visited) < max_documents and urls_seen < max_urls:
+            sitemap_url, depth = queue.pop(0)
+            key = _normalized(sitemap_url)
+            if key in visited or depth > max_depth:
                 continue
-            low = loc.lower()
-            if low.endswith((".rss", ".atom")) or any(
-                token in low for token in ("/feed", "/rss", "/atom", "feed.xml", "rss.xml")
+            visited.add(key)
+            try:
+                result = self._fetch(sitemap_url, max_bytes=max_bytes)
+                document = lxml.etree.fromstring(result.body)
+            except Exception as exc:
+                log.debug("No usable sitemap at %s: %s", sitemap_url, exc)
+                continue
+            root_name = document.tag.rsplit("}", 1)[-1] if isinstance(document.tag, str) else ""
+            locations = [
+                (element.text or "").strip()
+                for element in document.iter()
+                if isinstance(element.tag, str) and element.tag.rsplit("}", 1)[-1] == "loc"
+            ]
+            for location in locations:
+                if not location:
+                    continue
+                urls_seen += 1
+                if urls_seen > max_urls:
+                    break
+                absolute = urljoin(sitemap_url, location)
+                if root_name == "sitemapindex":
+                    queue.append((absolute, depth + 1))
+                elif _feedlike(absolute):
+                    normalized = _normalized(absolute)
+                    candidate = candidates.get(normalized)
+                    if candidate is None:
+                        candidate = FeedCandidate(
+                            absolute,
+                            "atom" if "atom" in absolute.lower() else "rss",
+                            source=[f"sitemap:{sitemap_url}"],
+                            confidence=0.6,
+                        )
+                        candidates[normalized] = candidate
+                    elif f"sitemap:{sitemap_url}" not in candidate.source:
+                        candidate.source.append(f"sitemap:{sitemap_url}")
+        return [candidate.to_dict() for candidate in candidates.values()]
+
+    def _verify(self, candidate, include_entries=False):
+        result = dict(candidate)
+        try:
+            fetched = self._fetch(candidate["url"])
+            parsed = self._parse_feed(
+                fetched, candidate.get("feedtype", "undefined"), include_entries
+            )
+            result.update(parsed)
+            result["verification"] = "valid"
+        except Exception as exc:
+            result["verification"] = "invalid"
+            result["verification_error"] = f"{type(exc).__name__}: {exc}"
+        return result
+
+    def _parse_feed(self, fetched: FetchResult, declared_type, include_entries):
+        content_type = (fetched.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+        kind = _FEED_TYPES.get(content_type, declared_type)
+        if kind == "jsonfeed" or fetched.body.lstrip().startswith(b"{"):
+            data = json.loads(fetched.body.decode("utf-8"))
+            version = data.get("version", "")
+            if (
+                not isinstance(version, str)
+                or "jsonfeed.org/version" not in version
+                or not isinstance(data.get("items"), list)
             ):
-                seen.add(loc)
-                feeds.append({"title": loc, "url": loc, "feedtype": "rss"})
-        return feeds
+                raise ValueError("document is not a valid JSON Feed")
+            parsed = {
+                "title": data.get("title") or fetched.effective_url,
+                "url": fetched.effective_url,
+                "feedtype": "jsonfeed",
+                "num_entries": len(data["items"]),
+            }
+            if data.get("language"):
+                parsed["language"] = data["language"]
+            if include_entries:
+                parsed["entries"] = data["items"]
+            hubs = [
+                hub.get("url")
+                for hub in data.get("hubs", [])
+                if isinstance(hub, dict) and hub.get("url")
+            ]
+            if hubs:
+                parsed["hubs"] = hubs
+            return parsed
+        document = feedparser.parse(fetched.body)
+        if document.bozo and not document.entries and not document.feed:
+            raise ValueError("document is not a valid RSS or Atom feed")
+        if not document.feed.get("title") and not document.entries:
+            raise ValueError("feed has neither metadata nor entries")
+        feedtype = "atom" if str(document.version).startswith("atom") else "rss"
+        parsed = {
+            "title": document.feed.get("title") or fetched.effective_url,
+            "url": fetched.effective_url,
+            "feedtype": feedtype,
+            "num_entries": len(document.entries),
+        }
+        if document.feed.get("language"):
+            parsed["language"] = document.feed.language
+        if include_entries:
+            parsed["entries"] = document.entries
+        hubs, self_url = [], None
+        for link in document.feed.get("links", []):
+            rel = link.get("rel")
+            if rel == "hub" and link.get("href"):
+                hubs.append(link["href"])
+            elif rel == "self" and link.get("href"):
+                self_url = link["href"]
+        if hubs:
+            parsed["hubs"] = hubs
+        if self_url:
+            parsed["self_url"] = self_url
+        return parsed
 
     def find_feeds(
         self,
@@ -273,183 +318,86 @@ class FeedsFinder:
         crawl=False,
         timeout=30,
         include_sitemap=False,
+        max_workers=8,
     ):
-        """
-        :param url: webpage url
-        :param noverify: Adds feeds without parsing. Warning, it's true by default. If you set it to false, it will be much slover
-        :param force_htmlparse: Forces parse of found HTML links as RSS/ATOM
-        :param include_entries: If "True" adds entries to the result
-        :param extractrss: If "True" uses feed extract algorithm to get valid feed
-        :param crawl: If "True" then crawls pages that are most likely with news. Not implemented yet
-        :return: list of feeds
-        """
-        feed_urls = []
-        items = []
         try:
-            r = requests.get(url, timeout=timeout)
-            r.raise_for_status()  # Raise an exception for bad status codes
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Failed to fetch {url}: {e}")
+            fetched = self._fetch(url)
+        except Exception as exc:
+            log.error("Failed to fetch %s: %s", url, exc)
             return {"url": url, "items": []}
-        
-        real_url = r.url
-        results = {"url": real_url, "items": items}
-        
-        # Check if content-type header exists
-        content_type = r.headers.get("content-type", "").split(";")[0].strip()
-        if content_type in FEED_CONTENT_TYPES:
-            try:
-                d = feedparser.parse(r.content)
-            except Exception as e:
-                logging.warning(f"Failed to parse feed from {url}: {e}")
-                d = None
-            
-            if d and "title" in d.feed:
-                item = {
-                    "title": d.feed.title,
-                    "url": real_url,
-                    "feedtype": "rss",
-                    "num_entries": len(d.entries),
-                }
-                if "language" in d.feed:
-                    item["language"] = d.feed.language
-                if include_entries:
-                    item["entries"] = d.entries
-                items.append(item)
+        content_type = (fetched.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+        root = None
+        if content_type in _FEED_TYPES or fetched.body.lstrip().startswith((b"<?xml", b"{")):
+            candidate = FeedCandidate(
+                fetched.effective_url,
+                _FEED_TYPES.get(content_type, "undefined"),
+                source=["direct"],
+                confidence=1.0,
+            ).to_dict()
+            items = [candidate if noverify else self._verify(candidate, include_entries)]
         else:
-            # Use memory-efficient parser that removes blank text nodes
             try:
-                parser = etree.HTMLParser(remove_blank_text=True)
-                root = fromstring(r.content, parser=parser)
-            except (ValueError, lxml.etree.ParserError, lxml.etree.XMLSyntaxError) as e:
-                logging.warning(f"Failed to parse HTML from {url}: {e}")
+                root = fromstring(fetched.body, parser=etree.HTMLParser(remove_blank_text=True))
+            except (ValueError, lxml.etree.ParserError, lxml.etree.XMLSyntaxError):
                 root = None
-            
-            if root is not None:
-                feeds = self.collect_feeds(root, real_url)
-                for f in feeds:
-                    if noverify:
-                        item = {"title": f["url"], "url": f["url"], "feedtype": "rss"}
-                        items.append(item)
-                        continue
-                    else:
-                        try:
-                            d = feedparser.parse(f["url"])
-                        except Exception as e:
-                            logging.warning(f"Failed to parse feed from {f['url']}: {e}")
-                            d = None
-                        
-                        if d and "title" in d.feed:
-                            item = {
-                                "title": d.feed.title,
-                                "url": f["url"],
-                                "feedtype": f["feedtype"],
-                                "num_entries": len(d.entries),
-                            }
-                            if "language" in d.feed:
-                                item["language"] = d.feed.language
-                            if include_entries:
-                                item["entries"] = d.entries
-                            items.append(item)
-                        elif force_htmlparse:
-                            try:
-                                rp = requests.get(f["url"], timeout=timeout)
-                                rp.raise_for_status()
-                            except requests.exceptions.RequestException as e:
-                                logging.warning(f"Failed to fetch {f['url']} for HTML parsing: {e}")
-                                continue
-                            
-                            if not rp.content:
-                                continue
-                            
-                            try:
-                                parser = etree.HTMLParser(remove_blank_text=True)
-                                root_content = fromstring(rp.content, parser=parser)
-                                if root_content is None:
-                                    continue
-                                cfeeds = self.collect_feeds(root_content, rp.url)
-                            except (ValueError, lxml.etree.ParserError, lxml.etree.XMLSyntaxError) as e:
-                                logging.warning(f"Failed to parse HTML from {f['url']}: {e}")
-                                continue
-                            for cf in cfeeds:
-                                if cf["url"] in feed_urls:
-                                    continue
-                                try:
-                                    d = feedparser.parse(cf["url"])
-                                except Exception as e:
-                                    logging.warning(f"Failed to parse feed from {cf['url']}: {e}")
-                                    continue
-                                
-                                if d and "title" in d.feed:
-                                    item = {
-                                        "title": d.feed.title,
-                                        "url": f["url"],
-                                        "feedtype": f["feedtype"],
-                                        "num_entries": len(d.entries),
-                                    }
-                                    if "language" in d.feed:
-                                        item["language"] = d.feed.language
-                                    if include_entries:
-                                        item["entries"] = d.entries
-                                    items.append(item)
-                if extractrss:
-                    try:
-                        datafeed, session = self.feedext.get_feed(r.url, data=r.content)
-                    except Exception as e:
-                        logging.warning(f"Failed to extract feed from {r.url}: {e}")
-                        datafeed = None
-                    
-                    if datafeed and len(datafeed.get("items", [])) > 0:
-                        item = {
-                            "feedtype": "html",
-                            "title": datafeed["title"],
-                            "num_entries": len(datafeed["items"]),
-                            "url": r.url,
-                        }
-                        if include_entries:
-                            item["entries"] = datafeed["items"]
-                        items.append(item)
-                results["items"] = items
+            items = self.collect_feeds(root, fetched.effective_url) if root is not None else []
         if include_sitemap:
-            existing = {it.get("url") for it in results["items"]}
-            for feed in self.discover_sitemap_feeds(real_url, timeout=timeout):
-                if feed["url"] not in existing:
-                    results["items"].append(feed)
-                    existing.add(feed["url"])
-        return results
+            items.extend(self.discover_sitemap_feeds(fetched.effective_url, timeout=timeout))
+        items = _merge_candidates(items)
+        if not noverify and items:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max(1, min(max_workers, len(items)))
+            ) as pool:
+                items = list(pool.map(lambda item: self._verify(item, include_entries), items))
+        elif noverify:
+            for item in items:
+                item["verification"] = "unverified"
+        if extractrss and root is not None:
+            from .extractor import FeedExtractor
+
+            feed, _ = FeedExtractor().get_feed(fetched.effective_url, data=fetched.body)
+            if feed.get("items"):
+                items.append(
+                    {
+                        "title": feed["title"],
+                        "url": fetched.effective_url,
+                        "feedtype": "html",
+                        "num_entries": len(feed["items"]),
+                        "verification": "valid",
+                        "source": ["extraction"],
+                    }
+                )
+        return {"url": fetched.effective_url, "items": items}
 
     def find_feeds_deep(self, url, lookin=True):
-        items = []
-        root, real_url = get_url_data(url)
-        results = {"url": real_url, "items": items}
-        if not root:
-            return {}
-        feeds = self.collect_feeds(root, real_url)
-        for f in feeds:
-            try:
-                d = feedparser.parse(f["url"])
-            except Exception as e:
-                logging.warning(f"Failed to parse feed from {f['url']}: {e}")
-                d = None
-            
-            if d and "title" in d.feed:
-                items.append(
-                    {"title": d.feed.title, "url": f["url"], "feedtype": f["feedtype"]}
-                )
-            elif lookin:
-                dp, dp_url = get_url_data(f["url"])
-                if not dp:
-                    results["items"] = items
-                    return results
-                cfeeds = self.collect_feeds(dp, dp_url)
-                for cf in cfeeds:
-                    try:
-                        d = feedparser.parse(cf["url"])
-                    except Exception as e:
-                        logging.warning(f"Failed to parse feed from {cf['url']}: {e}")
-                        continue
-                    
-                    if d and "title" in d.feed:
-                        items.append(cf)
-        results["items"] = items
-        return results
+        return self.find_feeds(url, noverify=False, force_htmlparse=lookin)
+
+
+def _merge_candidates(items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        key = _normalized(item["url"])
+        current = merged.get(key)
+        if current is None:
+            merged[key] = dict(item)
+            merged[key]["source"] = list(item.get("source") or [])
+            continue
+        for source in item.get("source") or []:
+            if source not in current["source"]:
+                current["source"].append(source)
+        if current.get("feedtype") == "undefined" and item.get("feedtype") != "undefined":
+            current["feedtype"] = item["feedtype"]
+        current["confidence"] = max(current.get("confidence", 0), item.get("confidence", 0))
+    return list(merged.values())
+
+
+def get_url_data(url):
+    """Compatibility helper returning parsed HTML and effective URL."""
+    finder = FeedsFinder()
+    try:
+        fetched = finder._fetch(url)
+        root = fromstring(fetched.body, parser=etree.HTMLParser(remove_blank_text=True))
+        return root, fetched.effective_url
+    except Exception as exc:
+        log.warning("Failed to parse HTML from %s: %s", url, exc)
+        return None, None

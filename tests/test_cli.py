@@ -3,6 +3,7 @@
 import datetime
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from newsworker import __version__
@@ -16,7 +17,6 @@ from newsworker.core import (
 from newsworker.extractor import FeedExtractor
 from newsworker.settings import Settings
 from newsworker.spec import SpecAnalyzer
-
 
 runner = CliRunner()
 
@@ -61,7 +61,7 @@ def test_parse_headers_ok():
 
 
 def test_parse_headers_rejects_malformed():
-    with pytest.raises(Exception):
+    with pytest.raises(typer.BadParameter):
         _parse_headers(["no-colon-here"])
 
 
@@ -127,9 +127,7 @@ def test_analyze_command_forwards_ignore_robots(monkeypatch):
     monkeypatch.setattr(SpecAnalyzer, "__init__", fake_init)
     monkeypatch.setattr(SpecAnalyzer, "analyze", fake_analyze)
 
-    result = runner.invoke(
-        app, ["analyze", "https://example.com/news", "--ignore-robots"]
-    )
+    result = runner.invoke(app, ["analyze", "https://example.com/news", "--ignore-robots"])
     assert result.exit_code == 0
     assert captured["respect_robots"] is False
 

@@ -21,9 +21,7 @@ def _service_with_fake_workers(monkeypatch, tmp_path, fail_for=None):
     svc = FeedService()
     svc.settings = settings
     svc.use_cache = False
-    monkeypatch.setattr(
-        FeedService, "_worker_service", lambda self: _FakeService(fail_for)
-    )
+    monkeypatch.setattr(FeedService, "_worker_service", lambda self: _FakeService(fail_for))
     return svc
 
 
@@ -38,9 +36,7 @@ def test_get_feeds_returns_feed_per_url(monkeypatch, tmp_path):
 
 def test_get_feeds_deduplicates(monkeypatch, tmp_path):
     svc = _service_with_fake_workers(monkeypatch, tmp_path)
-    results = svc.get_feeds(
-        ["https://a.example/x", "https://a.example/x"], max_workers=2
-    )
+    results = svc.get_feeds(["https://a.example/x", "https://a.example/x"], max_workers=2)
     assert len(results) == 1
 
 

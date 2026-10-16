@@ -1,43 +1,44 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-"""
+""" """
 
-
-import hashlib
-import requests.exceptions
-from copy import copy
+import contextvars
 import datetime
+import hashlib
+from copy import copy
+
 import requests
+import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import urllib3
 
 # Suppress InsecureRequestWarning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-from lxml.html import fromstring
 from lxml import etree
-from qddate import DateParser
-from .tools import (
-    get_abs_url,
-    decode_html,
-    clean_url,
-    validate_url,
-    can_fetch,
-    parse_fuzzy_date,
-    looks_like_fuzzy_date,
-    parse_datetime_attr,
-    resolve_feed_language,
-    Logger,
-)
-from .tagmapper import TagPath, TagBlock
+from lxml.html import fromstring
+
 from .consts import (
+    TAG_TYPE_BOLD,
     TAG_TYPE_DATE,
-    TAG_TYPE_TAIL,
-    TAG_TYPE_TEXT,
     TAG_TYPE_HREF,
     TAG_TYPE_IMG,
-    TAG_TYPE_BOLD,
+    TAG_TYPE_TAIL,
+    TAG_TYPE_TEXT,
+)
+from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport
+from .runtime import ExtractionContext
+from .tagmapper import TagBlock, TagPath
+from .tools import (
+    Logger,
+    clean_url,
+    decode_html,
+    get_abs_url,
+    looks_like_fuzzy_date,
+    normalize_datetime,
+    parse_datetime_attr,
+    parse_fuzzy_date,
+    resolve_feed_language,
+    validate_url,
 )
 
 #: Heading tags checked for titles before generic long-text heuristics.
@@ -52,6 +53,7 @@ def _element_text(node):
     if callable(text_content):
         return text_content()
     return "".join(node.itertext())
+
 
 # Default timeout for HTTP requests
 DEFAULT_TIMEOUT = 30
@@ -88,11 +90,10 @@ class FeedExtractor:
         :param extra_headers: extra HTTP headers sent on every request.
         :param cookies_file: optional Netscape cookie jar path.
         """
-        self.log = Logger()
+        self._context_var = contextvars.ContextVar("newsworker_extraction_context", default=None)
+        self._fallback_context = ExtractionContext()
         self.debug = debug
-        self.log.save("initclass", "Start loading patterns")
-        self.indexer = DateParser(generate=True)
-        self.log.save("initclass", "End loading patterns")
+        self.log.save("initclass", "Date patterns will be loaded per request")
         # key parameters
         self.filtered_text_length = filtered_text_length
         self.max_bytes = max_bytes
@@ -105,29 +106,74 @@ class FeedExtractor:
         self._cookie_jar = None
         #: Explicit language override; empty/None means auto-detect.
         self.default_language = default_language or None
-        #: Language captured from the last response's Content-Language header.
-        self._last_content_language = None
-        #: Validators (``etag``/``last_modified``) from the last response.
-        self.last_response_meta = {}
-
+        self.default_timezone = "UTC"
         # Create session with connection pooling
         self.http_session = requests.Session()
-        
+
         # Configure retry strategy
         retry_strategy = Retry(
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
         )
-        adapter = HTTPAdapter(
-            max_retries=retry_strategy,
-            pool_connections=10,
-            pool_maxsize=20
-        )
+        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
         self.http_session.mount("http://", adapter)
         self.http_session.mount("https://", adapter)
 
-        self.session = None
+        self.transport = RequestsTransport(self.http_session)
+
+    def _context(self):
+        return self._context_var.get() or self._fallback_context
+
+    @property
+    def log(self):
+        context = self._context()
+        if context.logger is None:
+            context.logger = Logger()
+        return context.logger
+
+    @property
+    def session(self):
+        return self._context().session
+
+    @session.setter
+    def session(self, value):
+        self._context().session = value
+
+    @property
+    def indexer(self):
+        return self._context().date_parser
+
+    @property
+    def last_response_meta(self):
+        return self._context().response_meta
+
+    @last_response_meta.setter
+    def last_response_meta(self, value):
+        self._context().response_meta = dict(value or {})
+
+    @property
+    def _last_content_language(self):
+        return self._context().content_language
+
+    @_last_content_language.setter
+    def _last_content_language(self, value):
+        self._context().content_language = value
+
+    def activate_context(self, context):
+        """Return a context manager activating request-local state."""
+        extractor = self
+
+        class _Activation:
+            def __enter__(self):
+                self.token = extractor._context_var.set(context)
+                return context
+
+            def __exit__(self, exc_type, exc, tb):
+                extractor._context_var.reset(self.token)
+                return False
+
+        return _Activation()
 
     def initfeed(self, document, base_url):
         """Inits feed to get data"""
@@ -181,14 +227,18 @@ class FeedExtractor:
             for k, v in list(r.items()):
                 d[k] = int(v)
             try:
-                the_date = datetime.datetime(**d)
+                the_date = normalize_datetime(
+                    datetime.datetime(**d), self._context().default_timezone
+                )
                 if self.session:
                     self.session["debug"]["num_matched"] += 1
                 return True, p["key"], p, text, the_date
             except (ValueError, TypeError, KeyError) as e:
                 self.log.save("match_text", f"Failed to create datetime: {e}")
                 return False, None, None, None, None
-        fuzzy_date = parse_fuzzy_date(text)
+        fuzzy_date = parse_fuzzy_date(
+            text, now=self._context().clock(), default_timezone=self._context().default_timezone
+        )
         if fuzzy_date is not None:
             if self.session:
                 self.session["debug"]["num_matched"] += 1
@@ -202,7 +252,9 @@ class FeedExtractor:
         if isinstance(getattr(node, "tag", None), str) and node.tag == "time":
             dt_attr = node.get("datetime")
             if dt_attr:
-                the_date = parse_datetime_attr(dt_attr)
+                the_date = parse_datetime_attr(
+                    dt_attr, default_timezone=self._context().default_timezone
+                )
                 if the_date is not None:
                     display = (node.text or "").strip() or dt_attr
                     if self.session:
@@ -213,9 +265,9 @@ class FeedExtractor:
         text_2 = None
 
         if node.text is not None and len(node.text.strip()) > 0:
-            text_1 = str(node.text.strip("/\\«[]»").strip().replace("\xA0", " "))
+            text_1 = str(node.text.strip("/\\«[]»").strip().replace("\xa0", " "))
         if node.tail is not None and len(node.tail.strip()) > 0:
-            text_2 = str(node.tail.strip("/\\«[]»").strip().replace("\xA0", " "))
+            text_2 = str(node.tail.strip("/\\«[]»").strip().replace("\xa0", " "))
         if text_1 is None and text_2 is None:
             return None, None, None, None, None
         #        self.log.save('match_date', 'Matching date text: ' + unicode(text_1))
@@ -270,14 +322,15 @@ class FeedExtractor:
             self.session["debug"]["clusters"] = {}
             self.log.save("getclusters", "Document is None, returning empty clusters")
             return {}
-        
+
         # Optimized XPath: exclude script/style nodes early for better performance
         nodes = document.xpath(
-            "//*[not(self::script or self::style) and string-length(text())<%d]" % self.filtered_text_length
+            "//*[not(self::script or self::style) and string-length(text())<%d]"
+            % self.filtered_text_length
         )
         self.session["debug"]["num_nodes"] = len(nodes)
         self.log.save("getclusters", "Nodes extracted")
-        
+
         # Early filtering: only check nodes that likely contain dates (have digits
         # or a relative-date keyword such as "yesterday"/"ago"). This avoids
         # expensive pattern matching on nodes that cannot be dates.
@@ -285,15 +338,11 @@ class FeedExtractor:
         for node in nodes:
             text = (node.text or "").strip()
             tail = (node.tail or "").strip()
-            if text and (
-                any(char.isdigit() for char in text) or looks_like_fuzzy_date(text)
-            ):
+            if text and (any(char.isdigit() for char in text) or looks_like_fuzzy_date(text)):
                 potential_date_nodes.append(node)
-            elif tail and (
-                any(char.isdigit() for char in tail) or looks_like_fuzzy_date(tail)
-            ):
+            elif tail and (any(char.isdigit() for char in tail) or looks_like_fuzzy_date(tail)):
                 potential_date_nodes.append(node)
-        
+
         shared_node = None
         last = None
         last_d = {}
@@ -372,9 +421,7 @@ class FeedExtractor:
                 avg_diff.setdefault(diff, 0)
                 avg_diff[diff] += 1
                 block = TagBlock(snode, snode_path, data[i], diff)
-                (match, t_key, t_data, the_text, the_date) = self.match_date(
-                    nodes[i]["node"]
-                )
+                (match, t_key, t_data, the_text, the_date) = self.match_date(nodes[i]["node"])
                 use_tail = nodes[i]["node"].text is None
                 text = nodes[i]["node"].text if not use_tail else nodes[i]["node"].tail
                 if text is not None:
@@ -393,9 +440,7 @@ class FeedExtractor:
                 else:
                     block = TagBlock(snode, snode_path, data[i], None)
                 last_block = block
-                (match, t_key, t_data, the_text, the_date) = self.match_date(
-                    nodes[i]["node"]
-                )
+                (match, t_key, t_data, the_text, the_date) = self.match_date(nodes[i]["node"])
                 if nodes[i]["node"].text:
                     block.add_entity(
                         "pub_date",
@@ -406,11 +451,7 @@ class FeedExtractor:
                     )
                 else:
                     use_tail = nodes[i]["node"].text is None
-                    text = (
-                        nodes[i]["node"].text
-                        if not use_tail
-                        else nodes[i]["node"].tail
-                    )
+                    text = nodes[i]["node"].text if not use_tail else nodes[i]["node"].tail
                     if text is not None:
                         block.add_entity(
                             "pub_date",
@@ -419,18 +460,17 @@ class FeedExtractor:
                             text.strip(),
                             the_date,
                         )
-        # NOTE: this picks the last non-zero gap rather than the true mode
-        # (``max_num`` is never updated); preserved as-is to keep the extraction
-        # output stable. See the maintainer notes for a possible follow-up.
         max_num = 0
         akey = 0
         for key, value in list(avg_diff.items()):
             if value > max_num:
                 akey = key
-        if last_block.shift != akey:
+                max_num = value
+        if last_block is not None and akey and last_block.shift != akey:
             last_block.shift = akey
         res.reverse()
-        res.append(last_block)
+        if last_block is not None:
+            res.append(last_block)
         return res
 
     def _item_from_block(self, base_url, block, cache_block):
@@ -466,27 +506,15 @@ class FeedExtractor:
                     and len(text_content) > 10
                 ):
                     description = text_content
-                elif (
-                    title is not None
-                    and description is not None
-                    and len(text_content) > 10
-                ):
+                elif title is not None and description is not None and len(text_content) > 10:
                     description_parts.append(text_content)
             if TAG_TYPE_TAIL in ann.attrs:
                 tail_content = ann.node.tail.strip() if ann.node.tail else ""
                 if len(tail_content) > 10 and title is None:
                     title = tail_content
-                if (
-                    description is None
-                    and title is not None
-                    and len(tail_content) > 10
-                ):
+                if description is None and title is not None and len(tail_content) > 10:
                     description = tail_content
-                elif (
-                    title is not None
-                    and description is not None
-                    and len(tail_content) > 10
-                ):
+                elif title is not None and description is not None and len(tail_content) > 10:
                     description_parts.append(tail_content)
             if TAG_TYPE_HREF in ann.attrs and "href" in ann.node.attrib:
                 clr = clean_url(get_abs_url(base_url, ann.node.attrib["href"]))
@@ -555,7 +583,93 @@ class FeedExtractor:
             self._cookie_jar = jar
         return self._cookie_jar
 
-    def fetch(self, url, user_agent=None, max_bytes=None, conditional=None):
+    def fetch_result(
+        self, url, user_agent=None, max_bytes=None, conditional=None, context=None
+    ) -> FetchResult:
+        """Fetch a URL through the shared policy and return response metadata."""
+        active = context or self._context()
+        validate_url(url)
+        if self.respect_robots and not self._can_fetch_policy(url, user_agent):
+            raise PermissionError("robots.txt disallows fetching %s" % url)
+        headers = {}
+        if conditional:
+            if conditional.get("etag"):
+                headers["If-None-Match"] = conditional["etag"]
+            if conditional.get("last_modified"):
+                headers["If-Modified-Since"] = conditional["last_modified"]
+        policy = FetchPolicy(
+            timeout=self.timeout,
+            max_bytes=max_bytes if max_bytes is not None else self.max_bytes,
+            verify_tls=self.verify_tls,
+            redirect_limit=getattr(self, "redirect_limit", 5),
+            allowed_hosts=tuple(getattr(self, "allowed_hosts", ()) or ()),
+            block_private_hosts=getattr(self, "block_private_hosts", True),
+            allow_private_hosts=getattr(self, "allow_private_hosts", False),
+            trusted_proxy=getattr(self, "trusted_proxy", False),
+            proxy=self.proxy,
+            user_agent=user_agent or "newsworker",
+            extra_headers=self.extra_headers,
+            cookies=self._load_cookies(),
+        )
+        result = self.transport.fetch(FetchRequest(url=url, headers=headers), policy)
+        active.response_meta = {
+            **result.validators,
+            "requested_url": result.requested_url,
+            "effective_url": result.effective_url,
+            "status": result.status,
+            "headers": dict(result.headers),
+        }
+        if result.content_language:
+            active.content_language = (
+                result.content_language.split(",")[0].strip().split("-")[0].lower() or None
+            )
+        return result
+
+    def _can_fetch_policy(self, url, user_agent):
+        """Retrieve robots.txt through the same bounded transport and policy."""
+        from urllib.parse import urljoin, urlparse
+        from urllib.robotparser import RobotFileParser
+
+        from . import tools
+
+        parsed = urlparse(url)
+        root = f"{parsed.scheme}://{parsed.netloc}"
+        with tools._ROBOTS_LOCK:
+            cached = tools._ROBOTS_CACHE.get(root, tools._ROBOTS_MISSING)
+        if cached is tools._ROBOTS_MISSING:
+            parser = RobotFileParser()
+            robots_url = urljoin(root, "/robots.txt")
+            policy = FetchPolicy(
+                timeout=self.timeout,
+                max_bytes=min(self.max_bytes, 512 * 1024),
+                verify_tls=self.verify_tls,
+                redirect_limit=getattr(self, "redirect_limit", 5),
+                allowed_hosts=tuple(getattr(self, "allowed_hosts", ()) or ()),
+                block_private_hosts=getattr(self, "block_private_hosts", True),
+                allow_private_hosts=getattr(self, "allow_private_hosts", False),
+                trusted_proxy=getattr(self, "trusted_proxy", False),
+                proxy=self.proxy,
+                user_agent=user_agent or "newsworker",
+                extra_headers=self.extra_headers,
+                cookies=self._load_cookies(),
+            )
+            try:
+                result = self.transport.fetch(FetchRequest(robots_url), policy)
+                parser.set_url(robots_url)
+                parser.parse(result.body.decode("utf-8", "replace").splitlines())
+            except Exception:
+                parser = None
+            with tools._ROBOTS_LOCK:
+                tools._ROBOTS_CACHE[root] = parser
+            cached = parser
+        if cached is None:
+            return True
+        try:
+            return cached.can_fetch(user_agent or "*", url)
+        except Exception:
+            return True
+
+    def fetch(self, url, user_agent=None, max_bytes=None, conditional=None, context=None):
         """Fetches ``url`` and returns its bytes, capped at ``max_bytes``.
 
         Only ``http``/``https`` URLs are accepted (a baseline SSRF guard). TLS
@@ -570,70 +684,27 @@ class FeedExtractor:
         a ``304 Not Modified`` response returns ``None`` so the caller can reuse
         its cached copy. Response validators are recorded on ``last_response_meta``.
         """
-        validate_url(url)
-        if self.respect_robots and not can_fetch(url, user_agent):
-            raise PermissionError("robots.txt disallows fetching %s" % url)
-        limit = max_bytes if max_bytes is not None else self.max_bytes
-        headers = dict(self.extra_headers)
-        if user_agent is not None:
-            headers["User-agent"] = user_agent
-        if conditional:
-            if conditional.get("etag"):
-                headers["If-None-Match"] = conditional["etag"]
-            if conditional.get("last_modified"):
-                headers["If-Modified-Since"] = conditional["last_modified"]
-        proxies = None
-        if self.proxy:
-            proxies = {"http": self.proxy, "https": self.proxy}
         try:
-            with self.http_session.get(
+            result = self.fetch_result(
                 url,
-                headers=headers,
-                verify=self.verify_tls,
-                timeout=self.timeout,
-                proxies=proxies,
-                cookies=self._load_cookies(),
-                stream=True,
-            ) as u:
-                if getattr(u, "status_code", None) == 304:
-                    return None
-                u.raise_for_status()  # Raise an exception for bad status codes
-                self.last_response_meta = {
-                    "etag": u.headers.get("ETag"),
-                    "last_modified": u.headers.get("Last-Modified"),
-                }
-                content_language = u.headers.get("Content-Language")
-                if content_language:
-                    self._last_content_language = (
-                        content_language.split(",")[0].strip().split("-")[0].lower()
-                        or None
-                    )
-                declared = u.headers.get("Content-Length")
-                if declared and declared.isdigit() and int(declared) > limit:
-                    raise ValueError(
-                        "Response too large: %s bytes declared (max %d)"
-                        % (declared, limit)
-                    )
-                chunks = []
-                total = 0
-                for chunk in u.iter_content(chunk_size=65536):
-                    if not chunk:
-                        continue
-                    total += len(chunk)
-                    if total > limit:
-                        raise ValueError(
-                            "Response exceeded max size of %d bytes" % limit
-                        )
-                    chunks.append(chunk)
-                data = b"".join(chunks)
+                user_agent=user_agent,
+                max_bytes=max_bytes,
+                conditional=conditional,
+                context=context,
+            )
+            if result.not_modified:
+                return None
+            data = result.body
             if self.session:
                 self.session["debug"]["page_length"] = len(data)
             return data
-        except requests.exceptions.Timeout:
-            self.log.save("fetch", f"Timeout while fetching {url}")
-            raise
-        except requests.exceptions.RequestException as e:
-            self.log.save("fetch", f"Request error while fetching {url}: {e}")
+        except Exception as exc:
+            from .fetch import FetchTimeout
+
+            if isinstance(exc, FetchTimeout):
+                self.log.save("fetch", f"Timeout while fetching {url}")
+            else:
+                self.log.save("fetch", f"Request error while fetching {url}: {exc}")
             raise
 
     def init_session(self):
@@ -647,12 +718,13 @@ class FeedExtractor:
     def clear_session(self):
         """Used to end internal debugging section"""
         session = copy(self.session)
-        session["log"] = self.log.getlogs()
+        session["log"] = list(self.log.getlogs())
+        self.log.clear()
         self.log.reset()
         self.session = None
         return session
 
-    def get_feed(self, url, data=None, user_agent=None, cached_p=None):
+    def _get_feed_active(self, url, data=None, user_agent=None, cached_p=None):
         """Return feed from url"""
         self.init_session()
         if cached_p is not None:
@@ -670,23 +742,19 @@ class FeedExtractor:
             self.log.save("get_rss", f"Failed to parse HTML: {e}")
             document = None
         self.log.save("get_rss", "Parsed data")
-        
+
         if document is None:
             self.log.save("get_rss", "Document is None, returning empty feed")
             feed = self.initfeed(None, url)
             session = self.clear_session()
             return feed, session
-        
+
         feed = self.initfeed(document, url)
         clusters = self.getclusters(document, url)
         self.log.save("get_rss", "Clusters extracted")
         feed = self.process_clusters(url, clusters, feed)
         if not self.default_language:
-            samples = [
-                item.get("title")
-                for item in feed.get("items", [])
-                if item.get("title")
-            ]
+            samples = [item.get("title") for item in feed.get("items", []) if item.get("title")]
             feed["language"] = resolve_feed_language(
                 document=document,
                 content_language=self._last_content_language,
@@ -698,6 +766,16 @@ class FeedExtractor:
         self.log.save("get_rss", "End of log")
         session = self.clear_session()
         return feed, session
+
+    def get_feed(self, url, data=None, user_agent=None, cached_p=None, context=None):
+        """Return a feed using isolated state for this logical build."""
+        context = context or ExtractionContext(
+            source="network" if data is None else "prefetched",
+            base_url=url,
+            default_timezone=self.default_timezone,
+        )
+        with self.activate_context(context):
+            return self._get_feed_active(url, data=data, user_agent=user_agent, cached_p=cached_p)
 
     def learn_feed(self, url, user_agent=None, data=None):
         """Build a feed from a page without reusing cached date patterns.
