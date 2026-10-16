@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -82,6 +83,35 @@ class TokenBucketLimiter:
                     key: value for key, value in self._buckets.items() if value[1] >= cutoff
                 }
         return True, 0
+
+
+def feed_signature(key, url, fmt):
+    """HMAC authorising ``GET /feed`` for exactly this source URL and format."""
+    message = f"{fmt}\n{url}".encode("utf-8")
+    return hmac.new(key.encode("utf-8"), message, hashlib.sha256).hexdigest()[:32]
+
+
+def public_feed_url(settings, url, fmt=DEFAULT_FORMAT):
+    """The subscription URL for a source page, signed when a key is configured."""
+    base = (getattr(settings, "public_base_url", "") or "").rstrip("/")
+    if not base:
+        host = getattr(settings, "host", "127.0.0.1")
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        base = f"http://{host}:{getattr(settings, 'port', 8787)}"
+    query = {"url": url, "format": fmt}
+    key = getattr(settings, "feed_signing_key", "")
+    if key:
+        query["sig"] = feed_signature(key, url, fmt)
+    return f"{base}/feed?{urlencode(query)}"
+
+
+def _feed_request(params):
+    """The (source URL, format) a /feed request asks for, as the handler reads them."""
+    urls = params.get("url") or []
+    url = urls[0].strip() if urls else ""
+    fmt = (params.get("format", [DEFAULT_FORMAT])[0] or DEFAULT_FORMAT).lower()
+    return url, fmt
 
 
 def _etag_matches(header, etag):
@@ -175,10 +205,23 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
     def _tokens(self):
         return getattr(self.settings, "api_tokens", []) or []
 
-    def _authorized(self):
+    def _signing_key(self):
+        return getattr(self.settings, "feed_signing_key", "") or ""
+
+    def _signed(self, params):
+        """Whether ``params`` carry a valid signature for the feed they request."""
+        key = self._signing_key()
+        supplied = (params.get("sig") or [""])[0]
+        if not key or not supplied:
+            return False
+        url, fmt = _feed_request(params)
+        return hmac.compare_digest(supplied, feed_signature(key, url, fmt))
+
+    def _authorized(self, *, feed=False):
         tokens = self._tokens()
         if not tokens:
-            return True
+            # A signing key alone protects /feed: only signed links pass there.
+            return not (feed and self._signing_key())
         supplied = self.headers.get("X-API-Key", "")
         authorization = self.headers.get("Authorization", "")
         if authorization.lower().startswith("bearer "):
@@ -186,17 +229,14 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         return any(hmac.compare_digest(str(supplied), str(token)) for token in tokens)
 
     def _public_feed_url(self, url, fmt):
-        """The URL a reader uses to fetch this feed; never carries credentials."""
-        base = (getattr(self.settings, "public_base_url", "") or "").rstrip("/")
-        if not base:
-            host = getattr(self.settings, "host", "127.0.0.1")
-            if ":" in host and not host.startswith("["):
-                host = f"[{host}]"
-            base = f"http://{host}:{getattr(self.settings, 'port', 8787)}"
-        return f"{base}/feed?{urlencode({'url': url, 'format': fmt})}"
+        """The URL a reader uses to fetch this feed; never carries API tokens."""
+        return public_feed_url(self.settings, url, fmt)
 
     def _may_force_refresh(self):
-        """``?refresh=1`` is honoured for loopback clients or token-authenticated calls."""
+        """``?refresh=1`` is honoured for loopback clients or token-authenticated calls.
+
+        A signature does not cover ``refresh``, so signed links never force one.
+        """
         if self._tokens():
             return self._authorized()
         try:
@@ -211,10 +251,10 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
                 return forwarded.split(",", 1)[0].strip()
         return self.client_address[0]
 
-    def _prepare(self, *, protected=False):
+    def _prepare(self, *, protected=False, feed=False, signed=False):
         self.request_id = self.headers.get("X-Request-ID", "").strip()[:128] or uuid.uuid4().hex
-        if protected and not self._authorized():
-            self._problem(401, "Unauthorized", "A valid API token is required")
+        if protected and not (signed or self._authorized(feed=feed)):
+            self._problem(401, "Unauthorized", "A valid API token or feed signature is required")
             return False
         limiter = getattr(self.server, "rate_limiter", None)
         if limiter is None:
@@ -252,7 +292,9 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         protected = path in {"/feed", "/metrics"}
-        if not self._prepare(protected=protected):
+        feed = path == "/feed"
+        signed = feed and self._signed(parse_qs(parsed.query))
+        if not self._prepare(protected=protected, feed=feed, signed=signed):
             return
         if path in {"/health", "/health/live"}:
             self._send_text(
@@ -306,8 +348,7 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         self._send_text(200, generate_latest().decode("utf-8"), CONTENT_TYPE_LATEST)
 
     def _handle_feed(self, params):
-        urls = params.get("url") or []
-        url = urls[0].strip() if urls else ""
+        url, fmt = _feed_request(params)
         if not url:
             self._problem(400, "Bad Request", "Missing required 'url' query parameter")
             return
@@ -316,7 +357,6 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._problem(400, "Rejected URL", str(exc))
             return
-        fmt = (params.get("format", [DEFAULT_FORMAT])[0] or DEFAULT_FORMAT).lower()
         if fmt not in SUPPORTED_FORMATS:
             self._problem(
                 400, "Unsupported Format", f"Supported formats: {', '.join(SUPPORTED_FORMATS)}"
@@ -399,8 +439,12 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
 def run_server(settings=None):
     settings = settings or Settings()
     settings.validate()
-    if settings.host not in {"127.0.0.1", "localhost", "::1"} and not settings.api_tokens:
-        log.warning("Server is binding a routable host without API-token authentication")
+    if (
+        settings.host not in {"127.0.0.1", "localhost", "::1"}
+        and not settings.api_tokens
+        and not settings.feed_signing_key
+    ):
+        log.warning("Server is binding a routable host without API tokens or a feed signing key")
     server = ThreadingHTTPServer((settings.host, settings.port), FeedRequestHandler)
     server.feed_service = FeedService(settings=settings)  # type: ignore[attr-defined]
     server.rate_limiter = TokenBucketLimiter(

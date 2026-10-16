@@ -658,6 +658,36 @@ def extract(
         sys.exit(1)
 
 
+@app.command("feed-url")
+def feed_url(
+    url: str = typer.Argument(..., help="Source page to subscribe to."),
+    format: str = typer.Option("atom", "--format", "-f", help="Feed format served."),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Settings YAML file."),
+):
+    """Print the feed-server subscription URL for a page (signed when configured).
+
+    Uses ``public_base_url`` (or host/port) and, when ``feed_signing_key`` is
+    set, adds a signature so RSS readers can subscribe without an API token.
+    """
+    from newsworker.server import public_feed_url
+    from newsworker.tools import validate_url
+
+    fmt = format.lower()
+    if fmt not in SUPPORTED_FORMATS:
+        raise typer.BadParameter(
+            f"supported formats: {', '.join(SUPPORTED_FORMATS)}", param_hint="--format"
+        )
+    validate_url(url)
+    settings = Settings.resolve(config)
+    if settings.api_tokens and not settings.feed_signing_key:
+        typer.echo(
+            "Warning: the server requires API tokens; set feed_signing_key to give "
+            "readers a link that works without one.",
+            err=True,
+        )
+    typer.echo(public_feed_url(settings, url, fmt))
+
+
 @app.command()
 def serve(
     host: Optional[str] = typer.Option(
