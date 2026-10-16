@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from pprint import pprint
+from typing import Any, cast
 
 import typer
 
@@ -19,6 +20,7 @@ from newsworker.formats import (
     format_feed,
     format_scan,
 )
+from newsworker.model import Feed
 from newsworker.server import run_server
 from newsworker.service import FeedService
 from newsworker.settings import DEFAULT_USER_AGENT as USER_AGENT  # noqa: F401  (compat alias)
@@ -206,7 +208,7 @@ def _read_sources(urls_file=None, from_opml=None, opml_pages=False):
     """
     from newsworker.formats import read_opml
 
-    urls = []
+    urls: list[str] = []
     if urls_file:
         with open(urls_file, encoding="utf-8") as handle:
             urls.extend(
@@ -265,7 +267,7 @@ def _resolve_caches(config, specs, content):
     settings = Settings.resolve(config)
     cache_dir = settings.resolved_cache_dir()
     both = not specs and not content
-    caches = {}
+    caches: dict[str, Any] = {}
     if specs or both:
         caches["specs"] = SpecCache(
             cache_dir,
@@ -1027,7 +1029,7 @@ def batch(
         name = hashlib.sha1(url.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
         path = os.path.join(output_dir, "%s.%s" % (name, ext))
         try:
-            rendered = format_feed(feed, fmt=fmt, public_url=url)
+            rendered = format_feed(cast(Feed, feed), fmt=fmt, public_url=url)
             tmp_path = path + ".tmp"
             with open(tmp_path, "w", encoding="utf-8") as handle:
                 handle.write(rendered)

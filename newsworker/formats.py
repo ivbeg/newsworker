@@ -43,6 +43,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 import yaml
 
+from .model import Feed
 from .tools import is_safe_link, normalize_datetime
 
 #: Supported output format identifiers for extracted feeds.
@@ -106,14 +107,14 @@ def to_json(feed):
     return json.dumps(feed, indent=4, default=_date_handler, ensure_ascii=False)
 
 
-def newest_pubdate(feed):
+def newest_pubdate(feed: Feed):
     """Return the most recent item publication time as an aware datetime, or None."""
     dates = [_ensure_tz(item.get("pubdate")) for item in feed.get("items", [])]
     dates = [value for value in dates if value is not None]
     return max(dates) if dates else None
 
 
-def content_fingerprint(feed, fmt="json", public_url=None):
+def content_fingerprint(feed: Feed, fmt: str = "json", public_url: str | None = None) -> str:
     """Hash of what a feed says, independent of when it was rendered.
 
     Used for weak HTTP validators: two renderings of the same items share it
@@ -405,7 +406,7 @@ def read_opml(source):
     return entries
 
 
-def format_feed(feed, fmt="json", public_url=None):
+def format_feed(feed: Feed, fmt: str = "json", public_url: str | None = None) -> str:
     """Renders ``feed`` in the requested format.
 
     :param feed: internal feed dictionary.

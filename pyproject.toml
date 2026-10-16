@@ -107,39 +107,13 @@ addopts = "-ra"
 filterwarnings = ["error::DeprecationWarning:newsworker"]
 
 [tool.mypy]
-# Type checking is being adopted incrementally. Third-party stubs are often
-# missing, so imports are treated leniently and errors from not-yet-annotated
-# modules that are only imported (``follow_imports = silent``) are suppressed.
-# Only the modules listed in ``files`` are actively checked; expand this list
-# as more modules gain type hints.
+# The whole package is checked. Third-party stubs are often missing, so imports
+# are treated leniently.
 python_version = "3.10"
 ignore_missing_imports = true
 follow_imports = "silent"
 disable_error_code = ["import-untyped"]
-files = [
-    "newsworker/settings.py",
-    "newsworker/cache.py",
-    "newsworker/fetch.py",
-    "newsworker/runtime.py",
-    "newsworker/diagnostics.py",
-    "newsworker/sources.py",
-    "newsworker/batch.py",
-    "newsworker/delivery.py",
-    "newsworker/dates.py",
-    "newsworker/relative.py",
-    "newsworker/structured.py",
-    "newsworker/evaluation.py",
-    "newsworker/explain.py",
-    "newsworker/watching.py",
-    "newsworker/language.py",
-    "newsworker/undated.py",
-    "newsworker/native.py",
-    "newsworker/mcp_server.py",
-    "newsworker/spec/model.py",
-    "newsworker/spec/selectors.py",
-    "newsworker/spec/execute.py",
-    "newsworker/spec/analyze.py",
-]
+files = ["newsworker"]
 check_untyped_defs = true
 
 [tool.coverage.run]

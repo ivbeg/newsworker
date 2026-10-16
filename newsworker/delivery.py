@@ -16,11 +16,12 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from email.message import EmailMessage
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 from .fetch import FetchPolicy, FetchRequest, RequestsTransport
 from .formats import _date_handler, format_feed
+from .model import Feed, Item
 from .tools import validate_url
 
 log = logging.getLogger(__name__)
@@ -140,8 +141,8 @@ class StdoutChannel:
                         json.dumps(payload.item, default=_date_handler, ensure_ascii=False) + "\n"
                     )
             else:
-                feed = dict(payloads[0].feed)
-                feed["items"] = [restore_item(payload.item) for payload in payloads]
+                feed = cast(Feed, dict(payloads[0].feed))
+                feed["items"] = [cast(Item, restore_item(payload.item)) for payload in payloads]
                 self.stream.write(format_feed(feed, fmt=self.fmt))
             self.stream.flush()
         except Exception as exc:  # noqa: BLE001

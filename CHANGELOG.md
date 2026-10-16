@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and complexity (≤ 15, existing hot spots marked) rules, over `benchmarks/`
   too. Non-security hashes (cache keys, item ids) are declared
   `usedforsecurity=False`, which also keeps them working on FIPS builds.
+- **Typed feed contract** — `newsworker.model.Feed` and `Item` (`TypedDict`)
+  declare every key strategies produce; `FeedService.get_feed`, plugins,
+  native feeds and `format_feed` are annotated with them. mypy now checks the
+  whole package (41 modules, was 22).
 
 ## [1.4.0] - 2026-10-16
 

@@ -15,6 +15,7 @@ from .diagnostics import ExtractionDiagnostics
 from .enrich import enrich_feed, extract_fulltext_with_kind
 from .extractor import FeedExtractor
 from .fetch import policy_from_settings
+from .model import Feed
 from .plugins import load_plugins, select_plugin
 from .runtime import ExtractionContext, SingleFlight, closing_context
 from .settings import Settings
@@ -87,7 +88,7 @@ class FeedService:
         self.extractor.trusted_proxy = self.settings.trusted_proxy
         self._content_flights = SingleFlight()
         self._spec_flights = SingleFlight()
-        self._renderer = None
+        self._renderer: Any = None
 
     def new_context(self, *, source: str = "network", base_url: str | None = None):
         diagnostics = ExtractionDiagnostics(source=source, requested_url=base_url)
@@ -222,7 +223,7 @@ class FeedService:
         context: ExtractionContext | None = None,
         revalidate: bool = False,
         render: bool | None = None,
-    ) -> dict:
+    ) -> Feed:
         context = context or self.new_context(
             source="network" if data is None else "prefetched", base_url=url
         )
@@ -766,7 +767,7 @@ class FeedService:
                 self._store_content(url, payload.body, meta)
             documents[url] = (payload.body, meta)
         fetch_ms = (time.monotonic() - fetch_started) * 1000
-        results = {}
+        results: dict[str, Any] = {}
         for url in urls:
             started = time.monotonic()
             if runtime is not None:

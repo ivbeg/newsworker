@@ -11,6 +11,7 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlparse
 
 import yaml
@@ -105,14 +106,15 @@ def load_bridges(*directories) -> list[SiteBridge]:
     return bridges
 
 
-def default_bridge_dirs(settings=None):
+def default_bridge_dirs(settings: Any = None):
     """Returns bridge directories, lowest precedence (bundled) first."""
     from .settings import DEFAULT_HOME
 
     dirs = [_PACKAGE_BRIDGES]
     user_dir = os.path.join(DEFAULT_HOME, "bridges")
-    if settings is not None and getattr(settings, "bridges_dir", ""):
-        user_dir = os.path.expanduser(settings.bridges_dir)
+    configured = getattr(settings, "bridges_dir", None) if settings is not None else None
+    if configured:
+        user_dir = os.path.expanduser(configured)
     dirs.append(user_dir)
     return dirs
 

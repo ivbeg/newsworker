@@ -582,9 +582,8 @@ def run_server(settings=None):
         log.warning("Server is binding a routable host without API tokens or a feed signing key")
     server = ThreadingHTTPServer((settings.host, settings.port), FeedRequestHandler)
     server.feed_service = FeedService(settings=settings)  # type: ignore[attr-defined]
-    server.rate_limiter = TokenBucketLimiter(
-        settings.rate_limit_per_minute, settings.rate_limit_burst
-    )  # type: ignore[attr-defined]
+    limiter = TokenBucketLimiter(settings.rate_limit_per_minute, settings.rate_limit_burst)
+    server.rate_limiter = limiter  # type: ignore[attr-defined]
     server.build_semaphore = threading.BoundedSemaphore(settings.max_concurrent_builds)  # type: ignore[attr-defined]
     base = "http://%s:%d" % (settings.host, settings.port)
     print("newsworker feed server listening on %s" % base)

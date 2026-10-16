@@ -29,7 +29,8 @@ extractor = FeedExtractor(filtered_text_length=150)
 feed, session = extractor.get_feed(url="https://www.eib.org/en/index.htm")
 ```
 
-`feed` is a dictionary shaped like:
+`feed` is a dictionary shaped like `newsworker.model.Feed` (a `TypedDict`
+that documents every key; items are `newsworker.model.Item`), for example:
 
 ```python
 {

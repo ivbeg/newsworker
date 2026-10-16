@@ -142,7 +142,7 @@ def parse_datetime_attr(value, default_timezone="UTC"):
         if m.group("second") is not None:
             parts["second"] = int(m.group("second"))
     try:
-        return normalize_datetime(datetime.datetime(**parts), default_timezone)
+        return normalize_datetime(datetime.datetime(**parts), default_timezone)  # type: ignore[arg-type]
     except ValueError:
         return None
 
@@ -342,14 +342,14 @@ def detect_text_language(text):  # noqa: C901
 
 def detect_text_language_from_samples(samples):
     """Votes across multiple text samples and returns the winning language."""
-    votes = {}
+    votes: dict[str, int] = {}
     for sample in samples or []:
         lang = detect_text_language(sample)
         if lang:
             votes[lang] = votes.get(lang, 0) + 1
     if not votes:
         return None
-    return max(votes, key=votes.get)
+    return max(votes, key=lambda lang: votes[lang])
 
 
 def resolve_feed_language(
@@ -417,11 +417,13 @@ def robots_rules(root, fetch):
     if cached is not _ROBOTS_MISSING:
         return cached
     robots_url = urljoin(root, "/robots.txt")
-    parser = RobotFileParser()
+    parser: RobotFileParser | None = None
     try:
         body = fetch(robots_url)
-        parser.set_url(robots_url)
-        parser.parse(body.decode("utf-8", "replace").splitlines())
+        rules = RobotFileParser()
+        rules.set_url(robots_url)
+        rules.parse(body.decode("utf-8", "replace").splitlines())
+        parser = rules
     except Exception:
         parser = None
     _ROBOTS_CACHE[root] = parser
@@ -638,7 +640,8 @@ def clean_urlquery(qs):
     """
     cleanable = {key.lower() for key in CLEANABLE_QUERY_KEYS}
     kept_segments = []
-    kept, filtered = {}, {}
+    kept: dict[str, list] = {}
+    filtered: dict[str, list] = {}
     for segment in qs.split("&"):
         if not segment:
             continue

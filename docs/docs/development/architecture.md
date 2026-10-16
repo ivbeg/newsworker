@@ -30,6 +30,7 @@ concern each.
 | `dedup.py` / `delivery.py` | SQLite outbox with claim tokens; stdout, webhook, SMTP, Telegram channels |
 | `explain.py` / `diagnostics.py` / `evaluation.py` | Explaining results, strategy diagnostics, corpus scoring |
 | `jsrender.py` | Optional Playwright rendering |
+| `model.py` | `Feed` / `Item` typed shapes shared by every strategy and output |
 | `settings.py` | Layered settings: defaults < YAML < environment < CLI |
 | `plugins.py` / `bridges.py` | Third-party extractors and host/path YAML overrides |
 
@@ -39,9 +40,12 @@ JSON-LD/microdata when no items were found → undated fallback (opt-in) →
 browser rendering (opt-in). Links are then sanitised and item identities
 assigned from links before formatting.
 
-The internal feed dict is the API contract between extraction and output:
-`{title, language, link, description, items: [{title, description, pubdate,
-unique_id, content_hash, link, extra: {links, images}}], provenance}`.
+The internal feed dict is the API contract between extraction and output. Its
+shape is declared in `model.py` as `Feed` and `Item` (`TypedDict`s, so plain
+dicts still work): `{title, language, link, description, items: [{title,
+description, pubdate, unique_id, content_hash, link, extra: {links, images},
+…}], provenance}`. `tests/test_model.py` fails when a strategy emits a key the
+model does not declare. mypy checks the whole package.
 
 See [how it works](/getting-started/how-it-works) and
 [parsing specs](/guides/parsing-specs).
