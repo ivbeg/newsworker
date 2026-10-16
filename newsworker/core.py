@@ -200,6 +200,27 @@ def _apply_item_filters(feed, since=None, until=None, limit=None):
     return feed
 
 
+def _read_sources(urls_file=None, from_opml=None, opml_pages=False):
+    """URLs from a text file (one per line, # comments) and/or an OPML file.
+
+    OPML outlines contribute their ``xmlUrl`` (read natively as a feed) or,
+    with ``opml_pages``, their ``htmlUrl`` page. Duplicates are dropped.
+    """
+    from newsworker.formats import read_opml
+
+    urls = []
+    if urls_file:
+        with open(urls_file, "r", encoding="utf-8") as handle:
+            urls.extend(
+                line.strip() for line in handle if line.strip() and not line.startswith("#")
+            )
+    if from_opml:
+        for entry in read_opml(from_opml):
+            page = entry.get("html_url") if opml_pages else None
+            urls.append(page or entry["url"])
+    return list(dict.fromkeys(urls))
+
+
 def _version_callback(value: bool):
     if value:
         typer.echo(__version__)
@@ -947,8 +968,6 @@ def batch(
     """Extract feeds from many pages concurrently, one output file per URL."""
     import hashlib
 
-    from newsworker.formats import read_opml
-
     if verbose:
         enableVerbose()
     fmt = format.lower()
@@ -959,19 +978,7 @@ def batch(
         logging.error("Provide --urls-file or --from-opml.")
         sys.exit(2)
 
-    urls = []
-    if urls_file:
-        with open(urls_file, "r", encoding="utf-8") as handle:
-            urls.extend(
-                line.strip() for line in handle if line.strip() and not line.startswith("#")
-            )
-    if from_opml:
-        for entry in read_opml(from_opml):
-            # Feeds are read natively, so the subscription URL is the reliable
-            # source; --opml-pages extracts from each outline's htmlUrl instead.
-            page = entry.get("html_url") if opml_pages else None
-            urls.append(page or entry["url"])
-
+    urls = _read_sources(urls_file, from_opml, opml_pages)
     if not urls:
         logging.error("No URLs to process.")
         sys.exit(2)
@@ -990,7 +997,6 @@ def batch(
 
     os.makedirs(output_dir, exist_ok=True)
     ext = {"markdown": "md", "jsonfeed": "json"}.get(fmt, fmt)
-    urls = list(dict.fromkeys(urls))
     runtime: dict = {}
     try:
         results = service.get_feeds(urls, max_workers=max_workers, runtime=runtime)
@@ -1069,7 +1075,16 @@ def batch(
 
 @app.command()
 def watch(
-    url: str = typer.Argument(..., help="Page URL to watch."),
+    url: Optional[str] = typer.Argument(None, help="Page URL to watch."),
+    urls_file: Optional[str] = typer.Option(
+        None, "--urls-file", help="Watch every URL in this file (one per line)."
+    ),
+    from_opml: Optional[str] = typer.Option(
+        None, "--from-opml", help="Watch every feed in this OPML file."
+    ),
+    opml_pages: bool = typer.Option(
+        False, "--opml-pages", help="Watch OPML outlines' htmlUrl pages instead of their feeds."
+    ),
     interval: Optional[float] = typer.Option(
         None, "--interval", "-i", help="Seconds between polls. Overrides settings."
     ),
@@ -1099,7 +1114,11 @@ def watch(
     config: Optional[str] = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
-    """Poll a page on an interval and emit/deliver only newly seen items."""
+    """Poll pages on an interval and emit/deliver only newly seen items.
+
+    Watch one URL, or many with --urls-file / --from-opml; each source keeps its
+    own delivery history in the shared outbox.
+    """
     import signal
 
     from newsworker.dedup import DedupStore
@@ -1119,6 +1138,11 @@ def watch(
         raise typer.BadParameter(
             "max-iterations must not be negative", param_hint="--max-iterations"
         )
+    sources = list(
+        dict.fromkeys(([url] if url else []) + _read_sources(urls_file, from_opml, opml_pages))
+    )
+    if not sources:
+        raise typer.BadParameter("supply a URL, --urls-file or --from-opml")
     settings = Settings.resolve(
         config,
         cli={"watch_interval": interval, "watch_max_pages": max_pages},
@@ -1150,22 +1174,28 @@ def watch(
     signal.signal(signal.SIGTERM, _handle_signal)
 
     iterations = 0
-    last_result = None
+    last_results = {}
     try:
         while not stop["flag"]:
-            try:
-                last_result = _run_watch_iteration(
-                    service,
-                    url,
-                    fmt,
-                    dedup,
-                    webhook,
-                    max_pages,
-                    channels=selected_channels,
-                )
-            except Exception as e:  # noqa: BLE001
-                logging.error("Watch iteration failed for %s: %s", url, e)
-                last_result = WatchIterationResult(fetch_error=str(e))
+            # Sources are polled one after another; per-host pacing keeps the
+            # load on any one site bounded, and one failing source never stops
+            # the others.
+            for source in sources:
+                if stop["flag"]:
+                    break
+                try:
+                    last_results[source] = _run_watch_iteration(
+                        service,
+                        source,
+                        fmt,
+                        dedup,
+                        webhook,
+                        max_pages,
+                        channels=selected_channels,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logging.error("Watch iteration failed for %s: %s", source, e)
+                    last_results[source] = WatchIterationResult(fetch_error=str(e))
             # Retention runs while watching, not only on exit, so a long-lived
             # daemon's outbox does not grow without bound.
             dedup.prune(settings.delivered_retention_days)
@@ -1180,16 +1210,21 @@ def watch(
     finally:
         dedup.prune(settings.delivered_retention_days)
         dedup.close()
-    if max_iterations and last_result is not None and not last_result.successful:
+    failed = {source: r for source, r in last_results.items() if not r.successful}
+    if max_iterations and failed:
         # Finite runs (cron) report problems through the exit status.
-        status = last_result.status
-        if status.get("fetch_error"):
-            message = "Watch could not fetch %s: %s" % (url, status["fetch_error"])
-        else:
-            undelivered = status.get("pending", 0) + status.get("terminal", 0)
-            message = "Watch completed with %d pending delivery item(s)" % undelivered
-        logging.error(message)
-        typer.echo(message, err=True)
+        for source, result in failed.items():
+            status = result.status
+            if status.get("fetch_error"):
+                message = "Watch could not fetch %s: %s" % (source, status["fetch_error"])
+            else:
+                undelivered = status.get("pending", 0) + status.get("terminal", 0)
+                message = "Watch of %s completed with %d pending delivery item(s)" % (
+                    source,
+                    undelivered,
+                )
+            logging.error(message)
+            typer.echo(message, err=True)
         raise typer.Exit(code=1)
 
 

@@ -14,6 +14,8 @@ newsworker watch URL [OPTIONS]
 
 | Option | Alias | Default | Description |
 | --- | --- | --- | --- |
+| `--urls-file` | | — | Watch every URL in a text file (one per line, `#` comments). |
+| `--from-opml` | | — | Watch every feed in an OPML file (`--opml-pages` for their `htmlUrl`). |
 | `--interval` | `-i` | `300` | Seconds between polls. |
 | `--channel` | | `stdout` | Repeatable destination: `stdout`, `webhook`, `smtp`, `telegram`. |
 | `--webhook` | | — | POST new items as JSON to this URL (with retry/backoff). |
@@ -27,12 +29,18 @@ newsworker watch URL [OPTIONS]
 
 ```bash
 newsworker watch "https://example.com/news" --interval 300
+newsworker watch --from-opml subscriptions.opml --channel telegram --telegram-chat-id 42
 newsworker watch "https://example.com/news" --channel webhook \
   --webhook https://hooks.example/new --max-pages 3
 ```
 
 The loop shuts down cleanly on Ctrl-C / SIGTERM. Use `--max-iterations N` to
 stop after N polls (handy for cron-style single runs).
+
+With several sources, each poll visits them one after another; per-host pacing
+keeps the load on any one site bounded, a failing source does not stop the
+others, and every source keeps its own delivery history in the shared outbox.
+A finite run lists each source that failed and exits with `1`.
 
 Each poll first retries deliveries that are due from earlier polls, then fetches
 the page. A temporarily unavailable source therefore does not hold back items

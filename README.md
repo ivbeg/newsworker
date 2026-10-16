@@ -139,7 +139,7 @@ Commands:
   scan       Scan a page and find existing feeds
   analyze    Analyze a page and generate a reusable YAML parsing spec
   batch      Extract feeds from many pages concurrently
-  watch      Poll a page and emit/deliver only new items
+  watch      Poll pages (one URL, a list or OPML) and deliver only new items
   cache      Inspect and manage the spec and content caches
   spec       Validate a parsing spec without fetching
   parsedate  Parse a date/time string (debugging helper)
@@ -414,6 +414,8 @@ store under the cache dir), and emits or POSTs only new items.
 
 | Option | Alias | Default | Description |
 | --- | --- | --- | --- |
+| `--urls-file` | | — | Watch every URL in a text file (one per line, `#` comments). |
+| `--from-opml` | | — | Watch every feed in an OPML file (`--opml-pages` for their `htmlUrl`). |
 | `--interval` | `-i` | `300` | Seconds between polls. |
 | `--webhook` | | — | POST new items as JSON to this URL (with retry/backoff). |
 | `--format` | `-f` | `json` | Stdout output: JSON Lines for `json`, one document per poll for other formats. |
@@ -425,6 +427,9 @@ store under the cache dir), and emits or POSTs only new items.
 ```bash
 # Print new items every 5 minutes
 newsworker watch "https://example.com/news" --interval 300
+
+# Watch every feed of a reader's OPML export and post new items to Telegram
+newsworker watch --from-opml subscriptions.opml --channel telegram --telegram-chat-id 42
 
 # Deliver new items to a webhook, following pagination
 newsworker watch "https://example.com/news" -i 600 --webhook https://hooks.example/new --max-pages 3
