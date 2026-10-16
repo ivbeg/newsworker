@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        extra: [async, fulltext, metrics, browser]
+        extra: [async, fulltext, metrics, browser, mcp]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,7 +57,7 @@ jobs:
       - name: Optional-extra tests
         env:
           NEWSWORKER_BROWSER_TESTS: ${{ matrix.extra == 'browser' && '1' || '0' }}
-        run: pytest -q tests/test_optional_transports.py tests/test_enrich.py tests/test_http_caching.py tests/test_politeness.py
+        run: pytest -q tests/test_optional_transports.py tests/test_enrich.py tests/test_http_caching.py tests/test_politeness.py tests/test_mcp_server.py
 
   corpus:
     runs-on: ubuntu-latest

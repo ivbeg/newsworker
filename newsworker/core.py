@@ -1229,6 +1229,23 @@ def watch(
 
 
 @app.command()
+def mcp(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Settings YAML file."),
+):
+    """Run a Model Context Protocol server on stdio (needs the mcp extra).
+
+    Exposes extract_news, find_feeds and explain_page tools to AI assistants.
+    """
+    from newsworker.mcp_server import run
+
+    try:
+        run(Settings.resolve(config))
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+
+@app.command()
 def parsedate(
     datestr: str = typer.Argument(..., help="Date string to parse"),
     verbose: bool = typer.Option(

@@ -67,6 +67,7 @@ pip install newsworker[fulltext]    # optional: trafilatura for --full-text
 pip install newsworker[async]       # optional: aiohttp for batch --async
 pip install newsworker[browser]     # optional: Playwright rendering via --render
 pip install newsworker[metrics]     # optional: Prometheus /metrics endpoint
+pip install newsworker[mcp]         # optional: `newsworker mcp` server for AI assistants
 ```
 
 Installing from source:
@@ -136,6 +137,7 @@ Commands:
   serve      Run a local HTTP server exposing pages as feeds
   feed-url   Print a (signed) subscription URL for the feed server
   explain    Explain why a page yields the items it does (text/HTML report)
+  mcp        Serve extract/scan/explain as MCP tools for AI assistants
   scan       Scan a page and find existing feeds
   analyze    Analyze a page and generate a reusable YAML parsing spec
   batch      Extract feeds from many pages concurrently
@@ -693,6 +695,8 @@ print(format_scan(results, fmt="opml"))
 
 ## Features
 
+- **MCP server** (`newsworker mcp`): `extract_news`, `find_feeds` and `explain_page` tools for AI
+  assistants and IDEs, with the same fetch policy as the CLI.
 - Reads **RSS, Atom and JSON Feed** natively: when a URL already serves a feed, its entries are
   normalised (publisher ids, dates, authors, categories, content) instead of being scraped.
 - Identifies news blocks on arbitrary HTML pages using **date patterns** — 340+ patterns via [qddate](https://github.com/ivbeg/qddate), plus HTML `<time datetime="...">` attributes.
@@ -757,6 +761,7 @@ partial; see [language support](docs/docs/guides/language-support.md).
 | `async` | aiohttp | `batch --async` |
 | `browser` | playwright | `extract --render` |
 | `metrics` | prometheus_client | `GET /metrics` on the feed server |
+| `mcp` | mcp | `newsworker mcp` (Model Context Protocol server) |
 | `dev` | pytest, ruff, mypy, pre-commit, build, twine | local development and CI parity |
 
 ---

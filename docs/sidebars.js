@@ -84,6 +84,7 @@ const sidebars = {
       label: 'Integrations',
       items: [
         'integrations/python-library',
+        'integrations/mcp',
         'integrations/plugins-and-bridges',
         'integrations/docker',
         'integrations/feed-server',
