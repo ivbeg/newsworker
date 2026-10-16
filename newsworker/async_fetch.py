@@ -8,7 +8,7 @@ import ipaddress
 import socket
 import ssl
 import urllib.request
-from typing import Dict, List, Mapping, Optional, Set, Union
+from collections.abc import Mapping
 from urllib.parse import urljoin, urlsplit
 
 from .fetch import (
@@ -46,7 +46,7 @@ def _ssl_context(verify_tls: bool):
     return context
 
 
-def _proxy_hosts(policy) -> Set[str]:
+def _proxy_hosts(policy) -> set[str]:
     """Hosts of the proxies requests may go through; their addresses are not checked."""
     candidates = [policy.proxy] if policy.proxy else []
     if policy.trust_env:
@@ -228,7 +228,7 @@ async def _send(session, current_url, policy, host, headers=None):
 
 
 async def fetch_urls_async(
-    urls: List[str],
+    urls: list[str],
     *,
     policy=None,
     user_agent: str = "",
@@ -237,9 +237,9 @@ async def fetch_urls_async(
     proxy: str = "",
     max_bytes: int = 10 * 1024 * 1024,
     max_concurrency: int = 8,
-    extra_headers: Optional[dict] = None,
-    request_headers: Optional[Mapping[str, Mapping[str, str]]] = None,
-) -> Dict[str, Union[FetchResult, Exception]]:
+    extra_headers: dict | None = None,
+    request_headers: Mapping[str, Mapping[str, str]] | None = None,
+) -> dict[str, FetchResult | Exception]:
     """Fetch ``urls`` concurrently under ``policy``.
 
     ``request_headers`` maps a URL to headers for that request only, such as
@@ -264,7 +264,7 @@ async def fetch_urls_async(
     semaphore = asyncio.Semaphore(max(1, max_concurrency))
     limits = _HostLimits(policy)
     per_url = request_headers or {}
-    results: Dict[str, Union[FetchResult, Exception]] = {}
+    results: dict[str, FetchResult | Exception] = {}
     async with aiohttp.ClientSession(
         connector=connector,
         cookie_jar=_cookie_jar(policy.cookies),

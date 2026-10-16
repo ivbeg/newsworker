@@ -13,9 +13,10 @@ import smtplib
 import ssl
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from email.message import EmailMessage
-from typing import Any, Dict, List, Mapping, Optional, Protocol
+from typing import Any, Protocol
 from urllib.parse import quote
 
 from .fetch import FetchPolicy, FetchRequest, RequestsTransport
@@ -44,7 +45,7 @@ class DeliveryPayload:
 class DeliveryResult:
     status: str
     detail: str = ""
-    provider_id: Optional[str] = None
+    provider_id: str | None = None
 
     @property
     def successful(self) -> bool:
@@ -68,7 +69,7 @@ class DeliveryChannel(Protocol):
 
 class DeliveryRegistry:
     def __init__(self):
-        self._channels: Dict[str, DeliveryChannel] = {}
+        self._channels: dict[str, DeliveryChannel] = {}
 
     def register(self, channel: DeliveryChannel) -> None:
         self._channels[channel.name] = channel
@@ -129,7 +130,7 @@ class StdoutChannel:
     def send(self, payload: DeliveryPayload) -> DeliveryResult:
         return self.send_batch([payload])[0]
 
-    def send_batch(self, payloads: List[DeliveryPayload]) -> List[DeliveryResult]:
+    def send_batch(self, payloads: list[DeliveryPayload]) -> list[DeliveryResult]:
         if not payloads:
             return []
         try:
@@ -148,7 +149,7 @@ class StdoutChannel:
         return [DeliveryResult("success") for _ in payloads]
 
 
-def restore_item(item: Mapping[str, Any]) -> Dict[str, Any]:
+def restore_item(item: Mapping[str, Any]) -> dict[str, Any]:
     """Turn a JSON-serialised outbox item back into the internal item shape."""
     restored = dict(item)
     value = restored.get("pubdate")
@@ -164,7 +165,7 @@ def restore_item(item: Mapping[str, Any]) -> Dict[str, Any]:
 class WebhookChannel:
     url: str
     timeout: float = 30
-    policy: Optional[FetchPolicy] = None
+    policy: FetchPolicy | None = None
     session: Any = None
     name: str = "webhook"
     capabilities: ChannelCapabilities = field(
@@ -272,10 +273,10 @@ def _item_text(item: Mapping[str, Any]) -> tuple:
 def _send_json(
     url: str,
     body: Mapping[str, Any],
-    policy: Optional[FetchPolicy],
+    policy: FetchPolicy | None,
     *,
     method: str = "POST",
-    headers: Optional[Mapping[str, str]] = None,
+    headers: Mapping[str, str] | None = None,
     secrets: tuple = (),
 ) -> DeliveryResult:
     """Send one JSON delivery request and classify the outcome.
@@ -349,7 +350,7 @@ class SlackChannel:
     """Slack incoming webhook. Titles are escaped, so ``<!channel>`` cannot ping."""
 
     webhook_url: str
-    policy: Optional[FetchPolicy] = None
+    policy: FetchPolicy | None = None
     name: str = "slack"
     capabilities: ChannelCapabilities = field(default_factory=lambda: ChannelCapabilities())
 
@@ -373,7 +374,7 @@ class DiscordChannel:
     """Discord webhook. Mentions are disabled, so ``@everyone`` in a title is inert."""
 
     webhook_url: str
-    policy: Optional[FetchPolicy] = None
+    policy: FetchPolicy | None = None
     name: str = "discord"
     capabilities: ChannelCapabilities = field(
         default_factory=lambda: ChannelCapabilities(max_message_bytes=2000)
@@ -401,7 +402,7 @@ class MatrixChannel:
     homeserver: str
     token: str
     room_id: str
-    policy: Optional[FetchPolicy] = None
+    policy: FetchPolicy | None = None
     name: str = "matrix"
     capabilities: ChannelCapabilities = field(
         default_factory=lambda: ChannelCapabilities(supports_idempotency=True)
@@ -455,7 +456,7 @@ class MastodonChannel:
     instance: str
     token: str
     visibility: str = "unlisted"
-    policy: Optional[FetchPolicy] = None
+    policy: FetchPolicy | None = None
     name: str = "mastodon"
     capabilities: ChannelCapabilities = field(
         default_factory=lambda: ChannelCapabilities(

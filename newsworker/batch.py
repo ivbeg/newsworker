@@ -6,31 +6,32 @@ import csv
 import dataclasses
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 
 @dataclass
 class BatchResult:
     source: str
     status: str
-    output_path: Optional[str] = None
+    output_path: str | None = None
     elapsed_ms: float = 0.0
     transport: str = "thread"
-    cache_state: Optional[str] = None
-    strategy: Optional[str] = None
+    cache_state: str | None = None
+    strategy: str | None = None
     item_count: int = 0
-    confidence: Optional[float] = None
-    warnings: List[str] = field(default_factory=list)
-    error_type: Optional[str] = None
-    error: Optional[str] = None
+    confidence: float | None = None
+    warnings: list[str] = field(default_factory=list)
+    error_type: str | None = None
+    error: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {"success", "partial", "failure"}:
             raise ValueError("batch status must be success, partial, or failure")
         self.error = redact_batch_error(self.error)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
 
@@ -51,7 +52,7 @@ def write_manifest(records: Iterable[BatchResult], path: str, fmt: str = "json")
     raise ValueError("manifest format must be json or csv")
 
 
-def redact_batch_error(error: Optional[str]) -> Optional[str]:
+def redact_batch_error(error: str | None) -> str | None:
     if error is None:
         return None
     text = str(error)

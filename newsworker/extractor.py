@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Dynamic, date-driven news extraction from HTML pages (the original algorithm)."""
 
 import contextvars

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Per-item enrichment: author, categories and optional full-article text.
 
 These helpers operate on an item's ``raw_html`` fragment (populated by both the

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf8 -*-
 import datetime
 import json
 import logging
@@ -7,7 +6,6 @@ import os
 import sys
 import time
 from pprint import pprint
-from typing import List, Optional
 
 import typer
 
@@ -210,7 +208,7 @@ def _read_sources(urls_file=None, from_opml=None, opml_pages=False):
 
     urls = []
     if urls_file:
-        with open(urls_file, "r", encoding="utf-8") as handle:
+        with open(urls_file, encoding="utf-8") as handle:
             urls.extend(
                 line.strip() for line in handle if line.strip() and not line.startswith("#")
             )
@@ -288,7 +286,7 @@ def _resolve_caches(config, specs, content):
 def cache_stats(
     specs: bool = typer.Option(False, "--specs", help="Only the spec cache."),
     content: bool = typer.Option(False, "--content", help="Only the content cache."),
-    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    config: str | None = typer.Option(None, "--config", "-c"),
 ):
     """Report entry counts and total size per cache."""
     for name, cache in _resolve_caches(config, specs, content).items():
@@ -302,7 +300,7 @@ def cache_stats(
 def cache_list(
     specs: bool = typer.Option(False, "--specs", help="Only the spec cache."),
     content: bool = typer.Option(False, "--content", help="Only the content cache."),
-    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    config: str | None = typer.Option(None, "--config", "-c"),
 ):
     """List cached entries."""
     for name, cache in _resolve_caches(config, specs, content).items():
@@ -316,7 +314,7 @@ def cache_list(
 def cache_clear(
     specs: bool = typer.Option(False, "--specs", help="Only the spec cache."),
     content: bool = typer.Option(False, "--content", help="Only the content cache."),
-    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    config: str | None = typer.Option(None, "--config", "-c"),
 ):
     """Delete cached entries."""
     for name, cache in _resolve_caches(config, specs, content).items():
@@ -326,45 +324,45 @@ def cache_clear(
 
 @app.command()
 def analyze(
-    url: Optional[str] = typer.Argument(None, help="URL to analyze and build a parsing spec for"),
-    source_file: Optional[str] = typer.Option(
+    url: str | None = typer.Argument(None, help="URL to analyze and build a parsing spec for"),
+    source_file: str | None = typer.Option(
         None, "--file", help="Analyze a local HTML file (use '-' for stdin)."
     ),
-    base_url: Optional[str] = typer.Option(
+    base_url: str | None = typer.Option(
         None, "--base-url", help="Base URL used to resolve links in local HTML."
     ),
-    output: Optional[str] = typer.Option(
+    output: str | None = typer.Option(
         None,
         "--output",
         "-o",
         help="Path to write the YAML spec to. Prints to stdout when omitted.",
     ),
-    user_agent: Optional[str] = typer.Option(
+    user_agent: str | None = typer.Option(
         None,
         "--user-agent",
         help="Override the User-Agent used for fetching.",
     ),
-    language: Optional[str] = typer.Option(
+    language: str | None = typer.Option(
         None,
         "--language",
         help="Override the auto-detected feed language (e.g. 'en', 'fr').",
     ),
-    proxy: Optional[str] = typer.Option(
+    proxy: str | None = typer.Option(
         None,
         "--proxy",
         help="Proxy URL for outgoing requests (e.g. http://host:port).",
     ),
-    timeout: Optional[int] = typer.Option(
+    timeout: int | None = typer.Option(
         None,
         "--timeout",
         help="HTTP request timeout in seconds.",
     ),
-    header: Optional[List[str]] = typer.Option(
+    header: list[str] | None = typer.Option(
         None,
         "--header",
         help="Extra HTTP header 'Key: Value' (repeatable).",
     ),
-    cookies: Optional[str] = typer.Option(
+    cookies: str | None = typer.Option(
         None,
         "--cookies",
         help="Path to a Netscape/Mozilla cookie jar file.",
@@ -379,7 +377,7 @@ def analyze(
         "--ignore-robots",
         help="Fetch even when the site's robots.txt disallows it.",
     ),
-    config: Optional[str] = typer.Option(
+    config: str | None = typer.Option(
         None,
         "--config",
         "-c",
@@ -456,14 +454,14 @@ def analyze(
 
 @app.command()
 def extract(
-    url: Optional[str] = typer.Argument(None, help="URL to extract feed from"),
-    source_file: Optional[str] = typer.Option(
+    url: str | None = typer.Argument(None, help="URL to extract feed from"),
+    source_file: str | None = typer.Option(
         None, "--file", help="Extract from a local HTML file (use '-' for stdin)."
     ),
-    base_url: Optional[str] = typer.Option(
+    base_url: str | None = typer.Option(
         None, "--base-url", help="Base URL used to resolve links in local HTML."
     ),
-    spec: Optional[str] = typer.Option(
+    spec: str | None = typer.Option(
         None,
         "--spec",
         "-s",
@@ -476,13 +474,13 @@ def extract(
         "-f",
         help="Output format: %s." % ", ".join(SUPPORTED_FORMATS),
     ),
-    output: Optional[str] = typer.Option(
+    output: str | None = typer.Option(
         None,
         "--output",
         "-o",
         help="Path to write the result to. Prints to stdout when omitted.",
     ),
-    limit: Optional[int] = typer.Option(
+    limit: int | None = typer.Option(
         None,
         "--limit",
         "-n",
@@ -493,42 +491,42 @@ def extract(
         "--max-pages",
         help="Follow up to N 'next' links, merging items across pages.",
     ),
-    since: Optional[str] = typer.Option(
+    since: str | None = typer.Option(
         None,
         "--since",
         help="Only items on or after this date (YYYY-MM-DD).",
     ),
-    until: Optional[str] = typer.Option(
+    until: str | None = typer.Option(
         None,
         "--until",
         help="Only items on or before this date (YYYY-MM-DD).",
     ),
-    user_agent: Optional[str] = typer.Option(
+    user_agent: str | None = typer.Option(
         None,
         "--user-agent",
         help="Override the User-Agent used for fetching.",
     ),
-    language: Optional[str] = typer.Option(
+    language: str | None = typer.Option(
         None,
         "--language",
         help="Override the auto-detected feed language (e.g. 'en', 'fr').",
     ),
-    proxy: Optional[str] = typer.Option(
+    proxy: str | None = typer.Option(
         None,
         "--proxy",
         help="Proxy URL for outgoing requests (e.g. http://host:port).",
     ),
-    timeout: Optional[int] = typer.Option(
+    timeout: int | None = typer.Option(
         None,
         "--timeout",
         help="HTTP request timeout in seconds.",
     ),
-    header: Optional[List[str]] = typer.Option(
+    header: list[str] | None = typer.Option(
         None,
         "--header",
         help="Extra HTTP header 'Key: Value' (repeatable).",
     ),
-    cookies: Optional[str] = typer.Option(
+    cookies: str | None = typer.Option(
         None,
         "--cookies",
         help="Path to a Netscape/Mozilla cookie jar file.",
@@ -579,7 +577,7 @@ def extract(
         "--ignore-robots",
         help="Fetch even when the site's robots.txt disallows it.",
     ),
-    config: Optional[str] = typer.Option(
+    config: str | None = typer.Option(
         None,
         "--config",
         "-c",
@@ -683,21 +681,21 @@ def extract(
 
 @app.command()
 def explain(
-    url: Optional[str] = typer.Argument(None, help="Page to explain."),
-    source_file: Optional[str] = typer.Option(
+    url: str | None = typer.Argument(None, help="Page to explain."),
+    source_file: str | None = typer.Option(
         None, "--file", help="Explain a local HTML file (use '-' for stdin)."
     ),
-    base_url: Optional[str] = typer.Option(
+    base_url: str | None = typer.Option(
         None, "--base-url", help="Base URL used to resolve links in local HTML."
     ),
     format: str = typer.Option("text", "--format", "-f", help="Report format: text, html, json."),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write the report here."),
+    output: str | None = typer.Option(None, "--output", "-o", help="Write the report here."),
     undated: bool = typer.Option(False, "--undated", help="Allow the undated-listing fallback."),
     render: bool = typer.Option(False, "--render", help="Render the page with the browser extra."),
-    user_agent: Optional[str] = typer.Option(None, "--user-agent"),
+    user_agent: str | None = typer.Option(None, "--user-agent"),
     ignore_robots: bool = typer.Option(False, "--ignore-robots"),
     no_cache: bool = typer.Option(False, "--no-cache", help="Ignore cached specs and pages."),
-    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    config: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
     """Explain why a page yields the items it does (date groups, strategies, hints)."""
@@ -753,7 +751,7 @@ def explain(
 def feed_url(
     url: str = typer.Argument(..., help="Source page to subscribe to."),
     format: str = typer.Option("atom", "--format", "-f", help="Feed format served."),
-    config: Optional[str] = typer.Option(None, "--config", "-c", help="Settings YAML file."),
+    config: str | None = typer.Option(None, "--config", "-c", help="Settings YAML file."),
 ):
     """Print the feed-server subscription URL for a page (signed when configured).
 
@@ -781,30 +779,30 @@ def feed_url(
 
 @app.command()
 def serve(
-    host: Optional[str] = typer.Option(
+    host: str | None = typer.Option(
         None,
         "--host",
         "-h",
         help="Interface to bind. Overrides the settings value.",
     ),
-    port: Optional[int] = typer.Option(
+    port: int | None = typer.Option(
         None,
         "--port",
         "-p",
         help="Port to listen on. Overrides the settings value.",
     ),
-    config: Optional[str] = typer.Option(
+    config: str | None = typer.Option(
         None,
         "--config",
         "-c",
         help="Path to a settings YAML file. Defaults to ~/.newsworker/config.yaml.",
     ),
-    cache_dir: Optional[str] = typer.Option(
+    cache_dir: str | None = typer.Option(
         None,
         "--cache-dir",
         help="Directory for cached specs and page content. Overrides settings.",
     ),
-    content_ttl: Optional[int] = typer.Option(
+    content_ttl: int | None = typer.Option(
         None,
         "--content-ttl",
         help="Seconds a cached page stays fresh. Overrides settings.",
@@ -853,7 +851,7 @@ def scan(
         "-f",
         help="Output format: %s." % ", ".join(SCAN_FORMATS),
     ),
-    output: Optional[str] = typer.Option(
+    output: str | None = typer.Option(
         None,
         "--output",
         "-o",
@@ -875,7 +873,7 @@ def scan(
     fail_on_empty: bool = typer.Option(
         False, "--fail-on-empty", help="Exit with status 3 when no feeds are found."
     ),
-    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    config: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -924,12 +922,12 @@ def scan(
 
 @app.command()
 def batch(
-    urls_file: Optional[str] = typer.Option(
+    urls_file: str | None = typer.Option(
         None,
         "--urls-file",
         help="Text file with one page URL per line.",
     ),
-    from_opml: Optional[str] = typer.Option(
+    from_opml: str | None = typer.Option(
         None,
         "--from-opml",
         help="OPML file; each outline's xmlUrl feed is read (see --opml-pages).",
@@ -953,7 +951,7 @@ def batch(
         help="Use the optional aiohttp transport for concurrent page fetches.",
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Bypass caches."),
-    manifest: Optional[str] = typer.Option(
+    manifest: str | None = typer.Option(
         None, "--manifest", help="Write a JSON or CSV per-source manifest."
     ),
     manifest_format: str = typer.Option(
@@ -962,7 +960,7 @@ def batch(
     failure_policy: str = typer.Option(
         "strict", "--failure-policy", help="strict or partial-success."
     ),
-    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    config: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
     """Extract feeds from many pages concurrently, one output file per URL."""
@@ -1075,35 +1073,35 @@ def batch(
 
 @app.command()
 def watch(
-    url: Optional[str] = typer.Argument(None, help="Page URL to watch."),
-    urls_file: Optional[str] = typer.Option(
+    url: str | None = typer.Argument(None, help="Page URL to watch."),
+    urls_file: str | None = typer.Option(
         None, "--urls-file", help="Watch every URL in this file (one per line)."
     ),
-    from_opml: Optional[str] = typer.Option(
+    from_opml: str | None = typer.Option(
         None, "--from-opml", help="Watch every feed in this OPML file."
     ),
     opml_pages: bool = typer.Option(
         False, "--opml-pages", help="Watch OPML outlines' htmlUrl pages instead of their feeds."
     ),
-    interval: Optional[float] = typer.Option(
+    interval: float | None = typer.Option(
         None, "--interval", "-i", help="Seconds between polls. Overrides settings."
     ),
-    webhook: Optional[str] = typer.Option(
+    webhook: str | None = typer.Option(
         None, "--webhook", help="POST new items as JSON to this URL."
     ),
-    channel: Optional[List[str]] = typer.Option(
+    channel: list[str] | None = typer.Option(
         None,
         "--channel",
         help="Delivery channel; repeat for several (stdout, webhook, smtp, telegram, slack, discord, matrix, mastodon).",
     ),
-    smtp_recipient: Optional[str] = typer.Option(
+    smtp_recipient: str | None = typer.Option(
         None, "--smtp-recipient", help="Recipient used by the smtp channel."
     ),
-    telegram_chat_id: Optional[str] = typer.Option(
+    telegram_chat_id: str | None = typer.Option(
         None, "--telegram-chat-id", help="Chat used by the telegram channel."
     ),
     format: str = typer.Option("json", "--format", "-f", help="Output format."),
-    max_pages: Optional[int] = typer.Option(
+    max_pages: int | None = typer.Option(
         None, "--max-pages", help="Pages to follow per poll. Overrides settings."
     ),
     max_iterations: int = typer.Option(
@@ -1121,7 +1119,7 @@ def watch(
         "--deliver-updates",
         help="Deliver an item again when its title, text, link or date changes.",
     ),
-    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    config: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
     """Poll pages on an interval and emit/deliver only newly seen items.
@@ -1247,7 +1245,7 @@ def watch(
 
 @app.command()
 def mcp(
-    config: Optional[str] = typer.Option(None, "--config", "-c", help="Settings YAML file."),
+    config: str | None = typer.Option(None, "--config", "-c", help="Settings YAML file."),
 ):
     """Run a Model Context Protocol server on stdio (needs the mcp extra).
 
@@ -1264,13 +1262,13 @@ def mcp(
 
 @app.command()
 def history(
-    url: Optional[str] = typer.Argument(None, help="Only this watched source."),
+    url: str | None = typer.Argument(None, help="Only this watched source."),
     format: str = typer.Option("jsonl", "--format", "-f", help="jsonl or csv."),
-    since: Optional[str] = typer.Option(
+    since: str | None = typer.Option(
         None, "--since", help="Only items first seen on or after this date (YYYY-MM-DD)."
     ),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write to a file."),
-    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    output: str | None = typer.Option(None, "--output", "-o", help="Write to a file."),
+    config: str | None = typer.Option(None, "--config", "-c"),
 ):
     """Export the item history recorded by watch (first/last seen, versions)."""
     import csv

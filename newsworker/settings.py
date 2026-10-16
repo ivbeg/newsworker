@@ -7,9 +7,10 @@ import dataclasses
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Union, get_args, get_origin, get_type_hints
+from typing import Any, Union, get_args, get_origin, get_type_hints
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -68,13 +69,13 @@ class Settings:
     respect_robots: bool = True
     request_timeout: int = 30
     proxy: str = ""
-    extra_headers: Dict[str, str] = field(default_factory=dict)
+    extra_headers: dict[str, str] = field(default_factory=dict)
     cookies_file: str = ""
     default_language: str = ""
     default_timezone: str = "UTC"
     full_text: bool = False
     full_text_workers: int = 4
-    allowed_hosts: List[str] = field(default_factory=list)
+    allowed_hosts: list[str] = field(default_factory=list)
     bridges_dir: str = ""
     use_async: bool = False
 
@@ -95,11 +96,11 @@ class Settings:
     delivery_max_response_bytes: int = 1024 * 1024
 
     # Server controls.
-    api_tokens: List[str] = field(default_factory=list)
+    api_tokens: list[str] = field(default_factory=list)
     rate_limit_per_minute: int = 0
     rate_limit_burst: int = 20
     max_concurrent_builds: int = 8
-    cors_allowed_origins: List[str] = field(default_factory=list)
+    cors_allowed_origins: list[str] = field(default_factory=list)
     trust_proxy_client_ip: bool = False
     metrics_enabled: bool = False
     # Externally visible base URL of the feed server (for rel="self" links),
@@ -149,7 +150,7 @@ class Settings:
     undated_min_confidence: float = 0.75
 
     _resolved: bool = field(default=False, repr=False, compare=False)
-    _sources: Dict[str, str] = field(default_factory=dict, repr=False, compare=False)
+    _sources: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if getattr(self, "_resolved", False) and name not in {"_resolved", "_sources"}:
@@ -158,7 +159,7 @@ class Settings:
             )
         super().__setattr__(name, value)
 
-    def to_dict(self, *, redact: bool = False) -> Dict[str, Any]:
+    def to_dict(self, *, redact: bool = False) -> dict[str, Any]:
         data = asdict(self)
         data.pop("_resolved", None)
         data.pop("_sources", None)
@@ -167,13 +168,13 @@ class Settings:
         return data
 
     @classmethod
-    def from_dict(cls, data: Optional[Mapping[str, Any]]) -> Settings:
+    def from_dict(cls, data: Mapping[str, Any] | None) -> Settings:
         data = data or {}
         known = {f.name for f in dataclasses.fields(cls) if not f.name.startswith("_")}
         return cls(**{key: value for key, value in data.items() if key in known})
 
     @classmethod
-    def load(cls, path: Optional[str] = None) -> Settings:
+    def load(cls, path: str | None = None) -> Settings:
         path = path or DEFAULT_CONFIG_PATH
         if not os.path.exists(path):
             settings = cls()
@@ -182,25 +183,25 @@ class Settings:
             except OSError:
                 pass
             return settings
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             return cls.from_dict(yaml.safe_load(handle) or {})
 
     @classmethod
     def resolve(
         cls,
-        path: Optional[str] = None,
+        path: str | None = None,
         *,
-        environ: Optional[Mapping[str, str]] = None,
-        cli: Optional[Mapping[str, Any]] = None,
+        environ: Mapping[str, str] | None = None,
+        cli: Mapping[str, Any] | None = None,
         create_default: bool = False,
     ) -> Settings:
         """Resolve defaults < YAML < environment < explicit CLI options."""
         defaults = cls().to_dict()
-        merged: Dict[str, Any] = dict(defaults)
+        merged: dict[str, Any] = dict(defaults)
         sources = {key: "default" for key in defaults}
         config_path = path or DEFAULT_CONFIG_PATH
         if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as handle:
+            with open(config_path, encoding="utf-8") as handle:
                 file_values = yaml.safe_load(handle) or {}
             if not isinstance(file_values, dict):
                 raise SettingsError("configuration root must be a mapping")
@@ -295,7 +296,7 @@ class Settings:
             if not path.is_file():
                 raise SettingsError(f"cookies_file is not a readable file: {path}")
 
-    def save(self, path: Optional[str] = None) -> None:
+    def save(self, path: str | None = None) -> None:
         path = path or DEFAULT_CONFIG_PATH
         directory = os.path.dirname(path)
         if directory:
@@ -311,7 +312,7 @@ class Settings:
 
 
 def _merge_known(
-    target: Dict[str, Any], sources: Dict[str, str], values: Mapping[str, Any], source: str
+    target: dict[str, Any], sources: dict[str, str], values: Mapping[str, Any], source: str
 ) -> None:
     for key, value in values.items():
         if key in target and not key.startswith("_"):
@@ -319,8 +320,8 @@ def _merge_known(
             sources[key] = source
 
 
-def _environment_values(environ: Mapping[str, str], cls: type[Settings]) -> Dict[str, Any]:
-    result: Dict[str, Any] = {}
+def _environment_values(environ: Mapping[str, str], cls: type[Settings]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     hints = get_type_hints(cls)
     for field_info in dataclasses.fields(cls):
         name = field_info.name
@@ -350,14 +351,14 @@ def _parse_env_value(raw: str, annotation: Any) -> Any:
         return int(raw)
     if annotation is float:
         return float(raw)
-    if origin in {list, List}:
+    if origin in {list, list}:
         if raw.lstrip().startswith("["):
             value = json.loads(raw)
             if not isinstance(value, list):
                 raise ValueError("expected JSON list")
             return value
         return [part.strip() for part in raw.split(",") if part.strip()]
-    if origin in {dict, Dict}:
+    if origin in {dict, dict}:
         value = json.loads(raw)
         if not isinstance(value, dict):
             raise ValueError("expected JSON object")
@@ -372,7 +373,7 @@ def _redacted(value: Any) -> str:
     return "<redacted>" if value not in (None, "", [], {}) else ""
 
 
-def redact_settings(data: Mapping[str, Any]) -> Dict[str, Any]:
+def redact_settings(data: Mapping[str, Any]) -> dict[str, Any]:
     safe = dict(data)
     for name in _SECRET_FIELDS:
         if name in safe:

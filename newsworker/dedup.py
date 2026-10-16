@@ -10,8 +10,9 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -21,13 +22,13 @@ class OutboxRecord:
     uid: str
     channel: str
     destination: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     status: str
     attempts: int
     next_attempt: float
-    last_error: Optional[str]
-    claim_token: Optional[str] = None
-    feed_meta: Optional[Dict[str, Any]] = None
+    last_error: str | None
+    claim_token: str | None = None
+    feed_meta: dict[str, Any] | None = None
 
 
 class DedupStore:
@@ -75,7 +76,7 @@ class DedupStore:
         self._conn.commit()
 
     @staticmethod
-    def _uid(item: Dict[str, Any]) -> str:
+    def _uid(item: dict[str, Any]) -> str:
         return str(item.get("unique_id") or item.get("link") or item.get("title") or "")
 
     @staticmethod
@@ -99,12 +100,12 @@ class DedupStore:
     def enqueue(
         self,
         feed: str,
-        items: Iterable[Dict[str, Any]],
+        items: Iterable[dict[str, Any]],
         *,
         channel: str,
         destination: str,
-        feed_meta: Optional[Dict[str, Any]] = None,
-    ) -> List[OutboxRecord]:
+        feed_meta: dict[str, Any] | None = None,
+    ) -> list[OutboxRecord]:
         """Queue items not seen before; ``feed_meta`` lets retries run without a new poll."""
         now = self.clock()
         inserted = []
@@ -146,7 +147,7 @@ class DedupStore:
                     inserted.append(self.get(key))
         return [record for record in inserted if record is not None]
 
-    def get(self, key: str) -> Optional[OutboxRecord]:
+    def get(self, key: str) -> OutboxRecord | None:
         row = self._conn.execute(
             "SELECT * FROM outbox WHERE idempotency_key = ?", (key,)
         ).fetchone()
@@ -155,15 +156,15 @@ class DedupStore:
     def claim_due(
         self,
         *,
-        feed: Optional[str] = None,
-        channel: Optional[str] = None,
-        destination: Optional[str] = None,
+        feed: str | None = None,
+        channel: str | None = None,
+        destination: str | None = None,
         limit: int = 100,
         lease_seconds: float = 60,
-    ) -> List[OutboxRecord]:
+    ) -> list[OutboxRecord]:
         now = self.clock()
         where = ["status IN ('pending', 'retry')", "next_attempt <= ?"]
-        params: List[Any] = [now]
+        params: list[Any] = [now]
         if feed is not None:
             where.append("feed = ?")
             params.append(feed)
@@ -214,14 +215,14 @@ class DedupStore:
             )
             return bool(cursor.rowcount)
 
-    def acknowledge(self, key: str, token: Optional[str] = None) -> bool:
+    def acknowledge(self, key: str, token: str | None = None) -> bool:
         """Mark delivered. With ``token``, only the current claim holder may do so."""
         now = self.clock()
         sql = (
             "UPDATE outbox SET status='delivered', delivered_at=?, updated_at=?, "
             "last_error=NULL, claim_token=NULL WHERE idempotency_key=?"
         )
-        params: List[Any] = [now, now, key]
+        params: list[Any] = [now, now, key]
         if token is not None:
             sql += " AND claim_token=? AND status='claimed'"
             params.append(token)
@@ -235,7 +236,7 @@ class DedupStore:
         *,
         backoff: float = 1.0,
         terminal: bool = False,
-        token: Optional[str] = None,
+        token: str | None = None,
     ) -> bool:
         """Record a failed attempt.
 
@@ -250,7 +251,7 @@ class DedupStore:
             "UPDATE outbox SET status=?, next_attempt=?, last_error=?, updated_at=?, "
             "claim_token=NULL WHERE idempotency_key=?"
         )
-        params: List[Any] = [
+        params: list[Any] = [
             "terminal" if terminal else "retry",
             next_attempt,
             str(error)[:1000],
@@ -293,7 +294,7 @@ class DedupStore:
     # -- item history -----------------------------------------------------
 
     @staticmethod
-    def content_hash(item: Dict[str, Any]) -> str:
+    def content_hash(item: dict[str, Any]) -> str:
         """What a reader sees of an item; a change makes a new version."""
         visible = {
             key: item.get(key) for key in ("title", "description", "link", "pubdate", "content")
@@ -301,7 +302,7 @@ class DedupStore:
         payload = json.dumps(visible, sort_keys=True, ensure_ascii=False, default=_json_default)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    def record_items(self, feed: str, items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def record_items(self, feed: str, items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         """Remember every item seen on ``feed``; return the ones that changed.
 
         Each returned item is a copy with ``version`` (2, 3, ...) and
@@ -346,8 +347,8 @@ class DedupStore:
         return changed
 
     def history(
-        self, feed: Optional[str] = None, *, since: Optional[float] = None
-    ) -> List[Dict[str, Any]]:
+        self, feed: str | None = None, *, since: float | None = None
+    ) -> list[dict[str, Any]]:
         """Recorded items, newest first; ``since`` filters on ``first_seen``."""
         where, params = [], []
         if feed is not None:
@@ -365,12 +366,12 @@ class DedupStore:
     def counts(
         self,
         *,
-        feed: Optional[str] = None,
-        channel: Optional[str] = None,
-        destination: Optional[str] = None,
-    ) -> Dict[str, int]:
+        feed: str | None = None,
+        channel: str | None = None,
+        destination: str | None = None,
+    ) -> dict[str, int]:
         where = []
-        params: List[Any] = []
+        params: list[Any] = []
         for column, value in (
             ("feed", feed),
             ("channel", channel),
@@ -386,7 +387,7 @@ class DedupStore:
         rows = self._conn.execute(sql, params).fetchall()
         return {row["status"]: row["count"] for row in rows}
 
-    def filter_new(self, feed_url: str, items: Iterable[Dict[str, Any]]):
+    def filter_new(self, feed_url: str, items: Iterable[dict[str, Any]]):
         """Compatibility seen-set API; new watch code uses the outbox methods."""
         new_items = []
         now = self.clock()

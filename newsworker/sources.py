@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Optional
+from typing import BinaryIO
 
 from .tools import validate_url
 
@@ -28,8 +28,8 @@ def _bounded_read(handle: BinaryIO, max_bytes: int, label: str) -> bytes:
 class DocumentSource:
     kind: str
     base_url: str
-    location: Optional[str] = None
-    data: Optional[bytes] = None
+    location: str | None = None
+    data: bytes | None = None
 
     @classmethod
     def url(cls, url: str) -> DocumentSource:
@@ -55,7 +55,7 @@ class DocumentSource:
         cls,
         *,
         base_url: str,
-        stream: Optional[BinaryIO] = None,
+        stream: BinaryIO | None = None,
         max_bytes: int = DEFAULT_MAX_BYTES,
     ) -> DocumentSource:
         validate_url(base_url)

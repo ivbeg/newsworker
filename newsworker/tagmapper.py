@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 Tag mapping routines. Initially it was created for other purposes. It's intended to create web page map of tags, annotating
 """
@@ -87,7 +86,7 @@ class TagPath:
             self.__tag_names.reverse()
         self.key = "_".join(map(str, self.__shifts))
         md = hashlib.md5()
-        md.update(self.key.encode("utf8") if type(self.key) == type("") else self.key)
+        md.update(self.key.encode("utf8") if type(self.key) == str else self.key)
         self.hash = md.hexdigest()
 
     def __cmp__(self, tagpath):

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 File-based caches for parsing specs and fetched page content.
 
@@ -28,7 +27,7 @@ import tempfile
 import threading
 import time
 import uuid
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
 
@@ -44,7 +43,7 @@ def key_for(url):
 
 # Per-path locks serialize concurrent writers to the same cache entry so a
 # ``ThreadingHTTPServer`` worker cannot observe a half-written file.
-_PATH_LOCKS: Dict[str, threading.Lock] = {}
+_PATH_LOCKS: dict[str, threading.Lock] = {}
 _PATH_LOCKS_GUARD = threading.Lock()
 
 
@@ -135,7 +134,7 @@ def _evict(directory, pattern, max_entries=0, max_bytes=0):
 
 def _list_entries(directory, pattern):
     """Returns cached entries as ``[{path, bytes, mtime}]`` sorted oldest-first."""
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     try:
         paths = glob.glob(os.path.join(directory, pattern))
     except OSError:
@@ -298,7 +297,7 @@ class ContentCache(_CacheStatsMixin):
             try:
                 with open(path, "rb") as handle:
                     body = handle.read()
-                with open(self._meta_path(url), "r", encoding="utf-8") as handle:
+                with open(self._meta_path(url), encoding="utf-8") as handle:
                     meta = json.load(handle) or {}
             except OSError:
                 return None, {}
@@ -316,7 +315,7 @@ class ContentCache(_CacheStatsMixin):
     def get_meta(self, url):
         """Returns stored upstream validators ``{etag, last_modified}`` or ``{}``."""
         try:
-            with open(self._meta_path(url), "r", encoding="utf-8") as handle:
+            with open(self._meta_path(url), encoding="utf-8") as handle:
                 meta = json.load(handle) or {}
                 return {
                     key: value
@@ -331,7 +330,7 @@ class ContentCache(_CacheStatsMixin):
         path = self._path(url)
         with _lock_for(path):
             try:
-                with open(self._meta_path(url), "r", encoding="utf-8") as handle:
+                with open(self._meta_path(url), encoding="utf-8") as handle:
                     stored = json.load(handle) or {}
             except (OSError, ValueError):
                 return

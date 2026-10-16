@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from lxml import etree
 from lxml.html import fromstring
@@ -39,9 +39,9 @@ def extract_undated_listing(
     min_confidence: float = 0.75,
     language: Any = None,
     content_language: Any = None,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     document = fromstring(decode_html(data), parser=etree.HTMLParser(remove_blank_text=True))
-    groups: Dict[Any, List[Any]] = defaultdict(list)
+    groups: dict[Any, list[Any]] = defaultdict(list)
     for heading in document.xpath("//h1|//h2|//h3|//h4"):
         links = heading.xpath(".//a[@href] | ./ancestor::a[@href][1]")
         if not links or _blocked(heading):
@@ -57,7 +57,7 @@ def extract_undated_listing(
         if parent is not None:
             groups[parent].append(card)
 
-    best_items: List[Dict[str, Any]] = []
+    best_items: list[dict[str, Any]] = []
     best_score = 0.0
     for _parent, cards in groups.items():
         unique_cards = []

@@ -168,6 +168,6 @@ def test_analyzer_detects_language_from_item_text():
         '<li><span class="date">01.07.2026</span>'
         '<a href="/c">Третья важная новость о спорте и культуре</a></li>'
         "</ul></main></body></html>"
-    ).encode("utf-8")
+    ).encode()
     spec = SpecAnalyzer(filtered_text_length=150).analyze("https://example.com/press", data=html)
     assert spec.language == "ru"

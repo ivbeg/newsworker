@@ -26,7 +26,7 @@ def test_supported_language_fixture_matrix(tmp_path):
             f"<article><time>{fixture['positive']}</time>"
             f"<a href='/{code}'>{fixture['headline']}</a></article>"
             "</body></html>"
-        ).encode("utf-8")
+        ).encode()
         spec = FeedSpec(
             title=code,
             language=code,

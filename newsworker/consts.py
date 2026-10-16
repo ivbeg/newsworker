@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Tags constants
 DATE_CLASSES_KEYWORDS = [
     x.lower()

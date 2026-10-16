@@ -6,7 +6,8 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import time
-from typing import Any, Dict, Iterable, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 from .bridges import default_bridge_dirs, load_bridges, select_bridge
 from .cache import ContentCache, SpecCache, key_for
@@ -35,10 +36,10 @@ class FeedService:
 
     def __init__(
         self,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         use_cache: bool = True,
-        plugins: Optional[list] = None,
-        bridges: Optional[list] = None,
+        plugins: list | None = None,
+        bridges: list | None = None,
         *,
         extensions_loaded: bool = False,
         clock=None,
@@ -88,7 +89,7 @@ class FeedService:
         self._spec_flights = SingleFlight()
         self._renderer = None
 
-    def new_context(self, *, source: str = "network", base_url: Optional[str] = None):
+    def new_context(self, *, source: str = "network", base_url: str | None = None):
         diagnostics = ExtractionDiagnostics(source=source, requested_url=base_url)
         context = ExtractionContext(
             source=source,
@@ -106,12 +107,12 @@ class FeedService:
         force_refresh: bool = False,
         *,
         revalidate: bool = False,
-        context: Optional[ExtractionContext] = None,
+        context: ExtractionContext | None = None,
     ) -> bytes:
         """Return bytes, optionally contacting upstream even while cache is fresh."""
         context = context or self.new_context(base_url=url)
 
-        def populate() -> Tuple[bytes, Dict[str, Any]]:
+        def populate() -> tuple[bytes, dict[str, Any]]:
             stale, meta = self.content_cache.get_generation(url, fresh_only=False)
             if self.use_cache and not force_refresh and not revalidate:
                 fresh, fresh_meta = self.content_cache.get_generation(url, fresh_only=True)
@@ -142,8 +143,8 @@ class FeedService:
         return data
 
     def _revalidated_meta(
-        self, url: str, cached_meta: MappingLike, response_meta: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, url: str, cached_meta: MappingLike, response_meta: dict[str, Any]
+    ) -> dict[str, Any]:
         """Refresh the cached copy the upstream confirmed with ``304``."""
         self.content_cache.touch(url)
         fresh_validators = {key: response_meta.get(key) for key in ("etag", "last_modified")}
@@ -157,7 +158,7 @@ class FeedService:
 
     @staticmethod
     def _record_response(
-        context: ExtractionContext, url: str, response_meta: Dict[str, Any]
+        context: ExtractionContext, url: str, response_meta: dict[str, Any]
     ) -> None:
         context.response_meta = dict(response_meta)
         context.content_language = context.content_language or _header_language(response_meta)
@@ -184,7 +185,7 @@ class FeedService:
 
     def _get_or_build_spec(
         self, url: str, data: bytes, context: ExtractionContext, *, rebuild: bool = False
-    ) -> Optional[FeedSpec]:
+    ) -> FeedSpec | None:
         use_cache = self._spec_cache_enabled(context)
         if use_cache and not rebuild:
             spec = self.spec_cache.get(url)
@@ -214,13 +215,13 @@ class FeedService:
         self,
         url: str,
         force_refresh: bool = False,
-        explicit_spec: Optional[FeedSpec] = None,
+        explicit_spec: FeedSpec | None = None,
         max_pages: int = 1,
-        data: Optional[bytes] = None,
+        data: bytes | None = None,
         *,
-        context: Optional[ExtractionContext] = None,
+        context: ExtractionContext | None = None,
         revalidate: bool = False,
-        render: Optional[bool] = None,
+        render: bool | None = None,
     ) -> dict:
         context = context or self.new_context(
             source="network" if data is None else "prefetched", base_url=url
@@ -315,7 +316,7 @@ class FeedService:
         url: str,
         data: bytes,
         *,
-        explicit_spec: Optional[FeedSpec] = None,
+        explicit_spec: FeedSpec | None = None,
         context: ExtractionContext,
     ) -> dict:
         diagnostics = context.diagnostics
@@ -528,7 +529,7 @@ class FeedService:
         self,
         url: str,
         data: bytes,
-        spec: Optional[FeedSpec],
+        spec: FeedSpec | None,
         feed: dict,
         max_pages: int,
         *,
@@ -578,7 +579,7 @@ class FeedService:
             current_url, current_data = next_url, next_data
             pages += 1
 
-    def _add_full_text(self, feed: dict, context: Optional[ExtractionContext] = None) -> None:
+    def _add_full_text(self, feed: dict, context: ExtractionContext | None = None) -> None:
         items = [item for item in feed.get("items", []) if item.get("link")]
         if not items:
             return
@@ -623,9 +624,9 @@ class FeedService:
         urls: Iterable[str],
         max_workers: int = 4,
         force_refresh: bool = False,
-        use_async: Optional[bool] = None,
-        runtime: Optional[Dict[str, dict]] = None,
-    ) -> Dict[str, dict]:
+        use_async: bool | None = None,
+        runtime: dict[str, dict] | None = None,
+    ) -> dict[str, dict]:
         """Build feeds for ``urls`` concurrently.
 
         ``runtime``, when given, is filled per URL with operational facts that
@@ -645,7 +646,7 @@ class FeedService:
 
         import threading
 
-        results: Dict[str, dict] = {}
+        results: dict[str, dict] = {}
         local = threading.local()
 
         def worker(url):
@@ -704,9 +705,9 @@ class FeedService:
                     refused[url] = PermissionError(f"robots.txt disallows fetching {url}")
         # The same content cache as the threaded path: fresh copies are not
         # fetched again and stale ones are revalidated with their validators.
-        documents: Dict[str, Tuple[bytes, Dict[str, Any]]] = {}
-        cached: Dict[str, Tuple[bytes, Dict[str, Any]]] = {}
-        conditional: Dict[str, Dict[str, str]] = {}
+        documents: dict[str, tuple[bytes, dict[str, Any]]] = {}
+        cached: dict[str, tuple[bytes, dict[str, Any]]] = {}
+        conditional: dict[str, dict[str, str]] = {}
         for url in urls:
             if url in refused:
                 continue
@@ -728,7 +729,7 @@ class FeedService:
             if headers:
                 conditional[url] = headers
         to_fetch = [url for url in urls if url not in refused and url not in documents]
-        fetched: Dict[str, Any] = dict(refused)
+        fetched: dict[str, Any] = dict(refused)
         if to_fetch:
             fetched.update(
                 fetch_urls_concurrent(
@@ -817,10 +818,10 @@ class FeedService:
         )
 
 
-MappingLike = Optional[Dict[str, Any]]
+MappingLike = dict[str, Any] | None
 
 
-def _header_language(meta: Dict[str, Any]) -> Optional[str]:
+def _header_language(meta: dict[str, Any]) -> str | None:
     headers = meta.get("headers") or {}
     value = headers.get("Content-Language") or headers.get("content-language")
     return value.split(",", 1)[0].split("-", 1)[0].strip().lower() if value else None

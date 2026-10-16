@@ -11,7 +11,8 @@ import calendar
 import datetime as dt
 import hashlib
 import json
-from typing import Any, Dict, List, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 from .tools import clean_url, get_abs_url, parse_datetime_attr
 
@@ -27,7 +28,7 @@ _FEED_TYPES = (
 _XML_MARKERS = (b"<rss", b"<feed", b"<rdf:rdf")
 
 
-def looks_like_feed(data: bytes, content_type: Optional[str] = None) -> bool:
+def looks_like_feed(data: bytes, content_type: str | None = None) -> bool:
     """Cheap check: does this response carry a feed rather than an HTML page?"""
     head = data[:2048].lstrip().lower()
     if head.startswith(b"<!doctype html") or head.startswith(b"<html"):
@@ -40,7 +41,7 @@ def looks_like_feed(data: bytes, content_type: Optional[str] = None) -> bool:
     return kind in _FEED_TYPES and head.startswith(b"<?xml")
 
 
-def _struct_time(value) -> Optional[dt.datetime]:
+def _struct_time(value) -> dt.datetime | None:
     if not value:
         return None
     try:
@@ -49,7 +50,7 @@ def _struct_time(value) -> Optional[dt.datetime]:
         return None
 
 
-def _identity(*parts: Optional[str]) -> str:
+def _identity(*parts: str | None) -> str:
     for part in parts:
         if part:
             return hashlib.md5(("native:" + part).encode("utf-8")).hexdigest()
@@ -71,7 +72,7 @@ def _item(
     base,
 ):
     link = clean_url(get_abs_url(base, link)) if link else None
-    item: Dict[str, Any] = {
+    item: dict[str, Any] = {
         "title": title,
         "description": description or title,
         "pubdate": pubdate,
@@ -90,7 +91,7 @@ def _item(
     return item
 
 
-def _from_feedparser(data: bytes, url: str) -> Optional[Dict[str, Any]]:
+def _from_feedparser(data: bytes, url: str) -> dict[str, Any] | None:
     import feedparser
 
     parsed = feedparser.parse(data)
@@ -98,7 +99,7 @@ def _from_feedparser(data: bytes, url: str) -> Optional[Dict[str, Any]]:
         return None
     feed_meta = parsed.feed
     base = feed_meta.get("link") or url
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for entry in parsed.entries:
         content = None
         content_kind = "text"
@@ -137,7 +138,7 @@ def _from_feedparser(data: bytes, url: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def _from_json_feed(data: bytes, url: str, default_timezone: str) -> Optional[Dict[str, Any]]:
+def _from_json_feed(data: bytes, url: str, default_timezone: str) -> dict[str, Any] | None:
     try:
         document = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
@@ -185,8 +186,8 @@ def _from_json_feed(data: bytes, url: str, default_timezone: str) -> Optional[Di
 
 
 def parse_native_feed(
-    data: bytes, url: str, *, content_type: Optional[str] = None, default_timezone: str = "UTC"
-) -> Optional[Dict[str, Any]]:
+    data: bytes, url: str, *, content_type: str | None = None, default_timezone: str = "UTC"
+) -> dict[str, Any] | None:
     """Return the internal feed dict for a native feed, or ``None`` if it is not one."""
     if not looks_like_feed(data, content_type):
         return None

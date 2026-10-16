@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Per-site bridge specs: YAML files with a host/path matcher plus a FeedSpec body.
 
 Bridges live in ``newsworker/bridges/`` (bundled) and optionally in
@@ -12,7 +11,6 @@ import glob
 import logging
 import os
 from dataclasses import dataclass
-from typing import List, Optional
 from urllib.parse import urlparse
 
 import yaml
@@ -76,9 +74,9 @@ def _bridge_from_dict(data, source_name=""):
     return _bridges_from_dict(data, source_name)[0]
 
 
-def load_bridge_files(path) -> List[SiteBridge]:
+def load_bridge_files(path) -> list[SiteBridge]:
     """Load one bridge file; a ``match.hosts`` list yields one bridge per host."""
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
     return _bridges_from_dict(data, source_name=os.path.basename(path))
 
@@ -87,14 +85,14 @@ def load_bridge_file(path):
     return load_bridge_files(path)[0]
 
 
-def load_bridges(*directories) -> List[SiteBridge]:
+def load_bridges(*directories) -> list[SiteBridge]:
     """Loads all ``*.yaml`` / ``*.yml`` bridge files from ``directories``.
 
     Directories are listed lowest precedence first; bridges from later
     directories are returned first, so a user bridge overrides a bundled one
     that matches the same URL.
     """
-    bridges: List[SiteBridge] = []
+    bridges: list[SiteBridge] = []
     for directory in reversed(directories):
         if not directory or not os.path.isdir(directory):
             continue
@@ -119,7 +117,7 @@ def default_bridge_dirs(settings=None):
     return dirs
 
 
-def select_bridge(url: str, bridges: List[SiteBridge]) -> Optional[FeedSpec]:
+def select_bridge(url: str, bridges: list[SiteBridge]) -> FeedSpec | None:
     """Returns the spec from the first matching bridge, or ``None``."""
     for bridge in bridges:
         try:

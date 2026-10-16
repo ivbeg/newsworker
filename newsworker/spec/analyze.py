@@ -1,7 +1,6 @@
 """Deriving a :class:`FeedSpec` from a page with the dynamic date heuristics."""
 
 import datetime
-from typing import Dict
 
 from lxml import etree
 from lxml.html import fromstring
@@ -416,7 +415,7 @@ class SpecAnalyzer:
             if rule is not None:
                 return rule
 
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for root in item_roots:
             css = css_for_item_element(root, NEWS_CLASSES_KEYWORDS)
             if css:
@@ -464,7 +463,7 @@ class SpecAnalyzer:
             except (ValueError, TypeError):
                 continue
         indices.sort()
-        gaps: Dict[int, int] = {}
+        gaps: dict[int, int] = {}
         for i in range(1, len(indices)):
             diff = indices[i] - indices[i - 1]
             if diff > 0:

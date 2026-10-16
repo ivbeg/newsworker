@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any
 
 from .settings import redact_settings
 
@@ -25,23 +26,23 @@ class StrategyDiagnostic:
     item_count: int = 0
     elapsed_ms: float = 0.0
     selectors: Mapping[str, str] = field(default_factory=dict)
-    reasons: List[DiagnosticReason] = field(default_factory=list)
+    reasons: list[DiagnosticReason] = field(default_factory=list)
 
 
 @dataclass
 class ExtractionDiagnostics:
     version: int = 1
     source: str = "network"
-    requested_url: Optional[str] = None
-    effective_url: Optional[str] = None
-    chosen_strategy: Optional[str] = None
+    requested_url: str | None = None
+    effective_url: str | None = None
+    chosen_strategy: str | None = None
     confidence: float = 0.0
-    attempts: List[StrategyDiagnostic] = field(default_factory=list)
-    reasons: List[DiagnosticReason] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    timings_ms: Dict[str, float] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    _starts: Dict[str, float] = field(default_factory=dict, repr=False)
+    attempts: list[StrategyDiagnostic] = field(default_factory=list)
+    reasons: list[DiagnosticReason] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    timings_ms: dict[str, float] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    _starts: dict[str, float] = field(default_factory=dict, repr=False)
 
     def start(self, name: str) -> None:
         self._starts[name] = time.monotonic()
@@ -59,8 +60,8 @@ class ExtractionDiagnostics:
         *,
         item_count: int = 0,
         elapsed_ms: float = 0.0,
-        selectors: Optional[Mapping[str, str]] = None,
-        reasons: Optional[List[DiagnosticReason]] = None,
+        selectors: Mapping[str, str] | None = None,
+        reasons: list[DiagnosticReason] | None = None,
     ) -> None:
         self.attempts.append(
             StrategyDiagnostic(
@@ -75,7 +76,7 @@ class ExtractionDiagnostics:
 
     def score(self, feed: Mapping[str, Any]) -> float:
         items = list(feed.get("items", []) or [])
-        reasons: List[DiagnosticReason] = []
+        reasons: list[DiagnosticReason] = []
         score = 0.0
         if len(items) >= 3:
             score += 0.25
@@ -121,7 +122,7 @@ class ExtractionDiagnostics:
             self.warnings.append("Low heuristic extraction confidence")
         return self.confidence
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = dataclasses.asdict(self)
         data.pop("_starts", None)
         data["metadata"] = redact_settings(data.get("metadata", {}))

@@ -11,7 +11,8 @@ from __future__ import annotations
 import datetime as dt
 import re
 import threading
-from typing import Any, Iterator, Mapping, Optional
+from collections.abc import Iterator, Mapping
+from typing import Any
 from zoneinfo import ZoneInfo
 
 #: Earliest publication year accepted from page text.  Older values are almost
@@ -65,7 +66,7 @@ def thread_date_parser() -> Any:
     return parser
 
 
-def _offset_from_token(token: Any) -> Optional[dt.timezone]:
+def _offset_from_token(token: Any) -> dt.timezone | None:
     text = str(token).strip()
     if not text:
         return None
@@ -79,7 +80,7 @@ def _offset_from_token(token: Any) -> Optional[dt.timezone]:
     return dt.timezone(sign * dt.timedelta(hours=hours, minutes=minutes))
 
 
-def offset_from_text(text: Optional[str]) -> Optional[dt.timezone]:
+def offset_from_text(text: str | None) -> dt.timezone | None:
     """Return the UTC offset written after a clock time in ``text``, if any."""
     if not text:
         return None
@@ -96,7 +97,7 @@ def offset_from_text(text: Optional[str]) -> Optional[dt.timezone]:
     return dt.timezone(sign * dt.timedelta(hours=hours, minutes=minutes))
 
 
-def date_text_variants(text: Optional[str]) -> Iterator[str]:
+def date_text_variants(text: str | None) -> Iterator[str]:
     """Rewrites of ``text`` that qddate may match when ``text`` itself does not.
 
     Press releases put a place (or a weekday) before the date and event pages
@@ -126,11 +127,11 @@ def is_plausible(value: dt.datetime, now: dt.datetime) -> bool:
 
 def build_match_datetime(
     match: Mapping[str, Any],
-    text: Optional[str],
+    text: str | None,
     *,
     now: dt.datetime,
     default_timezone: str = "UTC",
-) -> Optional[dt.datetime]:
+) -> dt.datetime | None:
     """Convert a qddate ``match()`` result into an aware UTC datetime.
 
     Returns ``None`` when the components do not form a valid, plausible date.

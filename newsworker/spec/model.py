@@ -1,7 +1,7 @@
 """The serialisable spec (YAML) and its schema validation."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 from lxml import etree
@@ -24,11 +24,11 @@ class FieldRule:
     selector: str = ""
     source: str = "text"  # text | tail | content | attr:<name>
     absolute: bool = False  # resolve value as an absolute URL
-    patterns: Optional[List[str]] = None  # qddate pattern keys (date field only)
+    patterns: list[str] | None = None  # qddate pattern keys (date field only)
     required: bool = False
 
     def to_dict(self):
-        data: Dict[str, Any] = {"selector": self.selector, "source": self.source}
+        data: dict[str, Any] = {"selector": self.selector, "source": self.source}
         if self.absolute:
             data["absolute"] = True
         if self.patterns is not None:
@@ -56,14 +56,14 @@ class ItemsRule:
 
     selector: str = "./*"
     selector_type: str = "css"  # css | xpath (informational; auto-detected too)
-    container: Optional[str] = None
+    container: str | None = None
     stride: int = 1
     #: ``"siblings"``: each matched node starts an item that also takes the
     #: following siblings up to the next match (flat, wrapper-less listings).
-    group: Optional[str] = None
+    group: str | None = None
 
     def to_dict(self):
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "selector_type": self.selector_type,
             "selector": self.selector,
         }
@@ -91,9 +91,9 @@ class ItemsRule:
 class FeedSpec:
     """Full serializable parsing specification for a site layout."""
 
-    source_url: Optional[str] = None
-    analyzed_at: Optional[str] = None
-    title: Optional[str] = None
+    source_url: str | None = None
+    analyzed_at: str | None = None
+    title: str | None = None
     language: str = "en"
     items: ItemsRule = field(default_factory=ItemsRule)
     fields: dict = field(default_factory=dict)  # name -> FieldRule
@@ -152,7 +152,7 @@ class FeedSpec:
 
     @classmethod
     def load(cls, path):
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             return cls.from_yaml(handle.read())
 
     def validate(self):

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Third-party extractor plugins loaded via setuptools entry points.
 
 Packages register extractors under the ``newsworker.extractors`` entry-point group.
@@ -8,7 +7,7 @@ the internal feed dict.
 """
 
 import logging
-from typing import Any, List, Optional
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ class BaseExtractorPlugin:
         """Return True when this plugin should handle ``url``."""
         raise NotImplementedError
 
-    def extract(self, url: str, data: Optional[bytes] = None, **kwargs: Any) -> dict:
+    def extract(self, url: str, data: bytes | None = None, **kwargs: Any) -> dict:
         """Return the internal feed dictionary for ``url``."""
         raise NotImplementedError
 
@@ -42,9 +41,9 @@ def _load_entry_point(name, entry):
     return loaded
 
 
-def load_plugins(extra: Optional[List[Any]] = None) -> List[Any]:
+def load_plugins(extra: list[Any] | None = None) -> list[Any]:
     """Returns all registered extractor plugins (entry points plus ``extra``)."""
-    plugins: List[Any] = list(extra or [])
+    plugins: list[Any] = list(extra or [])
     try:
         from importlib.metadata import entry_points
     except ImportError:
@@ -67,7 +66,7 @@ def load_plugins(extra: Optional[List[Any]] = None) -> List[Any]:
     return plugins
 
 
-def select_plugin(url: str, plugins: List[Any]) -> Optional[Any]:
+def select_plugin(url: str, plugins: list[Any]) -> Any | None:
     """Returns the first plugin whose ``matches(url)`` is true, or ``None``."""
     for plugin in plugins:
         try:
