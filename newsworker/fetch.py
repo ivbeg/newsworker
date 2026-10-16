@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
+import email.utils
 import ipaddress
 import socket
 import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Iterator, Mapping, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -51,6 +55,12 @@ class FetchTimeout(FetchError):
     code = "timeout"
 
 
+class RateLimited(FetchError):
+    """The site asked us to wait longer than the policy allows."""
+
+    code = "rate_limited"
+
+
 @dataclass(frozen=True)
 class FetchRequest:
     url: str
@@ -76,6 +86,13 @@ class FetchPolicy:
     cookies: Any = None
     #: Honour HTTP(S)_PROXY / NO_PROXY / .netrc from the environment.
     trust_env: bool = False
+    #: Politeness for page fetches (``operation="source"``): at most this many
+    #: requests in flight per host (0 = unlimited), at least this many seconds
+    #: between request starts (raised to robots.txt ``Crawl-delay``), and the
+    #: longest a request may wait for a slot or a ``Retry-After`` window.
+    host_concurrency: int = 0
+    host_interval: float = 0.0
+    max_host_wait: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -192,6 +209,141 @@ def _bounded_body(response: requests.Response, max_bytes: int) -> bytes:
             raise ResponseTooLarge(f"Response exceeds byte limit {max_bytes}")
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+#: Upper bounds for site-provided waits, so a hostile header cannot park a worker.
+MAX_CRAWL_DELAY = 60.0
+MAX_RETRY_AFTER = 3600.0
+
+
+@dataclass
+class _HostState:
+    active: int = 0
+    next_start: float = 0.0
+    not_before: float = 0.0
+    crawl_delay: float = 0.0
+
+
+class HostScheduler:
+    """Per-host request pacing shared by every transport in the process.
+
+    Batch workers, the feed server and full-text fetches each own transports,
+    so politeness has to live in one place: a cap on concurrent requests per
+    host, a minimum spacing between request starts (``Crawl-delay``), and a
+    "not before" time set by ``Retry-After``. Waits are bounded by the policy's
+    ``max_host_wait``; longer ones fail fast with :class:`RateLimited`.
+    """
+
+    MAX_HOSTS = 4096
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic, sleep=time.sleep):
+        self._clock = clock
+        self._sleep = sleep
+        self._hosts: OrderedDict[str, _HostState] = OrderedDict()
+        self._cond = threading.Condition()
+
+    def _state(self, host: str) -> _HostState:
+        state = self._hosts.get(host)
+        if state is None:
+            state = self._hosts[host] = _HostState()
+            self._evict()
+        self._hosts.move_to_end(host)
+        return state
+
+    def _evict(self) -> None:
+        if len(self._hosts) <= self.MAX_HOSTS:
+            return
+        now = self._clock()
+        for host in list(self._hosts):
+            state = self._hosts[host]
+            if state.active == 0 and max(state.next_start, state.not_before) <= now:
+                del self._hosts[host]
+                if len(self._hosts) <= self.MAX_HOSTS:
+                    return
+
+    def clear(self) -> None:
+        """Forget all hosts (tests, or a long-lived process that wants a reset)."""
+        with self._cond:
+            self._hosts.clear()
+            self._cond.notify_all()
+
+    def note_crawl_delay(self, host: str, seconds: Optional[float]) -> None:
+        with self._cond:
+            self._state(host).crawl_delay = min(max(0.0, float(seconds or 0)), MAX_CRAWL_DELAY)
+
+    def note_retry_after(self, host: str, seconds: float) -> None:
+        with self._cond:
+            state = self._state(host)
+            until = self._clock() + min(max(0.0, seconds), MAX_RETRY_AFTER)
+            state.not_before = max(state.not_before, until)
+
+    def reserve(self, host: str, *, interval: float = 0.0, max_wait: float = 30.0) -> float:
+        """Claim the next start time for ``host``; return how long to wait for it."""
+        with self._cond:
+            state = self._state(host)
+            now = self._clock()
+            start = max(now, state.next_start, state.not_before)
+            delay = start - now
+            if delay > max_wait:
+                raise RateLimited(
+                    f"{host} asks to wait {delay:.0f}s, more than the {max_wait:.0f}s allowed"
+                )
+            state.next_start = start + max(interval, state.crawl_delay)
+            return delay
+
+    @contextlib.contextmanager
+    def slot(self, host: str, policy: FetchPolicy) -> Iterator[None]:
+        """Hold one of ``host``'s concurrent slots and start on schedule."""
+        with self._cond:
+            deadline = self._clock() + policy.max_host_wait
+            while (
+                policy.host_concurrency > 0 and self._state(host).active >= policy.host_concurrency
+            ):
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    raise RateLimited(
+                        f"No free request slot for {host} within {policy.max_host_wait:.0f}s"
+                    )
+                self._cond.wait(remaining)
+            self._state(host).active += 1
+        try:
+            delay = self.reserve(host, interval=policy.host_interval, max_wait=policy.max_host_wait)
+            if delay > 0:
+                self._sleep(delay)
+            yield
+        finally:
+            with self._cond:
+                self._state(host).active -= 1
+                self._cond.notify_all()
+
+
+#: The process-wide scheduler used by :class:`RequestsTransport` and the
+#: aiohttp adapter.
+HOSTS = HostScheduler()
+
+
+def retry_after_seconds(value: Optional[str], now: Optional[float] = None) -> Optional[float]:
+    """Parse a ``Retry-After`` header (delta seconds or HTTP date)."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    current = time.time() if now is None else now
+    return max(0.0, when.timestamp() - current)
+
+
+def _paced(request: FetchRequest, host: str, policy: FetchPolicy):
+    # Delivery endpoints (webhooks, bot APIs) are not crawled; only pace pages.
+    if request.operation != "source":
+        return contextlib.nullcontext()
+    return HOSTS.slot(host, policy)
 
 
 # The policy and proxy state of the request being sent on this thread/task. The
@@ -350,86 +502,94 @@ class RequestsTransport:
 
         for redirect_index in range(policy.redirect_limit + 1):
             validate_destination(current_url, policy)
-            proxied = bool(policy.proxy) or bool(
-                policy.trust_env and requests.utils.get_environ_proxies(current_url)
-            )
-            token = _ACTIVE_GUARD.set((policy, proxied))
-            try:
-                kwargs = {
-                    "headers": headers,
-                    "timeout": policy.timeout,
-                    "verify": policy.verify_tls,
-                    "proxies": proxies,
-                    "cookies": policy.cookies,
-                    "allow_redirects": False,
-                    "stream": True,
-                }
-                if method == "GET":
-                    response = session.get(current_url, **kwargs)
-                else:
-                    kwargs["data"] = body
-                    response = session.request(method, current_url, **kwargs)
-            except requests.Timeout as exc:
-                raise FetchTimeout(f"Request timed out after {policy.timeout}s") from exc
-            except requests.RequestException as exc:
-                blocked = _find_cause(exc, AddressPolicyError)
-                if blocked is not None:
-                    raise blocked from exc
-                raise FetchError(str(exc)) from exc
-            finally:
-                _ACTIVE_GUARD.reset(token)
+            host = (urlsplit(current_url).hostname or "").lower()
+            with _paced(request, host, policy):
+                proxied = bool(policy.proxy) or bool(
+                    policy.trust_env and requests.utils.get_environ_proxies(current_url)
+                )
+                token = _ACTIVE_GUARD.set((policy, proxied))
+                try:
+                    kwargs = {
+                        "headers": headers,
+                        "timeout": policy.timeout,
+                        "verify": policy.verify_tls,
+                        "proxies": proxies,
+                        "cookies": policy.cookies,
+                        "allow_redirects": False,
+                        "stream": True,
+                    }
+                    if method == "GET":
+                        response = session.get(current_url, **kwargs)
+                    else:
+                        kwargs["data"] = body
+                        response = session.request(method, current_url, **kwargs)
+                except requests.Timeout as exc:
+                    raise FetchTimeout(f"Request timed out after {policy.timeout}s") from exc
+                except requests.RequestException as exc:
+                    blocked = _find_cause(exc, AddressPolicyError)
+                    if blocked is not None:
+                        raise blocked from exc
+                    raise FetchError(str(exc)) from exc
+                finally:
+                    _ACTIVE_GUARD.reset(token)
 
-            status_code = getattr(response, "status_code", 200)
-            if status_code in REDIRECT_STATUSES and response.headers.get("Location"):
-                if redirect_index >= policy.redirect_limit:
+                status_code = getattr(response, "status_code", 200)
+                if status_code in (429, 503):
+                    wait = retry_after_seconds(response.headers.get("Retry-After"))
+                    if wait is not None:
+                        HOSTS.note_retry_after(host, wait)
+                if status_code in REDIRECT_STATUSES and response.headers.get("Location"):
+                    if redirect_index >= policy.redirect_limit:
+                        close = getattr(response, "close", None)
+                        if close:
+                            close()
+                        raise RedirectPolicyError(
+                            f"Redirect limit {policy.redirect_limit} exceeded"
+                        )
+                    next_url = urljoin(current_url, response.headers["Location"])
+                    validate_destination(next_url, policy)
+                    if _origin(next_url) != start_origin:
+                        # Credentials belong to the origin they were configured for;
+                        # requests' own redirect stripping is bypassed by manual redirects.
+                        headers = strip_cross_origin_headers(headers, policy, keep=("User-agent",))
+                    chain.append(next_url)
+                    if status_code == 303 or (status_code in (301, 302) and method == "POST"):
+                        method, body = "GET", None
                     close = getattr(response, "close", None)
                     if close:
                         close()
-                    raise RedirectPolicyError(f"Redirect limit {policy.redirect_limit} exceeded")
-                next_url = urljoin(current_url, response.headers["Location"])
-                validate_destination(next_url, policy)
-                if _origin(next_url) != start_origin:
-                    # Credentials belong to the origin they were configured for;
-                    # requests' own redirect stripping is bypassed by manual redirects.
-                    headers = strip_cross_origin_headers(headers, policy, keep=("User-agent",))
-                chain.append(next_url)
-                if status_code == 303 or (status_code in (301, 302) and method == "POST"):
-                    method, body = "GET", None
-                close = getattr(response, "close", None)
-                if close:
-                    close()
-                current_url = next_url
-                continue
+                    current_url = next_url
+                    continue
 
-            if status_code == 304:
-                close = getattr(response, "close", None)
-                if close:
-                    close()
+                if status_code == 304:
+                    close = getattr(response, "close", None)
+                    if close:
+                        close()
+                    return FetchResult(
+                        requested_url=requested_url,
+                        effective_url=current_url,
+                        status=status_code,
+                        headers=dict(response.headers),
+                        body=b"",
+                        redirect_chain=tuple(chain),
+                        not_modified=True,
+                    )
+                try:
+                    if request.operation != "delivery":
+                        response.raise_for_status()
+                    response_body = _bounded_body(response, policy.max_bytes)
+                finally:
+                    close = getattr(response, "close", None)
+                    if close:
+                        close()
                 return FetchResult(
                     requested_url=requested_url,
                     effective_url=current_url,
                     status=status_code,
                     headers=dict(response.headers),
-                    body=b"",
+                    body=response_body,
                     redirect_chain=tuple(chain),
-                    not_modified=True,
                 )
-            try:
-                if request.operation != "delivery":
-                    response.raise_for_status()
-                response_body = _bounded_body(response, policy.max_bytes)
-            finally:
-                close = getattr(response, "close", None)
-                if close:
-                    close()
-            return FetchResult(
-                requested_url=requested_url,
-                effective_url=current_url,
-                status=status_code,
-                headers=dict(response.headers),
-                body=response_body,
-                redirect_chain=tuple(chain),
-            )
         raise RedirectPolicyError("Redirect handling exhausted")
 
 
@@ -472,4 +632,7 @@ def policy_from_settings(settings: Any, *, operation: str = "source") -> FetchPo
         user_agent=settings.user_agent,
         extra_headers=dict(settings.extra_headers) if operation != "delivery" else {},
         trust_env=bool(getattr(settings, "trust_env_proxy", False)),
+        host_concurrency=int(getattr(settings, "per_host_concurrency", 0) or 0),
+        host_interval=float(getattr(settings, "per_host_delay", 0.0) or 0.0),
+        max_host_wait=float(getattr(settings, "max_host_wait", 30.0)),
     )

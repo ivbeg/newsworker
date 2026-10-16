@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import threading
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 #: Earliest publication year accepted from page text.  Older values are almost
@@ -42,8 +42,8 @@ def thread_date_parser() -> Any:
 
     Building a ``DateParser(generate=True)`` costs tens of milliseconds, so a
     parser is shared by every request a thread serves instead of being rebuilt
-    per request.  Callers must pair :func:`start_session` with
-    :func:`end_session` so a narrowed pattern set never leaks between requests.
+    per request.  Callers must pair ``start_session`` with ``end_session`` (in a
+    ``finally`` block) so a narrowed pattern set never leaks between requests.
     """
     parser = getattr(_local, "parser", None)
     if parser is None:
@@ -52,17 +52,6 @@ def thread_date_parser() -> Any:
         parser = DateParser(generate=True)
         _local.parser = parser
     return parser
-
-
-def start_session(parser: Any, patterns: Iterable[str]) -> None:
-    """Restrict ``parser`` to ``patterns`` across qddate API generations."""
-    method = getattr(parser, "start_session", None) or parser.startSession
-    method(list(patterns))
-
-
-def end_session(parser: Any) -> None:
-    method = getattr(parser, "end_session", None) or parser.endSession
-    method()
 
 
 def _offset_from_token(token: Any) -> Optional[dt.timezone]:

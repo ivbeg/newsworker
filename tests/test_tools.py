@@ -150,36 +150,25 @@ def test_datetime_url_pagination_and_logger_edge_cases():
 
 def test_robots_helpers_cache_leniency_and_delay(monkeypatch):
     clear_robots_cache()
+    fetched = []
 
-    class Parser:
-        reads = 0
+    def fetch(url):
+        fetched.append(url)
+        return b"User-agent: *\nDisallow: /blocked\nCrawl-delay: 2\n"
 
-        def set_url(self, url):
-            self.url = url
-
-        def read(self):
-            type(self).reads += 1
-
-        def can_fetch(self, agent, url):
-            return not url.endswith("/blocked")
-
-        def crawl_delay(self, agent):
-            return 2
-
-    monkeypatch.setattr("newsworker.tools.RobotFileParser", Parser)
+    monkeypatch.setattr("newsworker.tools._default_robots_fetch", fetch)
     assert can_fetch("file:///tmp/a")
     assert can_fetch("https://example.com/open")
     assert not can_fetch("https://example.com/blocked")
     assert robots_crawl_delay("https://example.com/open") == 2.0
-    assert Parser.reads == 1
+    assert fetched == ["https://example.com/robots.txt"]
     assert robots_crawl_delay("file:///tmp/a") is None
 
     clear_robots_cache()
 
-    class BrokenParser(Parser):
-        def read(self):
-            raise OSError("network")
+    def broken(url):
+        raise OSError("network")
 
-    monkeypatch.setattr("newsworker.tools.RobotFileParser", BrokenParser)
+    monkeypatch.setattr("newsworker.tools._default_robots_fetch", broken)
     assert can_fetch("https://broken.example/path")
     assert robots_crawl_delay("https://broken.example/path") is None

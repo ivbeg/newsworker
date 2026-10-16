@@ -4,7 +4,6 @@ Regenerate the corpus with ``python benchmarks/build_corpus.py`` and print the
 full report with ``python benchmarks/corpus_report.py``.
 """
 
-import json
 import pathlib
 import sys
 
@@ -15,23 +14,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "benchmarks
 from corpus_report import run_corpus  # noqa: E402
 
 CORPUS = pathlib.Path(__file__).parent / "corpus"
-FULLY_SUPPORTED = {"en", "ru", "de", "fr", "es", "it", "pt"}
-
-
-def _qddate_reads(case, parser):
-    """Whether the installed qddate understands every printed date of a case.
-
-    Cases whose dates qddate cannot read (Ukrainian month names before qddate
-    1.0.13, Portuguese "maio" before 1.0.16) measure qddate, not newsworker,
-    so they count in the totals but are not required to be exact.
-    """
-    from newsworker.relative import parse_relative
-
-    for want in case["expected"]:
-        text = want.get("date_text")
-        if text and parser.match(text) is None and parse_relative(text) is None:
-            return False
-    return True
 
 
 @pytest.fixture(scope="module")
@@ -42,27 +24,17 @@ def corpus_score():
 def test_corpus_totals_meet_the_quality_floor(corpus_score):
     summary = corpus_score.summary()
     assert summary["cases"] >= 200
-    assert summary["precision"] >= 0.98, corpus_score.to_markdown()
-    assert summary["recall"] >= 0.92, corpus_score.to_markdown()
-    assert summary["title_accuracy"] >= 0.98, corpus_score.to_markdown()
-    assert summary["date_accuracy"] >= 0.98, corpus_score.to_markdown()
+    for metric in ("precision", "recall", "title_accuracy", "date_accuracy"):
+        assert summary[metric] == 1.0, corpus_score.to_markdown()
 
 
-def test_fully_supported_languages_extract_every_case_exactly(corpus_score):
-    from qddate import DateParser
-
-    parser = DateParser(generate=True)
-    cases = {
-        case["name"]: case
-        for case in json.loads((CORPUS / "cases.json").read_text(encoding="utf-8"))["cases"]
-    }
+def test_every_case_is_extracted_exactly(corpus_score):
     failures = [
         f"{case.name}: precision {case.precision:.2f}, recall {case.recall:.2f}, "
-        f"missing {case.missing[:2]}, unexpected {case.unexpected[:2]}"
+        f"titles {case.titles_correct}/{case.matched}, dates {case.dates_correct}/"
+        f"{case.dates_expected}, missing {case.missing[:2]}, unexpected {case.unexpected[:2]}"
         for case in corpus_score.cases
-        if cases[case.name]["language"] in FULLY_SUPPORTED | {"uk"}
-        and _qddate_reads(cases[case.name], parser)
-        and (
+        if (
             case.precision < 1.0
             or case.recall < 1.0
             or case.titles_correct < case.matched

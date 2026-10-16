@@ -77,6 +77,13 @@ class Settings:
     trusted_proxy: bool = False
     # Read HTTP(S)_PROXY / NO_PROXY / .netrc from the environment (off by default).
     trust_env_proxy: bool = False
+    # Politeness towards crawled sites (shared by every worker in the process):
+    # requests in flight per host (0 = unlimited), minimum seconds between
+    # request starts (robots.txt Crawl-delay raises it), and the longest wait
+    # for a slot or a Retry-After window before giving up.
+    per_host_concurrency: int = 2
+    per_host_delay: float = 0.0
+    max_host_wait: float = 30.0
     delivery_max_response_bytes: int = 1024 * 1024
 
     # Server controls.
@@ -218,6 +225,9 @@ class Settings:
             "spec_cache_max_entries": self.spec_cache_max_entries,
             "rate_limit_per_minute": self.rate_limit_per_minute,
             "redirect_limit": self.redirect_limit,
+            "per_host_concurrency": self.per_host_concurrency,
+            "per_host_delay": self.per_host_delay,
+            "max_host_wait": self.max_host_wait,
         }
         for name, value in nonnegative.items():
             if value < 0:

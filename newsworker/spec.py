@@ -37,7 +37,6 @@ from lxml import etree
 from lxml.html import fromstring
 
 from .consts import DATE_CLASSES_KEYWORDS, NEWS_CLASSES_KEYWORDS
-from .dates import end_session, start_session
 from .extractor import FeedExtractor
 from .tools import (
     clean_url,
@@ -1171,12 +1170,12 @@ def _parse_date_text(ext, text, patterns):
     if not text:
         return None
     if patterns:
-        start_session(ext.indexer, patterns)
+        ext.indexer.start_session(list(patterns))
     try:
         match, _key, _data, _matched_text, the_date = ext.match_text(text)
     finally:
         if patterns:
-            end_session(ext.indexer)
+            ext.indexer.end_session()
     if match:
         return the_date
     return None

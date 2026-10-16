@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowed qddate session active for later requests.
 
 ### Added
+- **Polite fetching** — requests to one site are paced across every worker in
+  the process: `per_host_concurrency` (default 2), `per_host_delay`, robots.txt
+  `Crawl-delay` / `Request-rate`, and `Retry-After` on 429/503 responses. Waits
+  are capped by `max_host_wait` (30 s), after which the request fails with a
+  `rate_limited` error. urllib3 no longer sleeps for whatever `Retry-After` a
+  server sends.
+- **Ukrainian** is a fully supported language (requires qddate 1.0.16).
 - **Extraction corpus and quality gate** — 182 labelled listing pages across 8
   languages and 13 CMS layouts (`tests/corpus`), scored by the new
   `newsworker.evaluation` module. CI fails when precision, recall, title or date
@@ -44,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed (accuracy)
 - **Article links** — the headline link is chosen instead of the first link in
   an item, which was often a category or tag link (#19).
+
+### Changed (dependencies)
+- Requires **qddate 1.0.16** (pyparsing snake_case API, signed timezone
+  offsets, Portuguese `maio`). The pyparsing deprecation-warning filter and
+  the qddate session compatibility shims are gone, and the extraction corpus
+  gate now requires every case to be exact.
 
 ### Changed (requests)
 - **User-Agent** — requests now identify as
@@ -101,6 +114,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of aborting the batch; duplicate URLs are processed once.
 
 ### Security
+- **robots.txt** is fetched through the shared fetch policy everywhere: the
+  public `tools.can_fetch()` helper used plain `urllib` (no private-address
+  checks, unbounded body), and the asynchronous batch transport skipped
+  robots.txt entirely. The rules cache now expires after a day and is bounded.
 - **Connection-time address check** — the address a socket actually connects
   to is validated against the private-network policy, closing the DNS
   rebinding window between resolution and connection.

@@ -78,6 +78,7 @@ class FeedService:
             default_language=self.settings.default_language,
         )
         self.extractor.default_timezone = self.settings.default_timezone
+        self.extractor.base_policy = policy_from_settings(self.settings)
         self.extractor.redirect_limit = self.settings.redirect_limit
         self.extractor.allowed_hosts = tuple(self.settings.allowed_hosts)
         self.extractor.block_private_hosts = self.settings.block_private_hosts
@@ -633,7 +634,22 @@ class FeedService:
         from .async_fetch import fetch_urls_concurrent
 
         fetch_started = time.monotonic()
-        fetched = fetch_urls_concurrent(urls, self.settings, max_workers=max_workers)
+        refused = {}
+        if self.settings.respect_robots:
+            # Same robots.txt rules (and Crawl-delay pacing) as the threaded path.
+            for url in urls:
+                try:
+                    allowed = self.extractor._can_fetch_policy(url, self.settings.user_agent)
+                except Exception:  # noqa: BLE001 - unreadable robots.txt allows the fetch
+                    allowed = True
+                if not allowed:
+                    refused[url] = PermissionError(f"robots.txt disallows fetching {url}")
+        allowed_urls = [url for url in urls if url not in refused]
+        fetched = dict(refused)
+        if allowed_urls:
+            fetched.update(
+                fetch_urls_concurrent(allowed_urls, self.settings, max_workers=max_workers)
+            )
         fetch_ms = (time.monotonic() - fetch_started) * 1000
         results = {}
         for url in urls:

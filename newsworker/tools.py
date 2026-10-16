@@ -9,7 +9,7 @@ import hashlib
 import re
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from urllib.parse import unquote_plus, urljoin, urlparse, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 from zoneinfo import ZoneInfo
@@ -24,13 +24,52 @@ ALLOWED_URL_SCHEMES = ("http", "https")
 #: Default User-Agent name used when consulting ``robots.txt``.
 DEFAULT_ROBOTS_AGENT = "newsworker"
 
-# Cache of parsed ``robots.txt`` rules keyed by scheme+host. A cached value of
-# ``None`` means the file could not be retrieved and fetching is permitted
-# (lenient policy). ``_ROBOTS_MISSING`` distinguishes "not attempted yet" from a
-# cached ``None`` so we do not re-read on every call.
-_ROBOTS_CACHE = {}
 _ROBOTS_MISSING = object()
-_ROBOTS_LOCK = threading.Lock()
+
+
+class _RobotsCache:
+    """Parsed ``robots.txt`` rules per scheme+host, bounded in size and age.
+
+    A cached ``None`` means the file could not be retrieved and fetching is
+    permitted (lenient policy). Entries expire after a day (RFC 9309 advises
+    against longer caching) and the oldest are dropped beyond ``max_entries``,
+    so a long-running server does not grow without bound.
+    """
+
+    def __init__(self, ttl=86400.0, max_entries=4096, clock=time.monotonic):
+        self.ttl = ttl
+        self.max_entries = max_entries
+        self._clock = clock
+        self._entries = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, root, default=None):
+        with self._lock:
+            entry = self._entries.get(root)
+            if entry is None:
+                return default
+            parser, stored = entry
+            if self._clock() - stored > self.ttl:
+                del self._entries[root]
+                return default
+            return parser
+
+    def __setitem__(self, root, parser):
+        with self._lock:
+            self._entries[root] = (parser, self._clock())
+            self._entries.move_to_end(root)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+
+    def clear(self):
+        with self._lock:
+            self._entries.clear()
+
+    def __len__(self):
+        return len(self._entries)
+
+
+_ROBOTS_CACHE = _RobotsCache()
 
 
 def decode_html(html_string):
@@ -369,32 +408,42 @@ def resolve_feed_language_with_diagnostics(**kwargs):
     return language, {"reason": "automatic_evidence", "ambiguous": False}
 
 
-def _robots_parser_for(root):
-    """Returns a cached :class:`RobotFileParser` for ``root`` (or ``None``).
+def robots_rules(root, fetch):
+    """Return cached ``robots.txt`` rules for ``root`` (``scheme://host[:port]``).
 
-    ``None`` indicates the ``robots.txt`` could not be read; callers treat that
-    leniently and allow the fetch.
+    ``fetch(url)`` returns the body bytes; any error (404, timeout, policy
+    rejection) caches ``None``, which callers treat as "allowed".
     """
-    with _ROBOTS_LOCK:
-        cached = _ROBOTS_CACHE.get(root, _ROBOTS_MISSING)
+    cached = _ROBOTS_CACHE.get(root, _ROBOTS_MISSING)
     if cached is not _ROBOTS_MISSING:
         return cached
+    robots_url = urljoin(root, "/robots.txt")
     parser = RobotFileParser()
-    parser.set_url(urljoin(root, "/robots.txt"))
     try:
-        parser.read()
+        body = fetch(robots_url)
+        parser.set_url(robots_url)
+        parser.parse(body.decode("utf-8", "replace").splitlines())
     except Exception:
-        # Network error, timeout, malformed file, etc. -> be lenient.
         parser = None
-    with _ROBOTS_LOCK:
-        _ROBOTS_CACHE[root] = parser
+    _ROBOTS_CACHE[root] = parser
     return parser
+
+
+def _default_robots_fetch(url):
+    from .fetch import FetchPolicy, FetchRequest, RequestsTransport
+
+    policy = FetchPolicy(timeout=10, max_bytes=512 * 1024, user_agent=DEFAULT_ROBOTS_AGENT)
+    return RequestsTransport().fetch(FetchRequest(url), policy).body
+
+
+def _robots_parser_for(root):
+    """Rules for ``root`` fetched with the default (private-address-blocking) policy."""
+    return robots_rules(root, _default_robots_fetch)
 
 
 def clear_robots_cache():
     """Clears the cached ``robots.txt`` rules (primarily for tests)."""
-    with _ROBOTS_LOCK:
-        _ROBOTS_CACHE.clear()
+    _ROBOTS_CACHE.clear()
 
 
 def can_fetch(url, user_agent=DEFAULT_ROBOTS_AGENT):

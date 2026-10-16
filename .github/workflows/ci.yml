@@ -57,7 +57,7 @@ jobs:
       - name: Optional-extra tests
         env:
           NEWSWORKER_BROWSER_TESTS: ${{ matrix.extra == 'browser' && '1' || '0' }}
-        run: pytest -q tests/test_optional_transports.py tests/test_enrich.py tests/test_http_caching.py
+        run: pytest -q tests/test_optional_transports.py tests/test_enrich.py tests/test_http_caching.py tests/test_politeness.py
 
   corpus:
     runs-on: ubuntu-latest

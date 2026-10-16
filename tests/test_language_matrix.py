@@ -18,7 +18,8 @@ def test_supported_language_fixture_matrix(tmp_path):
         assert LANGUAGE_SUPPORT[code].extraction == "supported"
         assert parser.match(fixture["positive"]), (code, fixture["positive"])
         assert not parser.match(fixture["negative"]), (code, fixture["negative"])
-        assert fixture["ambiguous"]
+        # A month name without a day or year must not become a publication date.
+        assert not parser.match(fixture["ambiguous"]), (code, fixture["ambiguous"])
 
         html = (
             f"<html lang='{code}'><head><meta charset='utf-8'><title>{code}</title></head><body>"
@@ -56,5 +57,5 @@ def test_supported_language_fixture_matrix(tmp_path):
 
 
 def test_partial_languages_do_not_claim_date_support():
-    for code in ("bg", "cs", "uk", "ja", "zh"):
+    for code in ("bg", "cs", "ja", "zh"):
         assert LANGUAGE_SUPPORT[code].extraction == "partial"

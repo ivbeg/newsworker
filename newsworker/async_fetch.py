@@ -6,9 +6,10 @@ from __future__ import annotations
 import asyncio
 import ssl
 from typing import Dict, List, Optional, Union
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from .fetch import (
+    HOSTS,
     REDIRECT_STATUSES,
     FetchError,
     FetchResult,
@@ -16,6 +17,7 @@ from .fetch import (
     RedirectPolicyError,
     ResponseTooLarge,
     policy_from_settings,
+    retry_after_seconds,
     validate_destination,
 )
 
@@ -38,66 +40,99 @@ def _ssl_context(verify_tls: bool):
     return context
 
 
-async def _fetch_one(session, url, policy):
-    import aiohttp
+class _HostLimits:
+    """Per-host concurrency for one async batch; timing comes from ``HOSTS``."""
 
+    def __init__(self, policy):
+        self.policy = policy
+        self._semaphores = {}
+
+    def semaphore(self, host):
+        if self.policy.host_concurrency <= 0:
+            return None
+        if host not in self._semaphores:
+            self._semaphores[host] = asyncio.Semaphore(self.policy.host_concurrency)
+        return self._semaphores[host]
+
+
+async def _fetch_one(session, url, policy, limits=None):
+    limits = limits or _HostLimits(policy)
     requested_url = url
     current_url = url
     chain = []
     for redirect_index in range(policy.redirect_limit + 1):
         validate_destination(current_url, policy)
+        host = (urlsplit(current_url).hostname or "").lower()
+        semaphore = limits.semaphore(host)
+        if semaphore is not None:
+            await semaphore.acquire()
         try:
-            async with session.get(
-                current_url,
-                timeout=aiohttp.ClientTimeout(total=policy.timeout),
-                proxy=policy.proxy,
-                allow_redirects=False,
-            ) as response:
-                if response.status in REDIRECT_STATUSES and response.headers.get("Location"):
-                    if redirect_index >= policy.redirect_limit:
-                        raise RedirectPolicyError(
-                            f"Redirect limit {policy.redirect_limit} exceeded"
-                        )
-                    current_url = urljoin(current_url, response.headers["Location"])
-                    validate_destination(current_url, policy)
-                    chain.append(current_url)
-                    continue
-                if response.status == 304:
-                    return FetchResult(
-                        requested_url,
-                        current_url,
-                        304,
-                        dict(response.headers),
-                        b"",
-                        tuple(chain),
-                        True,
-                    )
-                response.raise_for_status()
-                declared = response.headers.get("Content-Length")
-                if declared and declared.isdigit() and int(declared) > policy.max_bytes:
-                    raise ResponseTooLarge(
-                        f"Response Content-Length {declared} exceeds limit {policy.max_bytes}"
-                    )
-                chunks = []
-                total = 0
-                async for chunk in response.content.iter_chunked(64 * 1024):
-                    total += len(chunk)
-                    if total > policy.max_bytes:
-                        raise ResponseTooLarge(f"Response exceeds byte limit {policy.max_bytes}")
-                    chunks.append(chunk)
-                return FetchResult(
-                    requested_url,
-                    current_url,
-                    response.status,
-                    dict(response.headers),
-                    b"".join(chunks),
-                    tuple(chain),
-                )
-        except asyncio.TimeoutError as exc:
-            raise FetchTimeout(f"Request timed out after {policy.timeout}s") from exc
-        except aiohttp.ClientError as exc:
-            raise FetchError(str(exc)) from exc
+            delay = HOSTS.reserve(
+                host, interval=policy.host_interval, max_wait=policy.max_host_wait
+            )
+            if delay > 0:
+                await asyncio.sleep(delay)
+            outcome = await _send(session, current_url, policy, host)
+        finally:
+            if semaphore is not None:
+                semaphore.release()
+        if isinstance(outcome, str):
+            if redirect_index >= policy.redirect_limit:
+                raise RedirectPolicyError(f"Redirect limit {policy.redirect_limit} exceeded")
+            current_url = urljoin(current_url, outcome)
+            validate_destination(current_url, policy)
+            chain.append(current_url)
+            continue
+        status, headers, body = outcome
+        return FetchResult(
+            requested_url,
+            current_url,
+            status,
+            headers,
+            body,
+            tuple(chain),
+            status == 304,
+        )
     raise RedirectPolicyError("Redirect handling exhausted")
+
+
+async def _send(session, current_url, policy, host):
+    """One request: a redirect ``Location`` string or ``(status, headers, body)``."""
+    import aiohttp
+
+    try:
+        async with session.get(
+            current_url,
+            timeout=aiohttp.ClientTimeout(total=policy.timeout),
+            proxy=policy.proxy,
+            allow_redirects=False,
+        ) as response:
+            if response.status in (429, 503):
+                wait = retry_after_seconds(response.headers.get("Retry-After"))
+                if wait is not None:
+                    HOSTS.note_retry_after(host, wait)
+            if response.status in REDIRECT_STATUSES and response.headers.get("Location"):
+                return response.headers["Location"]
+            if response.status == 304:
+                return 304, dict(response.headers), b""
+            response.raise_for_status()
+            declared = response.headers.get("Content-Length")
+            if declared and declared.isdigit() and int(declared) > policy.max_bytes:
+                raise ResponseTooLarge(
+                    f"Response Content-Length {declared} exceeds limit {policy.max_bytes}"
+                )
+            chunks = []
+            total = 0
+            async for chunk in response.content.iter_chunked(64 * 1024):
+                total += len(chunk)
+                if total > policy.max_bytes:
+                    raise ResponseTooLarge(f"Response exceeds byte limit {policy.max_bytes}")
+                chunks.append(chunk)
+            return response.status, dict(response.headers), b"".join(chunks)
+    except asyncio.TimeoutError as exc:
+        raise FetchTimeout(f"Request timed out after {policy.timeout}s") from exc
+    except aiohttp.ClientError as exc:
+        raise FetchError(str(exc)) from exc
 
 
 async def fetch_urls_async(
@@ -129,6 +164,7 @@ async def fetch_urls_async(
     headers.setdefault("User-Agent", policy.user_agent)
     connector = aiohttp.TCPConnector(ssl=_ssl_context(policy.verify_tls))
     semaphore = asyncio.Semaphore(max(1, max_concurrency))
+    limits = _HostLimits(policy)
     results: Dict[str, Union[FetchResult, Exception]] = {}
     async with aiohttp.ClientSession(
         headers=headers,
@@ -139,7 +175,7 @@ async def fetch_urls_async(
         async def worker(url):
             async with semaphore:
                 try:
-                    results[url] = await _fetch_one(session, url, policy)
+                    results[url] = await _fetch_one(session, url, policy, limits)
                 except Exception as exc:
                     results[url] = exc
 

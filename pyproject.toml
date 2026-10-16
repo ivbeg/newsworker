@@ -17,7 +17,7 @@ dependencies = [
     "lxml>=4.9,<7",
     "cssselect>=1.2,<2",
     "beautifulsoup4>=4.12,<5",
-    "qddate>=1.0.4,<2",
+    "qddate>=1.0.16,<2",
     "typer>=0.9,<1",
     "feedgen>=1.0,<2",
     "pyyaml>=6,<7",
@@ -90,9 +90,8 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-ra"
-# qddate <= 1.0.15 still calls pyparsing's camelCase API, which pyparsing 3.3
-# deprecates; that noise is not actionable here. Our own deprecations stay visible.
-filterwarnings = ["ignore::DeprecationWarning:qddate"]
+# Deprecations raised by newsworker itself fail the suite.
+filterwarnings = ["error::DeprecationWarning:newsworker"]
 
 [tool.mypy]
 # Type checking is being adopted incrementally. Third-party stubs are often
