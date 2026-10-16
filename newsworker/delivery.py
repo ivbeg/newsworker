@@ -262,6 +262,53 @@ class SMTPChannel:
         return DeliveryResult("success")
 
 
+def _item_text(item: Mapping[str, Any]) -> tuple:
+    return str(item.get("title") or "News update"), str(item.get("link") or "")
+
+
+def _send_json(
+    url: str,
+    body: Mapping[str, Any],
+    policy: Optional[FetchPolicy],
+    *,
+    method: str = "POST",
+    headers: Optional[Mapping[str, str]] = None,
+    secrets: tuple = (),
+) -> DeliveryResult:
+    """Send one JSON delivery request and classify the outcome.
+
+    2xx is success; 408/425/429 and 5xx are retried; anything else is
+    terminal. ``secrets`` are scrubbed from error text kept in the outbox.
+    """
+    try:
+        result = RequestsTransport().fetch(
+            FetchRequest(
+                url,
+                method=method,
+                headers={"Content-Type": "application/json", **dict(headers or {})},
+                body=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                operation="delivery",
+            ),
+            policy or FetchPolicy(user_agent="newsworker"),
+        )
+    except Exception as exc:
+        detail = _safe_error(exc)
+        for secret in secrets:
+            if secret:
+                detail = detail.replace(secret, "<redacted>")
+        return DeliveryResult("retryable", detail)
+    if 200 <= result.status < 300:
+        return DeliveryResult("success")
+    if result.status in {408, 425, 429} or result.status >= 500:
+        return DeliveryResult("retryable", f"HTTP {result.status}")
+    return DeliveryResult("terminal", f"HTTP {result.status}")
+
+
+def _opaque(kind: str, secret: str) -> str:
+    """Stable outbox identity for a destination whose address is a secret."""
+    return f"{kind}:" + hashlib.sha256(secret.encode("utf-8")).hexdigest()[:24]
+
+
 @dataclass
 class TelegramChannel:
     token: str
@@ -281,35 +328,106 @@ class TelegramChannel:
             raise ValueError("Telegram token and chat_id are required")
 
     def send(self, payload: DeliveryPayload) -> DeliveryResult:
-        text = "\n".join(
-            filter(
-                None,
-                [
-                    str(payload.item.get("title") or "News update"),
-                    str(payload.item.get("link") or ""),
-                ],
-            )
-        )[:4096]
-        body = json.dumps({"chat_id": self.chat_id, "text": text}).encode("utf-8")
+        title, link = _item_text(payload.item)
+        # Plain text (no parse_mode): page titles cannot inject markup.
+        text = "\n".join(filter(None, [title, link]))[:4096]
         url = f"https://api.telegram.org/bot{quote(self.token, safe='')}/sendMessage"
-        try:
-            result = RequestsTransport().fetch(
-                FetchRequest(
-                    url,
-                    method="POST",
-                    headers={"Content-Type": "application/json"},
-                    body=body,
-                    operation="delivery",
-                ),
-                self.policy,
-            )
-        except Exception as exc:
-            return DeliveryResult("retryable", _safe_error(exc).replace(self.token, "<redacted>"))
-        if 200 <= result.status < 300:
-            return DeliveryResult("success")
-        return DeliveryResult(
-            "retryable" if result.status == 429 or result.status >= 500 else "terminal",
-            f"HTTP {result.status}",
+        return _send_json(
+            url, {"chat_id": self.chat_id, "text": text}, self.policy, secrets=(self.token,)
+        )
+
+
+def _slack_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+@dataclass
+class SlackChannel:
+    """Slack incoming webhook. Titles are escaped, so ``<!channel>`` cannot ping."""
+
+    webhook_url: str
+    policy: Optional[FetchPolicy] = None
+    name: str = "slack"
+    capabilities: ChannelCapabilities = field(default_factory=lambda: ChannelCapabilities())
+
+    @property
+    def destination_identity(self) -> str:
+        return _opaque("slack", self.webhook_url)
+
+    def validate_config(self) -> None:
+        validate_url(self.webhook_url)
+
+    def send(self, payload: DeliveryPayload) -> DeliveryResult:
+        title, link = _item_text(payload.item)
+        text = f"<{link}|{_slack_escape(title)}>" if link else _slack_escape(title)
+        return _send_json(
+            self.webhook_url, {"text": text}, self.policy, secrets=(self.webhook_url,)
+        )
+
+
+@dataclass
+class DiscordChannel:
+    """Discord webhook. Mentions are disabled, so ``@everyone`` in a title is inert."""
+
+    webhook_url: str
+    policy: Optional[FetchPolicy] = None
+    name: str = "discord"
+    capabilities: ChannelCapabilities = field(
+        default_factory=lambda: ChannelCapabilities(max_message_bytes=2000)
+    )
+
+    @property
+    def destination_identity(self) -> str:
+        return _opaque("discord", self.webhook_url)
+
+    def validate_config(self) -> None:
+        validate_url(self.webhook_url)
+
+    def send(self, payload: DeliveryPayload) -> DeliveryResult:
+        title, link = _item_text(payload.item)
+        content = "\n".join(filter(None, [title, link]))[:2000]
+        body = {"content": content, "allowed_mentions": {"parse": []}}
+        return _send_json(self.webhook_url, body, self.policy, secrets=(self.webhook_url,))
+
+
+@dataclass
+class MatrixChannel:
+    """Matrix room message. The outbox idempotency key is the Matrix
+    transaction id, so a retried send is de-duplicated by the homeserver."""
+
+    homeserver: str
+    token: str
+    room_id: str
+    policy: Optional[FetchPolicy] = None
+    name: str = "matrix"
+    capabilities: ChannelCapabilities = field(
+        default_factory=lambda: ChannelCapabilities(supports_idempotency=True)
+    )
+
+    @property
+    def destination_identity(self) -> str:
+        return f"matrix:{self.room_id}"
+
+    def validate_config(self) -> None:
+        if not self.token or not self.room_id:
+            raise ValueError("Matrix token and room id are required")
+        validate_url(self.homeserver)
+
+    def send(self, payload: DeliveryPayload) -> DeliveryResult:
+        title, link = _item_text(payload.item)
+        url = (
+            f"{self.homeserver.rstrip('/')}/_matrix/client/v3/rooms/"
+            f"{quote(self.room_id, safe='')}/send/m.room.message/"
+            f"{quote(payload.idempotency_key, safe='')}"
+        )
+        body = {"msgtype": "m.text", "body": "\n".join(filter(None, [title, link]))}
+        return _send_json(
+            url,
+            body,
+            self.policy,
+            method="PUT",
+            headers={"Authorization": f"Bearer {self.token}"},
+            secrets=(self.token,),
         )
 
 
@@ -351,14 +469,19 @@ def registry_from_settings(
                 timeout=settings.request_timeout,
             )
         )
-    if telegram_chat_id:
-        from .fetch import policy_from_settings
+    from .fetch import policy_from_settings
 
+    policy = policy_from_settings(settings, operation="delivery")
+    if telegram_chat_id:
+        registry.register(TelegramChannel(settings.telegram_token, telegram_chat_id, policy))
+    if getattr(settings, "slack_webhook_url", ""):
+        registry.register(SlackChannel(settings.slack_webhook_url, policy))
+    if getattr(settings, "discord_webhook_url", ""):
+        registry.register(DiscordChannel(settings.discord_webhook_url, policy))
+    if getattr(settings, "matrix_room", ""):
         registry.register(
-            TelegramChannel(
-                settings.telegram_token,
-                telegram_chat_id,
-                policy_from_settings(settings, operation="delivery"),
+            MatrixChannel(
+                settings.matrix_homeserver, settings.matrix_token, settings.matrix_room, policy
             )
         )
     return registry

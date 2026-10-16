@@ -17,7 +17,7 @@ newsworker watch URL [OPTIONS]
 | `--urls-file` | | — | Watch every URL in a text file (one per line, `#` comments). |
 | `--from-opml` | | — | Watch every feed in an OPML file (`--opml-pages` for their `htmlUrl`). |
 | `--interval` | `-i` | `300` | Seconds between polls. |
-| `--channel` | | `stdout` | Repeatable destination: `stdout`, `webhook`, `smtp`, `telegram`. |
+| `--channel` | | `stdout` | Repeatable destination: `stdout`, `webhook`, `smtp`, `telegram`, `slack`, `discord`, `matrix`. |
 | `--webhook` | | — | POST new items as JSON to this URL (with retry/backoff). |
 | `--smtp-recipient` | | — | SMTP recipient when `--channel smtp`. |
 | `--telegram-chat-id` | | — | Telegram chat id when `--channel telegram`. |

@@ -37,6 +37,9 @@ _SECRET_FIELDS = {
     "proxy",
     "smtp_password",
     "telegram_token",
+    "slack_webhook_url",
+    "discord_webhook_url",
+    "matrix_token",
 }
 
 
@@ -115,6 +118,12 @@ class Settings:
     smtp_password: str = ""
     smtp_from: str = ""
     telegram_token: str = ""
+    # Chat channels for watch (select with --channel slack|discord|matrix).
+    slack_webhook_url: str = ""
+    discord_webhook_url: str = ""
+    matrix_homeserver: str = ""
+    matrix_token: str = ""
+    matrix_room: str = ""
 
     # Optional extraction strategies.
     render: bool = False

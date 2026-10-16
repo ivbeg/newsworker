@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowed qddate session active for later requests.
 
 ### Added
+- **Slack, Discord and Matrix delivery** — `--channel slack|discord|matrix`,
+  configured with `slack_webhook_url`, `discord_webhook_url` and
+  `matrix_homeserver` / `matrix_token` / `matrix_room` (secrets are redacted).
+  Page titles cannot trigger mentions (Slack escaping, Discord
+  `allowed_mentions`), and Matrix uses the outbox key as its transaction id.
+  All JSON channels share one sender with the same retry classification.
 - **`watch` over many sources** — `--urls-file` and `--from-opml` (with
   `--opml-pages`) watch a whole list in one process. Sources are polled in
   turn with per-host pacing, failures are isolated, and a finite run reports

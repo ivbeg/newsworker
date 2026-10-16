@@ -1094,7 +1094,7 @@ def watch(
     channel: Optional[List[str]] = typer.Option(
         None,
         "--channel",
-        help="Delivery channel; repeat for multiple destinations (stdout/webhook/smtp/telegram).",
+        help="Delivery channel; repeat for several (stdout, webhook, smtp, telegram, slack, discord, matrix).",
     ),
     smtp_recipient: Optional[str] = typer.Option(
         None, "--smtp-recipient", help="Recipient used by the smtp channel."
