@@ -1,5 +1,5 @@
 ## 1. Formatting and linting
-- [ ] 1.1 Apply Ruff formatting in an isolated mechanical commit
+- [x] 1.1 Apply Ruff formatting in an isolated mechanical commit (`ruff format --check` passes in CI)
 - [x] 1.2 Add `ruff format --check` to CI and align CI/pre-commit Ruff versions
 - [x] 1.3 Enable `I`, `B`, and selected `UP`, `SIM`, and `RUF` rules in staged commits
 
