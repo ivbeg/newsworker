@@ -105,21 +105,28 @@ class FetchResult:
     redirect_chain: Tuple[str, ...] = ()
     not_modified: bool = False
 
+    def header(self, name: str) -> Optional[str]:
+        """A response header by case-insensitive name (aiohttp sends ``Etag``)."""
+        value = self.headers.get(name)
+        if value is not None:
+            return value
+        wanted = name.lower()
+        return next((v for k, v in self.headers.items() if k.lower() == wanted), None)
+
     @property
     def validators(self) -> Dict[str, str]:
         return {
             key: value
             for key, value in {
-                "etag": self.headers.get("ETag") or self.headers.get("etag"),
-                "last_modified": self.headers.get("Last-Modified")
-                or self.headers.get("last-modified"),
+                "etag": self.header("ETag"),
+                "last_modified": self.header("Last-Modified"),
             }.items()
             if value
         }
 
     @property
     def content_language(self) -> Optional[str]:
-        return self.headers.get("Content-Language") or self.headers.get("content-language")
+        return self.header("Content-Language")
 
 
 def _normalize_allowed(hosts: Iterable[str]) -> set[str]:
@@ -364,20 +371,32 @@ def check_connected_address(host: str, sock: socket.socket) -> None:
     if state is None:
         return
     policy, proxied = state
-    if proxied or not policy.block_private_hosts or policy.trusted_proxy:
+    if proxied:
         return
     try:
         peer = sock.getpeername()[0]
         address = ipaddress.ip_address(str(peer).split("%", 1)[0])
     except (OSError, ValueError, IndexError):
         return
-    if not is_unsafe_address(address):
+    try:
+        check_address(host, address, policy)
+    except AddressPolicyError:
+        sock.close()
+        raise
+
+
+def check_address(host: str, address: IPAddress, policy: FetchPolicy) -> None:
+    """Raise :class:`AddressPolicyError` if ``policy`` forbids ``host`` at ``address``.
+
+    Shared by the connect-time socket check above and the asynchronous
+    transport's resolver, which validates the addresses it will connect to.
+    """
+    if not policy.block_private_hosts or policy.trusted_proxy or not is_unsafe_address(address):
         return
     host = (host or "").rstrip(".").lower()
     allowed = _normalize_allowed(policy.allowed_hosts)
     if policy.allow_private_hosts and allowed and host in allowed:
         return
-    sock.close()
     raise AddressPolicyError(f"Connection to {host!r} reached blocked address {address}")
 
 

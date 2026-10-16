@@ -141,6 +141,8 @@ def test_async_policy_headers_cookies_proxy_tls_and_concurrency(monkeypatch):
         ClientSession=Session,
     )
     monkeypatch.setitem(sys.modules, "aiohttp", module)
+    monkeypatch.setattr("newsworker.async_fetch._guarded_resolver", lambda policy: "resolver")
+    monkeypatch.setattr("newsworker.async_fetch._cookie_jar", lambda cookies: ("jar", cookies))
     cookies = {"session": "value"}
     policy = FetchPolicy(
         timeout=7,
@@ -158,8 +160,10 @@ def test_async_policy_headers_cookies_proxy_tls_and_concurrency(monkeypatch):
     )
     result = results["https://example.com"]
     assert result.content_language == "fr"
-    assert captured["session"]["headers"] == {"X-Test": "yes", "User-Agent": "agent"}
-    assert captured["session"]["cookies"] is cookies
+    assert captured["request"]["headers"] == {"X-Test": "yes", "User-Agent": "agent"}
+    assert captured["session"]["cookie_jar"] == ("jar", cookies)
+    assert captured["session"]["trust_env"] is False
+    assert captured["session"]["connector"][1]["resolver"] == "resolver"
     assert captured["request"]["proxy"] == "http://proxy.example:8080"
     assert captured["request"]["timeout"] == ("timeout", 7)
     assert captured["session"]["connector"][1]["ssl"].check_hostname is False

@@ -131,23 +131,34 @@ class FeedService:
             if data is None:
                 if stale is None:
                     raise RuntimeError("upstream returned 304 without a cached body")
-                self.content_cache.touch(url)
-                fresh_validators = {
-                    key: response_meta.get(key) for key in ("etag", "last_modified")
-                }
-                if self.use_cache:
-                    self.content_cache.update_meta(url, fresh_validators)
-                merged = dict(meta)
-                merged.update(response_meta)
-                merged.update({k: v for k, v in fresh_validators.items() if v})
-                merged["cache_state"] = "revalidated"
-                return stale, merged
+                return stale, self._revalidated_meta(url, meta, response_meta)
             response_meta["cache_state"] = "miss" if stale is None else "changed"
             if self.use_cache:
                 self._store_content(url, data, response_meta)
             return data, response_meta
 
         data, response_meta = self._content_flights.call(key_for(url), populate)
+        self._record_response(context, url, response_meta)
+        return data
+
+    def _revalidated_meta(
+        self, url: str, cached_meta: MappingLike, response_meta: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Refresh the cached copy the upstream confirmed with ``304``."""
+        self.content_cache.touch(url)
+        fresh_validators = {key: response_meta.get(key) for key in ("etag", "last_modified")}
+        if self.use_cache:
+            self.content_cache.update_meta(url, fresh_validators)
+        merged = dict(cached_meta or {})
+        merged.update(response_meta)
+        merged.update({k: v for k, v in fresh_validators.items() if v})
+        merged["cache_state"] = "revalidated"
+        return merged
+
+    @staticmethod
+    def _record_response(
+        context: ExtractionContext, url: str, response_meta: Dict[str, Any]
+    ) -> None:
         context.response_meta = dict(response_meta)
         context.content_language = context.content_language or _header_language(response_meta)
         diagnostics = context.diagnostics
@@ -159,7 +170,6 @@ class FeedService:
                     "cache_state": response_meta.get("cache_state", "hit"),
                 }
             )
-        return data
 
     def _store_content(self, url: str, data: bytes, meta: MappingLike = None) -> None:
         try:
@@ -692,36 +702,88 @@ class FeedService:
                     allowed = True
                 if not allowed:
                     refused[url] = PermissionError(f"robots.txt disallows fetching {url}")
-        allowed_urls = [url for url in urls if url not in refused]
-        fetched = dict(refused)
-        if allowed_urls:
+        # The same content cache as the threaded path: fresh copies are not
+        # fetched again and stale ones are revalidated with their validators.
+        documents: Dict[str, Tuple[bytes, Dict[str, Any]]] = {}
+        cached: Dict[str, Tuple[bytes, Dict[str, Any]]] = {}
+        conditional: Dict[str, Dict[str, str]] = {}
+        for url in urls:
+            if url in refused:
+                continue
+            stale, meta = self.content_cache.get_generation(url, fresh_only=False)
+            if stale is None:
+                continue
+            cached[url] = (stale, dict(meta or {}))
+            if not self.use_cache or force_refresh:
+                continue
+            fresh, fresh_meta = self.content_cache.get_generation(url, fresh_only=True)
+            if fresh is not None:
+                documents[url] = (fresh, dict(fresh_meta or {}, cache_state="hit"))
+                continue
+            headers = {}
+            if (meta or {}).get("etag"):
+                headers["If-None-Match"] = meta["etag"]
+            if (meta or {}).get("last_modified"):
+                headers["If-Modified-Since"] = meta["last_modified"]
+            if headers:
+                conditional[url] = headers
+        to_fetch = [url for url in urls if url not in refused and url not in documents]
+        fetched: Dict[str, Any] = dict(refused)
+        if to_fetch:
             fetched.update(
-                fetch_urls_concurrent(allowed_urls, self.settings, max_workers=max_workers)
+                fetch_urls_concurrent(
+                    to_fetch,
+                    self.settings,
+                    max_workers=max_workers,
+                    policy=self.extractor._policy(self.settings.user_agent),
+                    request_headers=conditional,
+                )
             )
+        for url in to_fetch:
+            payload = fetched.get(url)
+            if payload is None or isinstance(payload, Exception):
+                continue
+            if not hasattr(payload, "effective_url"):
+                documents[url] = (payload, {"cache_state": "miss"})
+                continue
+            meta = {
+                **payload.validators,
+                "requested_url": payload.requested_url,
+                "effective_url": payload.effective_url,
+                "status": payload.status,
+                "headers": dict(payload.headers),
+            }
+            if payload.not_modified:
+                if url not in cached:
+                    fetched[url] = RuntimeError("upstream returned 304 without a cached body")
+                    continue
+                body, cached_meta = cached[url]
+                documents[url] = (body, self._revalidated_meta(url, cached_meta, meta))
+                continue
+            meta["cache_state"] = "changed" if url in cached else "miss"
+            if self.use_cache:
+                self._store_content(url, payload.body, meta)
+            documents[url] = (payload.body, meta)
         fetch_ms = (time.monotonic() - fetch_started) * 1000
         results = {}
         for url in urls:
             started = time.monotonic()
             if runtime is not None:
                 runtime[url] = {"transport": "async", "fetch_phase_ms": fetch_ms}
-            payload = fetched.get(url)
-            if isinstance(payload, Exception):
+            if url not in documents:
+                failure = fetched.get(url)
+                if not isinstance(failure, Exception):
+                    failure = RuntimeError(f"No response for {url}")
                 results[url] = {
-                    "error": str(payload),
-                    "error_type": type(payload).__name__,
+                    "error": str(failure),
+                    "error_type": type(failure).__name__,
                     "elapsed_ms": (time.monotonic() - started) * 1000,
                 }
                 continue
+            body, meta = documents[url]
             try:
-                body = payload.body if hasattr(payload, "body") else payload
                 context = self.new_context(source="network", base_url=url)
-                if hasattr(payload, "effective_url"):
-                    context.response_meta = {
-                        "effective_url": payload.effective_url,
-                        "status": payload.status,
-                        "headers": dict(payload.headers),
-                        "cache_state": "async_fetch",
-                    }
+                self._record_response(context, url, meta)
                 results[url] = self.get_feed(url, data=body, context=context)
             except Exception as exc:
                 results[url] = {
@@ -733,7 +795,7 @@ class FeedService:
                 runtime[url].update(
                     {
                         "elapsed_ms": fetch_ms + (time.monotonic() - started) * 1000,
-                        "cache_state": "async_fetch",
+                        "cache_state": meta.get("cache_state", "hit"),
                     }
                 )
         return results

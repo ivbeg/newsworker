@@ -160,8 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (exit `3`).
 - **Bridges** — user bridges override bundled ones, and `match.hosts` lists
   apply to every listed host.
-- **Batch** — manifests report the transport actually used, per-source timings
-  and cache state; a source that cannot be written is recorded as a failure
+- **Batch** — `--async` uses the content cache like the threaded transport
+  (fresh pages are not refetched, stale ones are revalidated with their ETag),
+  and `ETag` validators are read whatever their header case. Manifests report
+  the transport actually used, per-source timings and cache state; a source that cannot be written is recorded as a failure
   instead of aborting the batch; duplicate URLs are processed once.
 
 ### Security
@@ -182,6 +184,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   images are removed from every output; the HTML preview also carries a CSP.
 - **Server refresh** — `?refresh=1` is honoured only for loopback clients or
   token-authenticated requests.
+- **Asynchronous transport parity** — `batch --async` now checks the addresses
+  aiohttp actually connects to (DNS rebinding), drops `Authorization`, `Cookie`
+  headers and `extra_headers` on cross-origin redirects instead of sending
+  them to every host, keeps `cookies_file` cookies on their own domains, and
+  honours `trust_env_proxy`.
 
 ### Changed
 - Each thread uses its own pooled HTTP session, so concurrent server requests

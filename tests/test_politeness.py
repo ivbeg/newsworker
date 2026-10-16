@@ -185,7 +185,7 @@ def test_async_batch_honours_robots(tmp_path, monkeypatch):
     called = []
     monkeypatch.setattr(
         "newsworker.async_fetch.fetch_urls_concurrent",
-        lambda urls, settings, max_workers: called.append(urls) or {},
+        lambda urls, settings, max_workers, **kwargs: called.append(urls) or {},
     )
     results = service.get_feeds(["https://blocked.example/news"], use_async=True)
     assert results["https://blocked.example/news"]["error_type"] == "PermissionError"
