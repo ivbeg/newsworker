@@ -1,0 +1,97 @@
+# Full, pinned dependency set (runtime + test) for every supported Python.
+# CI's `locked` job installs exactly this, so a broken upstream release cannot
+# turn the build red unannounced; the `test` matrix keeps using the latest
+# versions allowed by pyproject.toml. Regenerate after changing dependencies:
+#   uv pip compile pyproject.toml --extra test --python-version 3.10 --universal \
+#     --no-header -o requirements-lock.txt
+# (`--upgrade` to move every pin to the newest allowed release.)
+annotated-doc==0.0.5
+    # via typer
+beautifulsoup4==4.15.0
+    # via newsworker (pyproject.toml)
+certifi==2026.7.22
+    # via requests
+charset-normalizer==3.5.2
+    # via requests
+colorama==0.4.6 ; sys_platform == 'win32'
+    # via
+    #   pytest
+    #   typer
+coverage==7.16.2
+    # via pytest-cov
+cssselect==1.5.0 ; python_full_version < '3.11'
+    # via newsworker (pyproject.toml)
+cssselect==1.6.0 ; python_full_version >= '3.11'
+    # via newsworker (pyproject.toml)
+exceptiongroup==1.3.1 ; python_full_version < '3.11'
+    # via pytest
+feedgen==1.0.0
+    # via newsworker (pyproject.toml)
+feedparser==6.0.14
+    # via newsworker (pyproject.toml)
+feedparser-sgmllib==2.1.0
+    # via feedparser
+idna==3.20
+    # via requests
+iniconfig==2.3.1
+    # via pytest
+lxml==6.1.3
+    # via
+    #   newsworker (pyproject.toml)
+    #   feedgen
+markdown-it-py==4.2.0
+    # via rich
+mdurl==0.1.2
+    # via markdown-it-py
+packaging==26.3
+    # via pytest
+pluggy==1.7.0
+    # via
+    #   pytest
+    #   pytest-cov
+pygments==2.21.0
+    # via
+    #   pytest
+    #   rich
+pyparsing==3.3.3
+    # via
+    #   newsworker (pyproject.toml)
+    #   qddate
+pytest==8.4.2
+    # via
+    #   newsworker (pyproject.toml)
+    #   pytest-cov
+pytest-cov==6.3.0
+    # via newsworker (pyproject.toml)
+python-dateutil==2.9.0.post0
+    # via feedgen
+pyyaml==6.0.3
+    # via newsworker (pyproject.toml)
+qddate==1.0.16
+    # via newsworker (pyproject.toml)
+requests==2.34.2
+    # via newsworker (pyproject.toml)
+rich==15.0.0
+    # via typer
+shellingham==1.5.4
+    # via typer
+six==1.17.0
+    # via python-dateutil
+soupsieve==2.10 ; python_full_version < '3.11.5'
+    # via beautifulsoup4
+soupsieve==3.0.3 ; python_full_version >= '3.11.5'
+    # via beautifulsoup4
+tomli==2.5.0 ; python_full_version <= '3.11'
+    # via
+    #   coverage
+    #   pytest
+typer==0.27.3
+    # via newsworker (pyproject.toml)
+typing-extensions==4.16.0
+    # via
+    #   beautifulsoup4
+    #   exceptiongroup
+urllib3==2.8.0
+    # via
+    #   newsworker (pyproject.toml)
+    #   requests

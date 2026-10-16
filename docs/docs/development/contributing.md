@@ -47,10 +47,23 @@ Optional jobs install and test the `async`, `fulltext`, `metrics`, and
 `browser` extras; browser tests additionally install Chromium. The Docker smoke
 builds the image, starts it bound to loopback, and probes `/health/live`.
 
-For reproducible transitive dependencies, generate `constraints/py<minor>.txt`
-from a clean environment with
-`pip-compile --generate-hashes pyproject.toml --extra dev`, then install with
-`pip install -c constraints/py<minor>.txt -e '.[dev]'`.
+`requirements-lock.txt` pins every runtime and test dependency for all
+supported Python versions. The `locked` CI job installs exactly that set on
+Python 3.10 and 3.14 and fails if the lock no longer satisfies
+`pyproject.toml`; the main test matrix keeps using the newest allowed
+releases, so an upstream break shows up there without blocking a reproducible
+build. Reproduce CI locally with:
+
+```bash
+pip install -r requirements-lock.txt && pip install --no-deps -e .
+```
+
+After changing dependencies, regenerate the lock (add `--upgrade` to move all
+pins forward):
+
+```bash
+uv pip compile pyproject.toml --extra test --python-version 3.10 --universal --no-header -o requirements-lock.txt
+```
 
 ## Releasing
 
