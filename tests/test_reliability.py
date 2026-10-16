@@ -449,8 +449,17 @@ def test_batch_manifest_reports_runtime_facts(tmp_path):
         manifest = tmp_path / "manifest.json"
         result = CliRunner().invoke(
             cli_app,
-            ["batch", "--urls-file", str(pages), "-d", str(tmp_path / "out"),
-             "--manifest", str(manifest), "-c", str(config)],
+            [
+                "batch",
+                "--urls-file",
+                str(pages),
+                "-d",
+                str(tmp_path / "out"),
+                "--manifest",
+                str(manifest),
+                "-c",
+                str(config),
+            ],
         )
     finally:
         core.FeedService = original
