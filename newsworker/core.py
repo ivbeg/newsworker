@@ -1111,6 +1111,11 @@ def watch(
         "--max-iterations",
         help="Stop after N polls (0 = run until interrupted).",
     ),
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Poll every source once and exit (for cron); same as --max-iterations 1.",
+    ),
     deliver_updates: bool = typer.Option(
         False,
         "--deliver-updates",
@@ -1143,6 +1148,12 @@ def watch(
         raise typer.BadParameter(
             "max-iterations must not be negative", param_hint="--max-iterations"
         )
+    if once:
+        if max_iterations not in (0, 1):
+            raise typer.BadParameter(
+                "--once cannot be combined with --max-iterations", param_hint="--once"
+            )
+        max_iterations = 1
     sources = list(
         dict.fromkeys(([url] if url else []) + _read_sources(urls_file, from_opml, opml_pages))
     )
@@ -1346,6 +1357,33 @@ def parsedate(
 
             traceback.print_exc()
         sys.exit(1)
+
+
+@app.command()
+def languages(
+    format: str = typer.Option("text", "--format", "-f", help="text, json or markdown."),
+):
+    """Show which languages newsworker supports and how well (evidence-based)."""
+    import dataclasses
+
+    from newsworker.language import LANGUAGE_SUPPORT, support_markdown
+
+    fmt = format.lower()
+    if fmt == "markdown":
+        typer.echo(support_markdown(), nl=False)
+    elif fmt == "json":
+        rows = [dataclasses.asdict(entry) for entry in LANGUAGE_SUPPORT.values()]
+        typer.echo(json.dumps(sorted(rows, key=lambda row: row["code"]), indent=2))
+    elif fmt == "text":
+        typer.echo(f"{'code':<6}{'language':<12}{'date':<13}{'text':<15}extraction")
+        for entry in sorted(
+            LANGUAGE_SUPPORT.values(), key=lambda e: (e.extraction != "supported", e.code)
+        ):
+            typer.echo(
+                f"{entry.code:<6}{entry.name:<12}{entry.date:<13}{entry.text:<15}{entry.extraction}"
+            )
+    else:
+        raise typer.BadParameter("format must be text, json or markdown", param_hint="--format")
 
 
 def cli():

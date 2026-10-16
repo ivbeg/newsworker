@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`newsworker languages`** prints the language support matrix (`--format
+  text|json|markdown`). The table in the language-support guide is generated
+  from it and a test keeps the two in sync; it now states that Italian page
+  text is not detected (the language comes from page metadata).
+- **`watch --once`** polls every source once and exits, for cron.
+
 ## [1.4.0] - 2026-10-16
 
 Reliability, accuracy and reach: correct dates and time zones, self-healing

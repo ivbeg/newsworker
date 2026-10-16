@@ -59,3 +59,30 @@ def test_supported_language_fixture_matrix(tmp_path):
 def test_partial_languages_do_not_claim_date_support():
     for code in ("bg", "cs", "ja", "zh"):
         assert LANGUAGE_SUPPORT[code].extraction == "partial"
+
+
+def test_documented_matrix_is_generated_from_language_support():
+    from pathlib import Path
+
+    from newsworker.language import support_markdown
+
+    page = Path(__file__).resolve().parents[1] / "docs/docs/guides/language-support.md"
+    assert support_markdown() in page.read_text(encoding="utf-8"), (
+        "Regenerate the table with: newsworker languages --format markdown"
+    )
+
+
+def test_languages_command_formats():
+    import json
+
+    from typer.testing import CliRunner
+
+    from newsworker.core import app
+
+    runner = CliRunner()
+    text = runner.invoke(app, ["languages"])
+    assert text.exit_code == 0
+    assert text.output.splitlines()[1].startswith("de")
+    rows = json.loads(runner.invoke(app, ["languages", "-f", "json"]).output)
+    assert {row["code"]: row["extraction"] for row in rows}["ja"] == "partial"
+    assert runner.invoke(app, ["languages", "-f", "xml"]).exit_code == 2

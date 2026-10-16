@@ -69,3 +69,23 @@ def test_watch_requires_a_source(tmp_path):
         core.app, ["watch", "--max-iterations", "1", "-c", _config(tmp_path)]
     )
     assert result.exit_code != 0
+
+
+def test_watch_once_polls_each_source_a_single_time(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_iteration(service, url, fmt, dedup, webhook, max_pages, **kwargs):
+        calls.append(url)
+        return WatchIterationResult([], discovered=0, delivered=0)
+
+    monkeypatch.setattr(core, "_run_watch_iteration", fake_iteration)
+    result = CliRunner().invoke(
+        core.app, ["watch", "https://a.example/news", "--once", "-c", _config(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert calls == ["https://a.example/news"]
+    conflict = CliRunner().invoke(
+        core.app,
+        ["watch", "https://a.example/news", "--once", "--max-iterations", "3"],
+    )
+    assert conflict.exit_code == 2
