@@ -29,6 +29,9 @@ Built-in channel implementations are:
   in a title is inert.
 - `matrix`: a message in a Matrix room; the outbox idempotency key is the
   Matrix transaction id, so the homeserver de-duplicates a retried send.
+- `mastodon`: a status on a Mastodon (or API-compatible) account, sent with the
+  outbox key as `Idempotency-Key`. `@` in titles is defused so a page cannot
+  mention anyone, and long titles are shortened to fit 500 characters.
 
 Third-party packages may register deterministic channels in the
 `newsworker.delivery` entry-point group. Channels classify an attempt as
@@ -60,6 +63,9 @@ discord_webhook_url: https://discord.com/api/webhooks/…   # secret
 matrix_homeserver: https://matrix.example.org
 matrix_token: …                                           # secret
 matrix_room: "!abcdef:example.org"
+mastodon_instance: https://mastodon.example
+mastodon_token: …                                         # secret, scope write:statuses
+mastodon_visibility: unlisted                             # public, unlisted, private, direct
 ```
 
 Webhook URLs and tokens are redacted in configuration dumps and never stored in
