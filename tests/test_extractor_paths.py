@@ -94,8 +94,7 @@ def test_cached_date_patterns_narrow_the_parser_and_are_released():
 def test_cookie_file_is_loaded_once_and_bad_files_are_ignored(tmp_path):
     jar_file = tmp_path / "cookies.txt"
     jar_file.write_text(
-        "# Netscape HTTP Cookie File\n"
-        "example.com\tFALSE\t/\tFALSE\t2147483647\tsession\tabc\n"
+        "# Netscape HTTP Cookie File\nexample.com\tFALSE\t/\tFALSE\t2147483647\tsession\tabc\n"
     )
     extractor = FeedExtractor(cookies_file=str(jar_file))
     jar = extractor._load_cookies()
