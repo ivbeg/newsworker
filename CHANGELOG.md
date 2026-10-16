@@ -7,21 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- **Two-digit years** — `25/7/22` and `16.10.26` resolve to 2022 and 2026 instead
-  of years 22 and 26 AD (#14).
-- **Offsets written in text** — `10:00:00 +0300`, `10:00 -0500` and
-  `10:00 GMT+3` are converted to UTC instead of being read as UTC wall time.
-  The signed `timezone` token reported by newer qddate releases is understood.
-- **Implausible dates** (before 1970 or more than a year ahead) are ignored
-  rather than clustered as news dates; dates printed without a year roll back to
-  the previous year around New Year.
-- A failure while extracting with cached date patterns no longer leaves the
-  narrowed qddate session active for later requests.
-- **Datelines, weekdays and day spans** — `GENEVA, 29 July 2022`,
-  `Bangkok, 21-22 July 2022` and `Monday, January 31, 2022` are read as dates
-  (the first day of a span is used). Such listings previously yielded no items
-  (#8, #18).
+## [1.4.0] - 2026-10-16
+
+Reliability, accuracy and reach: correct dates and time zones, self-healing
+specs, native RSS/Atom/JSON Feed input, JSON-LD and relative dates in eight
+languages, polite per-host fetching, signed feed links, `explain`, item
+history, Slack/Discord/Matrix delivery, an MCP server, and an extraction
+corpus that gates every change. Requires Python 3.10+ and qddate 1.0.16.
 
 ### Added
 - **Item history and update notifications** — `watch` records every item with
@@ -80,7 +72,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Flat listings** — pages whose items are sibling elements with no wrapper
   (heading, date line, teaser, "read more") are now analysed as heading-led
   groups (`items.group: siblings` in specs). Seen on postgresql.org.
-
 - **Structured data** — JSON-LD (`ItemList`, `@graph`, `NewsArticle`,
   `BlogPosting`, ...) and microdata article lists are read. They supply the
   items when a page shows no dates, and sharpen same-day dates with the exact
@@ -91,32 +82,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   es, it and pt (previously English only).
 - `FeedService(clock=...)` resolves relative dates against an injected time.
 
-### Fixed (accuracy)
-- **Article links** — the headline link is chosen instead of the first link in
-  an item, which was often a category or tag link (#19).
-
-### Changed (internals)
-- `newsworker.spec` is now a package: `model` (spec and validation),
-  `selectors`, `analyze` (`SpecAnalyzer`) and `execute` (`SpecExtractor`).
-  Everything previously importable from `newsworker.spec` still is.
-- The per-poll `watch` logic moved from the CLI module to
-  `newsworker.watching.run_watch_iteration`.
-- mypy now checks 20 modules (was 8), including the spec package and watch.
-
-### Changed (dependencies)
+### Changed
 - Requires **qddate 1.0.16** (pyparsing snake_case API, signed timezone
   offsets, Portuguese `maio`). The pyparsing deprecation-warning filter and
   the qddate session compatibility shims are gone, and the extraction corpus
   gate now requires every case to be exact.
-
-### Changed (requests)
 - **User-Agent** — requests now identify as
   `newsworker/<version> (+https://github.com/ivbeg/newsworker)` instead of
   posing as Chrome 23. Sites such as w3.org and gnu.org reject the old string;
   `robots.txt` rules for `newsworker` now match. Use `--user-agent` or the
   `user_agent` setting to override.
+- Each thread uses its own pooled HTTP session, so concurrent server requests
+  and full-text fetches no longer serialise behind one locked session.
+- **Python 3.10+** is required; Python 3.14 is tested. Python 3.9 reached
+  end of life in October 2025.
+- Importing `newsworker` no longer configures the root logger or silences
+  urllib3's `InsecureRequestWarning` process-wide. The CLI configures logging in
+  `cli()`, and `--insecure` silences the warning for that run only.
+- The qddate parser is built once per thread and reused, instead of once per
+  request (about 33 ms per feed build on a laptop).
+- Replaced lxml's deprecated `getchildren()` and removed dead debug comments.
+- README and docs: publish the Docker port on `127.0.0.1` in examples; describe
+  timezone handling and the `--undated` fallback accurately.
+- Reorganized documentation into a Docusaurus site under `docs/` (Getting
+  Started, Use Cases, CLI Reference, Guides, Integrations, Development), with a
+  GitHub Pages workflow at `.github/workflows/deploy-docs.yml`.
+- `newsworker.spec` is now a package: `model` (spec and validation),
+  `selectors`, `analyze` (`SpecAnalyzer`) and `execute` (`SpecExtractor`).
+  Everything previously importable from `newsworker.spec` still is.
+- The per-poll `watch` logic moved from the CLI module to
+  `newsworker.watching.run_watch_iteration`.
+- mypy now checks 22 modules (was 8), including the spec package and watch.
 
-### Fixed (reliability)
+### Fixed
+- **Two-digit years** — `25/7/22` and `16.10.26` resolve to 2022 and 2026 instead
+  of years 22 and 26 AD (#14).
+- **Offsets written in text** — `10:00:00 +0300`, `10:00 -0500` and
+  `10:00 GMT+3` are converted to UTC instead of being read as UTC wall time.
+  The signed `timezone` token reported by newer qddate releases is understood.
+- **Implausible dates** (before 1970 or more than a year ahead) are ignored
+  rather than clustered as news dates; dates printed without a year roll back to
+  the previous year around New Year.
+- A failure while extracting with cached date patterns no longer leaves the
+  narrowed qddate session active for later requests.
+- **Datelines, weekdays and day spans** — `GENEVA, 29 July 2022`,
+  `Bangkok, 21-22 July 2022` and `Monday, January 31, 2022` are read as dates
+  (the first day of a span is used). Such listings previously yielded no items
+  (#8, #18).
+- **Article links** — the headline link is chosen instead of the first link in
+  an item, which was often a category or tag link (#19).
 - **Stale inferred specs** — when a cached, automatically inferred spec matches
   no items (the site changed its layout), the page is re-analysed once and the
   new spec replaces the old one; otherwise dynamic extraction runs. Explicit
@@ -189,23 +203,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   headers and `extra_headers` on cross-origin redirects instead of sending
   them to every host, keeps `cookies_file` cookies on their own domains, and
   honours `trust_env_proxy`.
-
-### Changed
-- Each thread uses its own pooled HTTP session, so concurrent server requests
-  and full-text fetches no longer serialise behind one locked session.
-- **Python 3.10+** is required; Python 3.14 is tested. Python 3.9 reached
-  end of life in October 2025.
-- Importing `newsworker` no longer configures the root logger or silences
-  urllib3's `InsecureRequestWarning` process-wide. The CLI configures logging in
-  `cli()`, and `--insecure` silences the warning for that run only.
-- The qddate parser is built once per thread and reused, instead of once per
-  request (about 33 ms per feed build on a laptop).
-- Replaced lxml's deprecated `getchildren()` and removed dead debug comments.
-- README and docs: publish the Docker port on `127.0.0.1` in examples; describe
-  timezone handling and the `--undated` fallback accurately.
-- Reorganized documentation into a Docusaurus site under `docs/` (Getting
-  Started, Use Cases, CLI Reference, Guides, Integrations, Development), with a
-  GitHub Pages workflow at `.github/workflows/deploy-docs.yml`.
 
 ## [1.3.0] - 2026-07-05
 
