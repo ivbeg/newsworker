@@ -83,7 +83,7 @@ def _deliver_records(channel, dedup, records, settings, lease_seconds=60):
     return delivered, failed, retried
 
 
-def run_watch_iteration(
+def run_watch_iteration(  # noqa: C901
     service,
     url,
     fmt,

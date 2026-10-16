@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
@@ -178,10 +179,8 @@ class Settings:
         path = path or DEFAULT_CONFIG_PATH
         if not os.path.exists(path):
             settings = cls()
-            try:
+            with contextlib.suppress(OSError):
                 settings.save(path)
-            except OSError:
-                pass
             return settings
         with open(path, encoding="utf-8") as handle:
             return cls.from_dict(yaml.safe_load(handle) or {})
@@ -219,7 +218,7 @@ class Settings:
         settings._resolved = True
         return settings
 
-    def validate(self) -> None:
+    def validate(self) -> None:  # noqa: C901
         positive = {
             "filtered_text_length": self.filtered_text_length,
             "max_content_bytes": self.max_content_bytes,

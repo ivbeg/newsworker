@@ -53,7 +53,9 @@ def _struct_time(value) -> dt.datetime | None:
 def _identity(*parts: str | None) -> str:
     for part in parts:
         if part:
-            return hashlib.md5(("native:" + part).encode("utf-8")).hexdigest()
+            return hashlib.md5(
+                ("native:" + part).encode("utf-8"), usedforsecurity=False
+            ).hexdigest()
     return ""
 
 

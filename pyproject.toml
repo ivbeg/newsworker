@@ -83,8 +83,20 @@ line-length = 100
 extend-exclude = ["build", "dist", "docs", "*.egg-info"]
 
 [tool.ruff.lint]
-select = ["E9", "F", "I", "B", "UP037", "SIM103", "RUF013"]
-ignore = ["B008"]
+# UP: Python 3.10 syntax; SIM: simpler control flow; S: bandit security checks;
+# C901: complexity, ratcheted (existing hot spots carry `noqa: C901`).
+select = ["E9", "F", "I", "B", "UP", "SIM", "S", "C901", "RUF013"]
+# B008: Typer options are function defaults by design. UP031: %-formatting is
+# left as is (log calls must stay lazy).
+ignore = ["B008", "UP031"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert, use throwaway secrets and drive local subprocesses.
+"tests/**" = ["S101", "S104", "S105", "S106", "S108", "S311", "S314", "S603", "S607", "C901"]
+"benchmarks/**" = ["S101", "S311", "S603", "C901"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

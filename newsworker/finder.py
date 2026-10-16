@@ -112,7 +112,7 @@ class FeedsFinder:
             policy = replace(policy, max_bytes=max_bytes)
         return self.transport.fetch(FetchRequest(url), policy)
 
-    def collect_feeds(self, root, url):
+    def collect_feeds(self, root, url):  # noqa: C901
         candidates: dict[str, FeedCandidate] = {}
         page_hubs = []
         page_self = None

@@ -348,9 +348,10 @@ class FeedExtractor:
         for node in nodes:
             text = (node.text or "").strip()
             tail = (node.tail or "").strip()
-            if text and (any(char.isdigit() for char in text) or looks_like_fuzzy_date(text)):
-                potential_date_nodes.append(node)
-            elif tail and (any(char.isdigit() for char in tail) or looks_like_fuzzy_date(tail)):
+            if any(
+                value and (any(char.isdigit() for char in value) or looks_like_fuzzy_date(value))
+                for value in (text, tail)
+            ):
                 potential_date_nodes.append(node)
 
         shared_node = None
@@ -364,18 +365,17 @@ class FeedExtractor:
             (match, t_key, t_data, the_text, the_date) = self.match_date(node)
             if match:
                 path = TagPath(node)
-                if last is not None:
-                    if path.level == last_path.level:
-                        snode = TagPath.getSharedNode(node, last)
-                        if shared_node is None:
-                            shared_node = snode
-                        spath = document.getroottree().getpath(snode)
-                        if spath not in clusters:
-                            clusters[spath] = {"snode": snode, "nodes": []}
-                        if first:
-                            clusters[spath]["nodes"].append(last_d)
-                            first = False
-                        clusters[spath]["nodes"].append({"t_key": t_key, "node": node})
+                if last is not None and path.level == last_path.level:
+                    snode = TagPath.getSharedNode(node, last)
+                    if shared_node is None:
+                        shared_node = snode
+                    spath = document.getroottree().getpath(snode)
+                    if spath not in clusters:
+                        clusters[spath] = {"snode": snode, "nodes": []}
+                    if first:
+                        clusters[spath]["nodes"].append(last_d)
+                        first = False
+                    clusters[spath]["nodes"].append({"t_key": t_key, "node": node})
 
                 last = node
                 last_d = {"t_key": t_key, "node": node}
@@ -483,7 +483,7 @@ class FeedExtractor:
             res.append(last_block)
         return res
 
-    def _item_from_block(self, base_url, block, cache_block):
+    def _item_from_block(self, base_url, block, cache_block):  # noqa: C901
         """Turns a single :class:`TagBlock` into a feed item dict, or ``None``.
 
         Classifies the block's annotations into title / description / links /
@@ -553,7 +553,7 @@ class FeedExtractor:
             return None
         if t_key not in cache_block["pats"]:
             cache_block["pats"].append(t_key)
-        md = hashlib.md5()
+        md = hashlib.md5(usedforsecurity=False)
         md.update(block.entities["pub_date"][2].encode("utf8"))
         if title:
             md.update(title.encode("utf8"))

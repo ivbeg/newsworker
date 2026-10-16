@@ -176,8 +176,9 @@ class DedupStore:
             params.append(destination)
         params.append(max(1, limit))
         with self._lock, self._conn:
+            # ``where`` holds fixed column tests; every value is a bound parameter.
             rows = self._conn.execute(
-                "SELECT * FROM outbox WHERE "
+                "SELECT * FROM outbox WHERE "  # noqa: S608
                 + " AND ".join(where)
                 + " ORDER BY created_at, idempotency_key LIMIT ?",
                 params,

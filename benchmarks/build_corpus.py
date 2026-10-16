@@ -82,7 +82,7 @@ WORDS = {
 }
 
 
-WEEKDAYS_EN = "Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split()
+WEEKDAYS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 # Press-release datelines: a place before the date (issue #8).
 DATELINES = ["GENEVA", "Vienna", "New York", "Bangkok", "St. Petersburg"]
 
@@ -422,10 +422,7 @@ def build():
     pages.mkdir(parents=True, exist_ok=True)
     cases = []
     for seed, (lang, style, layout_name, layout) in enumerate(_variants(), start=1):
-        if layout_name == "relative":
-            items = relative_items(lang, seed)
-        else:
-            items = items_for(lang, seed)
+        items = relative_items(lang, seed) if layout_name == "relative" else items_for(lang, seed)
         name = f"{lang}-{layout_name}" + ("" if style == "none" else f"-{style}")
         document = (
             f'<!DOCTYPE html><html lang="{lang}"><head><meta charset="utf-8">'

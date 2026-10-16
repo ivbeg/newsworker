@@ -689,7 +689,7 @@ class FeedService:
                     results[url] = {"error": str(exc), "error_type": type(exc).__name__}
         return {url: results[url] for url in urls}
 
-    def _get_feeds_async(self, urls, max_workers, force_refresh, runtime=None):
+    def _get_feeds_async(self, urls, max_workers, force_refresh, runtime=None):  # noqa: C901
         from .async_fetch import fetch_urls_concurrent
 
         fetch_started = time.monotonic()

@@ -385,9 +385,11 @@ def read_opml(source):
         and ("\n" in source or source.lstrip().startswith("<"))
         and not os.path.exists(source)
     ):
-        root = ET.fromstring(source)
+        # OPML comes from the user; expat >= 2.4.1 (bundled with Python 3.10+)
+        # bounds entity expansion and ElementTree never fetches external entities.
+        root = ET.fromstring(source)  # noqa: S314
     else:
-        root = ET.parse(source).getroot()
+        root = ET.parse(source).getroot()  # noqa: S314
     entries = []
     for outline in root.iter("outline"):
         xml_url = outline.get("xmlUrl")

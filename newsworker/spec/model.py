@@ -170,7 +170,7 @@ class SpecValidationError(ValueError):
         super().__init__(f"{path}: {message}")
 
 
-def validate_spec_dict(data):
+def validate_spec_dict(data):  # noqa: C901
     """Validate a serialized parsing spec without fetching its source."""
     if not isinstance(data, dict):
         raise SpecValidationError("$", "spec root must be a mapping")

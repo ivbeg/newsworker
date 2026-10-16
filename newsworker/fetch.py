@@ -191,10 +191,9 @@ def validate_destination(url: str, policy: FetchPolicy) -> str:
 
     if policy.block_private_hosts and not policy.trusted_proxy:
         unsafe = [address for address in classify_addresses(host) if is_unsafe_address(address)]
-        if unsafe:
-            if not (policy.allow_private_hosts and allowed and host in allowed):
-                joined = ", ".join(str(address) for address in unsafe)
-                raise AddressPolicyError(f"Host {host!r} resolves to blocked address: {joined}")
+        if unsafe and not (policy.allow_private_hosts and allowed and host in allowed):
+            joined = ", ".join(str(address) for address in unsafe)
+            raise AddressPolicyError(f"Host {host!r} resolves to blocked address: {joined}")
     return host
 
 
@@ -504,7 +503,7 @@ class RequestsTransport:
                 return self._fetch(request, policy)
         return self._fetch(request, policy)
 
-    def _fetch(self, request: FetchRequest, policy: FetchPolicy) -> FetchResult:
+    def _fetch(self, request: FetchRequest, policy: FetchPolicy) -> FetchResult:  # noqa: C901
         requested_url = request.url
         current_url = requested_url
         method = request.method.upper()

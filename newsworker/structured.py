@@ -211,15 +211,17 @@ def merge_structured_dates(items: list[dict[str, Any]], structured: list[dict[st
         updated = False
         exact = match.get("pubdate")
         current = item.get("pubdate")
-        if isinstance(exact, dt.datetime):
-            if current is None or (
+        if isinstance(exact, dt.datetime) and (
+            current is None
+            or (
                 isinstance(current, dt.datetime)
                 and current.date() == exact.date()
                 and current.time() == dt.time(0)
                 and exact.time() != dt.time(0)
-            ):
-                item["pubdate"] = exact
-                updated = True
+            )
+        ):
+            item["pubdate"] = exact
+            updated = True
         if match.get("author") and not item.get("author"):
             item["author"] = match["author"]
             updated = True

@@ -85,7 +85,7 @@ class TagPath:
             self.__shifts.reverse()
             self.__tag_names.reverse()
         self.key = "_".join(map(str, self.__shifts))
-        md = hashlib.md5()
+        md = hashlib.md5(usedforsecurity=False)
         md.update(self.key.encode("utf8") if type(self.key) == str else self.key)
         self.hash = md.hexdigest()
 
@@ -195,7 +195,7 @@ class TagBlock:
                         s += etree.tostring(ch[self.position + i], encoding="utf8")
             return s
 
-    def identify_entities(self, node=None, parent_id=None):
+    def identify_entities(self, node=None, parent_id=None):  # noqa: C901
         """Identifies tag entries as different data types"""
         annotations = []
         if node is None and self.shift is None:

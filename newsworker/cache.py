@@ -18,6 +18,7 @@ their total size fall back within the configured limits. A limit of ``0`` (the
 default) disables that bound, preserving the previous unbounded behaviour.
 """
 
+import contextlib
 import glob
 import hashlib
 import json
@@ -38,7 +39,7 @@ log = logging.getLogger(__name__)
 
 def key_for(url):
     """Returns a stable filesystem-safe key for ``url``."""
-    return hashlib.sha1(url.encode("utf-8")).hexdigest()
+    return hashlib.sha1(url.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 # Per-path locks serialize concurrent writers to the same cache entry so a
@@ -66,10 +67,8 @@ def _atomic_write(path, data):
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(tmp)
-            except OSError:
-                pass
 
 
 def _is_fresh(path, ttl):
@@ -121,10 +120,8 @@ def _evict(directory, pattern, max_entries=0, max_bytes=0):
             os.remove(path)
             if path.endswith(".bin"):
                 meta_path = path[:-4] + ".meta"
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(meta_path)
-                except OSError:
-                    pass
             count -= 1
             total -= size
         except OSError:
@@ -344,10 +341,8 @@ class ContentCache(_CacheStatsMixin):
         path = self._path(url)
         if os.path.exists(path):
             now = time.time()
-            try:
+            with contextlib.suppress(OSError):
                 os.utime(path, (now, now))
-            except OSError:
-                pass
 
     def set(self, url, data, meta=None):
         """Stores raw ``data`` bytes for ``url`` (atomically) plus optional

@@ -1024,7 +1024,7 @@ def batch(
                 )
             )
             continue
-        name = hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
+        name = hashlib.sha1(url.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
         path = os.path.join(output_dir, "%s.%s" % (name, ext))
         try:
             rendered = format_feed(feed, fmt=fmt, public_url=url)
@@ -1072,7 +1072,7 @@ def batch(
 
 
 @app.command()
-def watch(
+def watch(  # noqa: C901
     url: str | None = typer.Argument(None, help="Page URL to watch."),
     urls_file: str | None = typer.Option(
         None, "--urls-file", help="Watch every URL in this file (one per line)."

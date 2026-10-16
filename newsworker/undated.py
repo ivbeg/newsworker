@@ -31,7 +31,7 @@ def _blocked(node: Any) -> bool:
     return False
 
 
-def extract_undated_listing(
+def extract_undated_listing(  # noqa: C901
     data: bytes,
     base_url: str,
     *,
