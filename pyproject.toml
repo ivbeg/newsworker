@@ -120,6 +120,7 @@ files = [
     "newsworker/watching.py",
     "newsworker/language.py",
     "newsworker/undated.py",
+    "newsworker/native.py",
     "newsworker/spec/model.py",
     "newsworker/spec/selectors.py",
     "newsworker/spec/execute.py",

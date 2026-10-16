@@ -911,7 +911,12 @@ def batch(
     from_opml: Optional[str] = typer.Option(
         None,
         "--from-opml",
-        help="OPML file; feeds' htmlUrl (or xmlUrl) are used as page URLs.",
+        help="OPML file; each outline's xmlUrl feed is read (see --opml-pages).",
+    ),
+    opml_pages: bool = typer.Option(
+        False,
+        "--opml-pages",
+        help="Extract from each OPML outline's htmlUrl instead of reading its xmlUrl feed.",
     ),
     output_dir: str = typer.Option(
         ".",
@@ -962,7 +967,10 @@ def batch(
             )
     if from_opml:
         for entry in read_opml(from_opml):
-            urls.append(entry.get("html_url") or entry["url"])
+            # Feeds are read natively, so the subscription URL is the reliable
+            # source; --opml-pages extracts from each outline's htmlUrl instead.
+            page = entry.get("html_url") if opml_pages else None
+            urls.append(page or entry["url"])
 
     if not urls:
         logging.error("No URLs to process.")

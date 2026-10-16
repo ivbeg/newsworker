@@ -14,7 +14,8 @@ newsworker batch [OPTIONS]
 | Option | Alias | Default | Description |
 | --- | --- | --- | --- |
 | `--urls-file` | | — | Text file with one page URL per line. |
-| `--from-opml` | | — | OPML file; each outline's `htmlUrl` (or `xmlUrl`) is used as the page URL. |
+| `--from-opml` | | — | OPML file; each outline's `xmlUrl` feed is read and normalised. |
+| `--opml-pages` | | `false` | Extract from each outline's `htmlUrl` page instead of its feed. |
 | `--output-dir` | `-d` | `.` | Directory for one output file per URL. |
 | `--format` | `-f` | `json` | Output format (same set as `extract`). |
 | `--max-workers` | | `4` | Concurrent workers (thread pool, or aiohttp when `--async`). |

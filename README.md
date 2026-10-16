@@ -356,7 +356,8 @@ Extracts feeds from a list of pages concurrently, writing one file per URL.
 | Option | Alias | Default | Description |
 | --- | --- | --- | --- |
 | `--urls-file` | | — | Text file with one page URL per line. |
-| `--from-opml` | | — | OPML file; each outline's `htmlUrl` (or `xmlUrl`) is used as the page URL. |
+| `--from-opml` | | — | OPML file; each outline's `xmlUrl` feed is read and normalised. |
+| `--opml-pages` | | `false` | Extract from each outline's `htmlUrl` page instead of its feed. |
 | `--output-dir` | `-d` | `.` | Directory for one output file per URL. |
 | `--format` | `-f` | `json` | Output format (same set as `extract`). |
 | `--max-workers` | | `4` | Concurrent workers (thread pool, or aiohttp when `--async`). |
@@ -369,7 +370,7 @@ Extracts feeds from a list of pages concurrently, writing one file per URL.
 # One URL per line
 newsworker batch --urls-file urls.txt --output-dir out --format rss
 
-# Or reuse an OPML subscription list (uses each feed's htmlUrl as the page)
+# Or normalise a reader's OPML subscriptions (RSS, Atom and JSON Feed) into one format
 newsworker batch --from-opml feeds.opml -d out -f json --max-workers 8
 
 # Optional aiohttp transport for high-throughput fetches (install the async extra)
@@ -505,6 +506,7 @@ use_async: false                 # use aiohttp for batch --async (needs [async] 
 full_text: false                 # follow item links and populate content (needs [fulltext])
 full_text_workers: 4             # concurrency for --full-text fetches
 structured_data: true            # use JSON-LD / microdata article lists when present
+native_feeds: true               # read RSS/Atom/JSON Feed responses as feeds
 trust_env_proxy: false           # honor HTTP(S)_PROXY / NO_PROXY / .netrc
 ```
 
@@ -685,6 +687,8 @@ print(format_scan(results, fmt="opml"))
 
 ## Features
 
+- Reads **RSS, Atom and JSON Feed** natively: when a URL already serves a feed, its entries are
+  normalised (publisher ids, dates, authors, categories, content) instead of being scraped.
 - Identifies news blocks on arbitrary HTML pages using **date patterns** — 340+ patterns via [qddate](https://github.com/ivbeg/qddate), plus HTML `<time datetime="...">` attributes.
 - Very fast pattern matching built on `pyparsing`.
 - Discovers existing RSS/Atom feeds (`scan`), including optional **sitemap.xml** lookup, and falls back to HTML extraction when none exist.
