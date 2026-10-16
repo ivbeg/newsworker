@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import ipaddress
 import json
 import logging
@@ -53,6 +54,79 @@ GET /feed?url=<page-url>&format=<fmt>
 GET /health/live
 GET /health/ready
 """
+
+#: Formats a feed reader subscribes to, offered first on the home page.
+READER_FORMATS = ("rss", "atom", "jsonfeed")
+
+# The home page posts its form back to itself and runs no script.
+HOME_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
+    "form-action 'self'; frame-ancestors 'none'"
+)
+
+
+class _Problem(Exception):
+    """An HTTP problem raised while building a feed for a request."""
+
+    def __init__(self, status, title, detail):
+        super().__init__(detail)
+        self.status = status
+        self.title = title
+        self.detail = detail
+
+
+def _home_page(url, fmt, *, allowed, feed=None, public_url=None, error=None):
+    """The ``/`` page: paste a news page URL, preview its items, copy the feed link."""
+    esc = html.escape
+    options = "".join(
+        f'<option value="{name}"{" selected" if name == fmt else ""}>{name}</option>'
+        for name in READER_FORMATS + tuple(f for f in SUPPORTED_FORMATS if f not in READER_FORMATS)
+    )
+    parts = [
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        "<title>newsworker</title><style>",
+        "body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem}",
+        "input[type=url]{width:100%;padding:.4rem;box-sizing:border-box}",
+        "code{word-break:break-all}li{margin:.4rem 0}small{color:#666}",
+        ".error{color:#a00}</style></head><body><h1>newsworker</h1>",
+    ]
+    if not allowed:
+        parts.append(
+            "<p>This server is protected. Ask its operator for a feed link, created with "
+            "<code>newsworker feed-url URL</code>.</p></body></html>"
+        )
+        return "".join(parts)
+    parts.append(
+        '<form method="get" action="/"><p><label for="url">News page URL</label><br>'
+        f'<input type="url" id="url" name="url" required value="{esc(url)}" '
+        'placeholder="https://example.org/news"></p>'
+        f'<p><label>Format <select name="format">{options}</select></label> '
+        '<button type="submit">Preview</button></p></form>'
+    )
+    if error is not None:
+        parts.append(f'<p class="error">{esc(error.title)}: {esc(str(error.detail))}</p>')
+    if feed is not None:
+        parts.append(
+            "<h2>Subscribe</h2><p>Add this link to your feed reader:</p>"
+            f'<p><a href="{esc(public_url)}"><code>{esc(public_url)}</code></a></p>'
+            f"<h2>{esc(str(feed.get('title') or url))}</h2>"
+        )
+        items = feed.get("items") or []
+        if not items:
+            parts.append("<p>No news items were found on this page.</p>")
+        parts.append("<ol>")
+        for item in items:
+            title = esc(str(item.get("title") or "(untitled)"))
+            link = str(item.get("link") or "")
+            if link.startswith(("http://", "https://")):
+                title = f'<a href="{esc(link)}" rel="noopener noreferrer">{title}</a>'
+            pubdate = item.get("pubdate")
+            when = f" <small>{esc(pubdate.date().isoformat())}</small>" if pubdate else ""
+            parts.append(f"<li>{title}{when}</li>")
+        parts.append("</ol>")
+    parts.append("</body></html>")
+    return "".join(parts)
 
 
 class TokenBucketLimiter:
@@ -239,10 +313,26 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         """
         if self._tokens():
             return self._authorized()
+        return self._is_loopback()
+
+    def _is_loopback(self):
         try:
             return ipaddress.ip_address(self.client_address[0]).is_loopback
         except ValueError:
             return False
+
+    def _home_allowed(self):
+        """Whether this client may preview feeds and get links from ``/``.
+
+        An open server allows everyone. With API tokens the caller must send
+        one; with only a signing key, minting signed links is limited to the
+        operator on this machine, as ``newsworker feed-url`` is.
+        """
+        if self._tokens():
+            return self._authorized()
+        if self._signing_key():
+            return self._is_loopback()
+        return True
 
     def _client_identity(self):
         if getattr(self.settings, "trust_proxy_client_ip", False):
@@ -305,7 +395,7 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         elif path == "/health/ready":
             self._handle_readiness()
         elif path == "/":
-            self._send_text(200, INDEX_TEXT)
+            self._handle_home(parse_qs(parsed.query))
         elif path == "/metrics":
             self._handle_metrics()
         elif path == "/feed":
@@ -347,15 +437,79 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_text(200, generate_latest().decode("utf-8"), CONTENT_TYPE_LATEST)
 
-    def _handle_feed(self, params):
-        url, fmt = _feed_request(params)
-        if not url:
-            self._problem(400, "Bad Request", "Missing required 'url' query parameter")
+    def _handle_home(self, params):
+        if "text/html" not in self.headers.get("Accept", ""):
+            self._send_text(200, INDEX_TEXT)
             return
+        url, fmt = _feed_request(params)
+        if "format" not in params:
+            fmt = "rss"
+        allowed = self._home_allowed()
+        feed = public_url = error = None
+        if url and allowed:
+            try:
+                if fmt not in SUPPORTED_FORMATS:
+                    raise _Problem(400, "Unsupported Format", "Choose one of the listed formats")
+                self._check_source(url)
+                feed, _diagnostics, start = self._build_feed(url)
+                self._record_metric("200", start)
+                public_url = self._public_feed_url(url, fmt)
+            except _Problem as problem:
+                error = problem
+        page = _home_page(url, fmt, allowed=allowed, feed=feed, public_url=public_url, error=error)
+        self._send_text(
+            error.status if error is not None else 200,
+            page,
+            "text/html; charset=utf-8",
+            {"Content-Security-Policy": HOME_CSP, "Cache-Control": "no-store"},
+        )
+
+    def _check_source(self, url):
+        if not url:
+            raise _Problem(400, "Bad Request", "Missing required 'url' query parameter")
         try:
             validate_url(url, allowed_hosts=getattr(self.settings, "allowed_hosts", []))
         except ValueError as exc:
-            self._problem(400, "Rejected URL", str(exc))
+            raise _Problem(400, "Rejected URL", str(exc)) from exc
+
+    def _build_feed(self, url, force_refresh=False):
+        """Build ``url`` under the server's worker limit: ``(feed, diagnostics, start)``."""
+        semaphore = getattr(self.server, "build_semaphore", None)
+        if semaphore is None:
+            semaphore = threading.BoundedSemaphore(
+                getattr(self.settings, "max_concurrent_builds", 8)
+            )
+            self.server.build_semaphore = semaphore  # type: ignore[attr-defined]
+        if not semaphore.acquire(blocking=False):
+            self._record_metric("503", time.time())
+            raise _Problem(503, "Service Unavailable", "Feed workers are saturated")
+        start = time.time()
+        if _PROM_AVAILABLE:
+            ACTIVE_BUILDS.inc()
+        try:
+            if hasattr(self.service, "get_feed_with_diagnostics"):
+                feed, diagnostics = self.service.get_feed_with_diagnostics(
+                    url, force_refresh=force_refresh
+                )
+            else:
+                feed = self.service.get_feed(url, force_refresh=force_refresh)
+                diagnostics = None
+        except Exception as exc:
+            log.exception("Feed build failed request_id=%s url=%s", self.request_id, url)
+            self._record_metric("502", start)
+            raise _Problem(502, "Upstream Feed Failure", type(exc).__name__) from exc
+        finally:
+            semaphore.release()
+            if _PROM_AVAILABLE:
+                ACTIVE_BUILDS.dec()
+        return feed, diagnostics, start
+
+    def _handle_feed(self, params):
+        url, fmt = _feed_request(params)
+        try:
+            self._check_source(url)
+        except _Problem as problem:
+            self._problem(problem.status, problem.title, problem.detail)
             return
         if fmt not in SUPPORTED_FORMATS:
             self._problem(
@@ -368,40 +522,21 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             # An anonymous remote client must not be able to make this server
             # re-fetch third-party pages on demand (cache bypass amplification).
             force_refresh = False
-        semaphore = getattr(self.server, "build_semaphore", None)
-        if semaphore is None:
-            semaphore = threading.BoundedSemaphore(
-                getattr(self.settings, "max_concurrent_builds", 8)
-            )
-            self.server.build_semaphore = semaphore  # type: ignore[attr-defined]
-        if not semaphore.acquire(blocking=False):
-            self._record_metric("503", time.time())
-            self._problem(503, "Service Unavailable", "Feed workers are saturated")
-            return
-        start = time.time()
-        if _PROM_AVAILABLE:
-            ACTIVE_BUILDS.inc()
         try:
-            if hasattr(self.service, "get_feed_with_diagnostics"):
-                feed, diagnostics = self.service.get_feed_with_diagnostics(
-                    url, force_refresh=force_refresh
-                )
-            else:
-                feed = self.service.get_feed(url, force_refresh=force_refresh)
-                diagnostics = None
+            feed, diagnostics, start = self._build_feed(url, force_refresh)
+        except _Problem as problem:
+            self._problem(problem.status, problem.title, problem.detail)
+            return
+        try:
             public_url = self._public_feed_url(url, fmt)
             rendered = format_feed(feed, fmt=fmt, public_url=public_url)
             fingerprint = content_fingerprint(feed, fmt=fmt, public_url=public_url)
             newest = newest_pubdate(feed)
         except Exception as exc:
-            log.exception("Feed build failed request_id=%s url=%s", self.request_id, url)
+            log.exception("Feed rendering failed request_id=%s url=%s", self.request_id, url)
             self._record_metric("502", start)
             self._problem(502, "Upstream Feed Failure", type(exc).__name__)
             return
-        finally:
-            semaphore.release()
-            if _PROM_AVAILABLE:
-                ACTIVE_BUILDS.dec()
         # Weak validator: equal for every rendering of the same items, even when a
         # format embeds incidental bytes. Readers use it with If-None-Match.
         etag = 'W/"%s"' % fingerprint[:40]
