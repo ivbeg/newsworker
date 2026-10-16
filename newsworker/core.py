@@ -23,10 +23,10 @@ from newsworker.formats import (
 )
 from newsworker.server import run_server
 from newsworker.service import FeedService
+from newsworker.settings import DEFAULT_USER_AGENT as USER_AGENT  # noqa: F401  (compat alias)
 from newsworker.settings import Settings
 from newsworker.spec import FeedSpec, SpecAnalyzer
 
-USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11"
 DEFAULT_FILTERED_TEXT_URL = 150
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

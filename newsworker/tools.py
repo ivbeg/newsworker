@@ -540,6 +540,43 @@ def sanitize_feed_links(feed, fallback_url=None):
     return feed
 
 
+_HEADING_TAG_NAMES = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+
+
+def _node_text(node):
+    return " ".join("".join(node.itertext()).split())
+
+
+def pick_link_node(candidates, title=None):
+    """Choose the article link among an item's ``<a href>`` nodes.
+
+    The first link in an item is often a category, tag or author link
+    (issue #19). Prefer, in order: the link whose text is the title, a link
+    inside a heading, then the link with the longest text; fall back to the
+    first candidate.
+    """
+    links = [node for node in candidates if node.get("href")]
+    if not links:
+        return None
+    wanted = " ".join((title or "").split()).casefold()
+    if wanted:
+        for node in links:
+            text = _node_text(node).casefold()
+            if text and (text == wanted or (len(text) > 10 and (text in wanted or wanted in text))):
+                return node
+    for node in links:
+        if any(
+            isinstance(ancestor.tag, str) and ancestor.tag.lower() in _HEADING_TAG_NAMES
+            for ancestor in node.iterancestors()
+        ) or any(
+            isinstance(child.tag, str) and child.tag.lower() in _HEADING_TAG_NAMES
+            for child in node.iterdescendants()
+        ):
+            return node
+    longest = max(links, key=lambda node: len(_node_text(node)))
+    return longest if len(_node_text(longest)) > 10 else links[0]
+
+
 def assign_item_identities(items, page_url=None):
     """Give items a ``unique_id`` derived from their own link.
 

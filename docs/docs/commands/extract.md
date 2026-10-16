@@ -26,7 +26,7 @@ newsworker extract URL [OPTIONS]
 | `--undated` | | `false` | Opt in to the undated listing fallback. |
 | `--render` | | `false` | Force Playwright rendering (`newsworker[browser]`). |
 | `--explain` / `--explain-json` | | `false` | Print extraction diagnostics. |
-| `--user-agent` | | *(built-in)* | Override the User-Agent used for fetching. |
+| `--user-agent` | | `newsworker/<version> (+URL)` | Override the User-Agent used for fetching. |
 | `--language` | | *(auto)* | Override the auto-detected feed language (e.g. `en`, `fr`). |
 | `--proxy` | | — | Proxy URL for outgoing requests. |
 | `--timeout` | | `30` | HTTP request timeout in seconds. |

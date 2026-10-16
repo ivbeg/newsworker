@@ -95,6 +95,7 @@ const sidebars = {
         'development/architecture',
         'development/openspec',
         'development/benchmarks',
+        'development/extraction-corpus',
       ],
     },
     'license',

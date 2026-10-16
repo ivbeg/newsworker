@@ -6,6 +6,7 @@ on:
   pull_request:
   schedule:
     - cron: "17 4 * * 1"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -58,8 +59,7 @@ jobs:
           NEWSWORKER_BROWSER_TESTS: ${{ matrix.extra == 'browser' && '1' || '0' }}
         run: pytest -q tests/test_optional_transports.py tests/test_enrich.py tests/test_http_caching.py
 
-  network-smoke:
-    if: github.event_name == 'schedule'
+  corpus:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,8 +68,23 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -e '.[test]'
-      - name: Public HTTPS extraction smoke
-        run: newsworker extract https://example.com --format json --no-cache --ignore-robots
+      - name: Extraction quality report
+        run: python benchmarks/corpus_report.py --output corpus.md && cat corpus.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Quality gate
+        run: pytest -q tests/test_corpus.py
+
+  network-smoke:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e '.[test]'
+      - name: Live news pages still extract
+        run: python benchmarks/live_check.py
 
   artifact:
     runs-on: ubuntu-latest
