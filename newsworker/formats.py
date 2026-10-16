@@ -43,7 +43,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 import yaml
 
-from .tools import normalize_datetime
+from .tools import is_safe_link, normalize_datetime
 
 #: Supported output format identifiers for extracted feeds.
 SUPPORTED_FORMATS = ("json", "rss", "atom", "csv", "jsonfeed", "html", "markdown", "yaml")
@@ -260,6 +260,9 @@ def to_html(feed):
         "<html lang=%s>" % quoteattr(str(feed.get("language") or "en")),
         "<head>",
         '<meta charset="utf-8">',
+        '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
+        "style-src 'unsafe-inline'; img-src https: http: data:; base-uri 'none'; "
+        "form-action 'none'\">",
         "<title>%s</title>" % title,
         "<style>",
         "body{font-family:system-ui,sans-serif;max-width:48rem;margin:2rem auto;"
@@ -277,7 +280,7 @@ def to_html(feed):
         link = item.get("link")
         date = escape(_format_item_date(item))
         parts.append('<article class="card">')
-        if link:
+        if link and is_safe_link(link):
             parts.append("<h2><a href=%s>%s</a></h2>" % (quoteattr(str(link)), item_title))
         else:
             parts.append("<h2>%s</h2>" % item_title)

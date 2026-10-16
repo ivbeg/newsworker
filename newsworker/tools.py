@@ -504,6 +504,40 @@ def get_abs_url(root_url, url):
     return urljoin(root_url, url or "")
 
 
+#: URL schemes that may appear as item links or images in produced feeds.
+SAFE_LINK_SCHEMES = ("http", "https")
+
+
+def is_safe_link(url):
+    """Return whether ``url`` is an absolute http(s) link safe to publish."""
+    if not url or not isinstance(url, str):
+        return False
+    return urlparse(url.strip()).scheme.lower() in SAFE_LINK_SCHEMES
+
+
+def sanitize_feed_links(feed, fallback_url=None):
+    """Drop ``javascript:``, ``data:`` and other non-http(s) links from ``feed``.
+
+    Pages are untrusted input; a crafted ``<a href="javascript:...">`` must not
+    reach feed readers or the HTML preview.  An unsafe item link falls back to
+    the page URL, the same as an item without a link.
+    """
+    for item in feed.get("items", []) or []:
+        link = item.get("link")
+        if link and not is_safe_link(link):
+            item["link"] = fallback_url if is_safe_link(fallback_url) else None
+        extra = item.get("extra")
+        if isinstance(extra, dict):
+            for key in ("links", "images"):
+                values = extra.get(key)
+                if isinstance(values, list):
+                    extra[key] = [value for value in values if is_safe_link(value)]
+        image = item.get("image")
+        if image and not is_safe_link(image):
+            item.pop("image", None)
+    return feed
+
+
 def clean_url(url):
     """Removes just query parameters from url"""
     # clean url from jsession param

@@ -19,7 +19,7 @@ from .runtime import ExtractionContext, SingleFlight, closing_context
 from .settings import Settings
 from .sources import DocumentSource
 from .spec import FeedSpec, SpecAnalyzer, SpecExtractor
-from .tools import decode_html, find_next_link
+from .tools import decode_html, find_next_link, sanitize_feed_links
 
 log = logging.getLogger(__name__)
 
@@ -234,6 +234,7 @@ class FeedService:
                         )
                 else:
                     feed = self._extract(extraction_url, rendered, context=context)
+            sanitize_feed_links(feed, fallback_url=extraction_url)
             enrich_feed(feed)
             if self.settings.full_text:
                 self._add_full_text(feed)

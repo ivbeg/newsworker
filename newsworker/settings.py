@@ -68,6 +68,8 @@ class Settings:
     allow_private_hosts: bool = False
     redirect_limit: int = 5
     trusted_proxy: bool = False
+    # Read HTTP(S)_PROXY / NO_PROXY / .netrc from the environment (off by default).
+    trust_env_proxy: bool = False
     delivery_max_response_bytes: int = 1024 * 1024
 
     # Server controls.

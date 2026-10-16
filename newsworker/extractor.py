@@ -4,12 +4,11 @@
 
 import contextvars
 import hashlib
+import threading
 from copy import copy
 
-import requests
 from lxml import etree
 from lxml.html import fromstring
-from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .consts import (
@@ -21,7 +20,7 @@ from .consts import (
     TAG_TYPE_TEXT,
 )
 from .dates import build_match_datetime, end_session, start_session
-from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport
+from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport, new_session
 from .runtime import ExtractionContext
 from .tagmapper import TagBlock, TagPath
 from .tools import (
@@ -102,20 +101,25 @@ class FeedExtractor:
         #: Explicit language override; empty/None means auto-detect.
         self.default_language = default_language or None
         self.default_timezone = "UTC"
-        # Create session with connection pooling
-        self.http_session = requests.Session()
+        # One pooled, address-guarded session per thread: concurrent fetches
+        # (server requests, full-text workers) no longer queue behind a lock.
+        self._http_sessions = threading.local()
+        self.transport = RequestsTransport(session_factory=lambda: self.http_session)
 
-        # Configure retry strategy
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
-        self.http_session.mount("http://", adapter)
-        self.http_session.mount("https://", adapter)
+    @property
+    def http_session(self):
+        """This thread's HTTP session (retries 429/5xx with backoff)."""
+        session = getattr(self._http_sessions, "session", None)
+        if session is None:
+            session = new_session(
+                Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+            )
+            self._http_sessions.session = session
+        return session
 
-        self.transport = RequestsTransport(self.http_session)
+    @http_session.setter
+    def http_session(self, session):
+        self._http_sessions.session = session
 
     def _context(self):
         return self._context_var.get() or self._fallback_context

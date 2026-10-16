@@ -19,7 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failure while extracting with cached date patterns no longer leaves the
   narrowed qddate session active for later requests.
 
+### Security
+- **Connection-time address check** — the address a socket actually connects
+  to is validated against the private-network policy, closing the DNS
+  rebinding window between resolution and connection.
+- **Credentials on redirects** — `Authorization`, `Cookie`, `X-API-Key` and all
+  configured `extra_headers` are dropped when a redirect leaves the origin.
+- **Delivery isolation** — webhook and Telegram requests no longer inherit the
+  source `extra_headers`.
+- **Environment proxies** — `HTTP(S)_PROXY`, `NO_PROXY` and `.netrc` are ignored
+  unless the new `trust_env_proxy` setting is enabled.
+- **Unsafe links** — `javascript:`, `data:` and other non-http(s) item links and
+  images are removed from every output; the HTML preview also carries a CSP.
+- **Server refresh** — `?refresh=1` is honoured only for loopback clients or
+  token-authenticated requests.
+
 ### Changed
+- Each thread uses its own pooled HTTP session, so concurrent server requests
+  and full-text fetches no longer serialise behind one locked session.
 - **Python 3.10+** is required; Python 3.14 is tested. Python 3.9 reached
   end of life in October 2025.
 - Importing `newsworker` no longer configures the root logger or silences

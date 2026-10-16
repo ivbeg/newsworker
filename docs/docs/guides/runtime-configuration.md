@@ -39,6 +39,8 @@ verification, robots compliance, five validated redirect hops, disabled CORS,
 and no trusted proxy. Intranet access requires both `allow_private_hosts: true`
 and an explicit `allowed_hosts` entry. Set `trusted_proxy: true` only when the
 configured outbound proxy is itself trusted to enforce destination policy.
+Environment proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) and
+`.netrc` are ignored unless `trust_env_proxy: true` is set.
 
 Watch settings include `watch_interval`, `watch_max_pages`, `delivery_retries`,
 `delivery_backoff`, and `delivered_retention_days`. Server controls include
