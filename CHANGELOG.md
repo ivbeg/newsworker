@@ -61,6 +61,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Article links** — the headline link is chosen instead of the first link in
   an item, which was often a category or tag link (#19).
 
+### Changed (internals)
+- `newsworker.spec` is now a package: `model` (spec and validation),
+  `selectors`, `analyze` (`SpecAnalyzer`) and `execute` (`SpecExtractor`).
+  Everything previously importable from `newsworker.spec` still is.
+- The per-poll `watch` logic moved from the CLI module to
+  `newsworker.watching.run_watch_iteration`.
+- mypy now checks 20 modules (was 8), including the spec package and watch.
+
 ### Changed (dependencies)
 - Requires **qddate 1.0.16** (pyparsing snake_case API, signed timezone
   offsets, Portuguese `maio`). The pyparsing deprecation-warning filter and

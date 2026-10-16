@@ -112,6 +112,18 @@ files = [
     "newsworker/sources.py",
     "newsworker/batch.py",
     "newsworker/delivery.py",
+    "newsworker/dates.py",
+    "newsworker/relative.py",
+    "newsworker/structured.py",
+    "newsworker/evaluation.py",
+    "newsworker/explain.py",
+    "newsworker/watching.py",
+    "newsworker/language.py",
+    "newsworker/undated.py",
+    "newsworker/spec/model.py",
+    "newsworker/spec/selectors.py",
+    "newsworker/spec/execute.py",
+    "newsworker/spec/analyze.py",
 ]
 check_untyped_defs = true
 

@@ -126,7 +126,14 @@ def build_match_datetime(
     elif 0 <= parts["year"] < 100:
         parts["year"] = expand_two_digit_year(parts["year"], local_now)
     try:
-        naive = dt.datetime(**parts)
+        naive = dt.datetime(
+            parts["year"],
+            parts["month"],
+            parts["day"],
+            parts.get("hour", 0),
+            parts.get("minute", 0),
+            parts.get("second", 0),
+        )
     except (TypeError, ValueError):
         return None
     if offset is None and ":time" in str(pattern.get("key", "")):
