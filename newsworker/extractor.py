@@ -20,7 +20,7 @@ from .consts import (
     TAG_TYPE_TAIL,
     TAG_TYPE_TEXT,
 )
-from .dates import build_match_datetime
+from .dates import build_match_datetime, date_text_variants
 from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport, new_session
 from .runtime import ExtractionContext
 from .tagmapper import TagBlock, TagPath
@@ -225,13 +225,21 @@ class FeedExtractor:
         if text is None:
             return False, None, None, None, None
         res = self.indexer.match(text)
+        date_text = text
+        if not res:
+            # "GENEVA, 29 July 2022", "Monday, January 31, 2022", "21-22 July 2022"
+            for variant in date_text_variants(text):
+                res = self.indexer.match(variant)
+                if res:
+                    date_text = variant
+                    break
         if self.session:
             self.session["debug"]["num_textcompared"] += 1
         if res:
             p = res["pattern"]
             the_date = build_match_datetime(
                 res,
-                text,
+                date_text,
                 now=self._context().clock(),
                 default_timezone=self._context().default_timezone,
             )

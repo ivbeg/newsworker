@@ -23,8 +23,9 @@ date styles, and layouts taken from real CMS output: WordPress, Drupal views,
 Bootstrap cards, tables, plain lists, date after title, sidebars and pagers that
 also carry dates, a category link before the headline, "read more" links, date
 plus clock time, flat listings with no wrapper per item, relative dates
-("3 hours ago", "вчера"), and pages whose dates exist only in JSON-LD or
-microdata.
+("3 hours ago", "вчера"), press-release datelines and day spans
+("GENEVA, 21-22 July 2025"), weekday-led US dates ("Monday, July 28, 2025"),
+and pages whose dates exist only in JSON-LD or microdata.
 
 Items are matched by link. The report gives precision and recall of items, and
 the share of matched items whose title and date are right. The gate requires

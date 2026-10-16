@@ -82,8 +82,24 @@ WORDS = {
 }
 
 
+WEEKDAYS_EN = "Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split()
+# Press-release datelines: a place before the date (issue #8).
+DATELINES = ["GENEVA", "Vienna", "New York", "Bangkok", "St. Petersburg"]
+
+
 def date_text(lang: str, value: dt.date, style: str) -> str:
     month = MONTHS[lang].split()[value.month - 1]
+    if style == "dateline":
+        place = DATELINES[value.toordinal() % len(DATELINES)]
+        if place.isupper():
+            month = month.upper()
+        if value.day % 3 == 0 and value.day < 28:
+            # An event span; the first day is the date.
+            return f"{place}, {value.day}-{value.day + 1} {month} {value.year}"
+        return f"{place}, {value.day} {month} {value.year}"
+    if style == "weekday":
+        # "Monday, January 31, 2022" (issue #18).
+        return f"{WEEKDAYS_EN[value.weekday()]}, {month} {value.day}, {value.year}"
     if style == "iso":
         return value.isoformat()
     if style == "dotted":
@@ -374,6 +390,13 @@ STYLES = {
 }
 
 
+# Styles added after the corpus was first built; generated last so the
+# earlier cases keep their seeds (and pages) unchanged.
+EXTRA_STYLES = {
+    "en": ["dateline", "weekday"],
+}
+
+
 EXTRA_LAYOUTS = {
     "relative": layout_relative,
     "json-ld": layout_json_ld,
@@ -388,6 +411,10 @@ def _variants():
                 yield lang, style, layout_name, layout
         for layout_name, layout in EXTRA_LAYOUTS.items():
             yield lang, "none", layout_name, layout
+    for lang, styles in EXTRA_STYLES.items():
+        for style in styles:
+            for layout_name, layout in LAYOUTS.items():
+                yield lang, style, layout_name, layout
 
 
 def build():
