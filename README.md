@@ -174,6 +174,7 @@ newsworker extract URL [OPTIONS]
 | `--json-logs` | | `false` | Emit logs as structured JSON. |
 | `--no-cache` | | `false` | Bypass the spec and content caches for this run. |
 | `--refresh` | | `false` | Force re-fetching the page, ignoring cached content. |
+| `--fail-on-empty` | | `false` | Exit with status `3` when no items are extracted (useful in cron/CI). |
 | `--config` | `-c` | *(default)* | Path to a settings YAML file (see [Settings and caching](#settings-and-caching)). |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 
@@ -394,7 +395,7 @@ store under the cache dir), and emits or POSTs only new items.
 | --- | --- | --- | --- |
 | `--interval` | `-i` | `300` | Seconds between polls. |
 | `--webhook` | | — | POST new items as JSON to this URL (with retry/backoff). |
-| `--format` | `-f` | `json` | Output format when not using a webhook. |
+| `--format` | `-f` | `json` | Stdout output: JSON Lines for `json`, one document per poll for other formats. |
 | `--max-pages` | | `1` | Pages to follow per poll (pagination). |
 | `--max-iterations` | | `0` | Stop after N polls (`0` = run until interrupted). |
 | `--config` | `-c` | *(default)* | Path to settings YAML. |
@@ -409,7 +410,9 @@ newsworker watch "https://example.com/news" -i 600 --webhook https://hooks.examp
 ```
 
 The loop shuts down cleanly on Ctrl-C / SIGTERM. Use `--max-iterations N` to stop
-after N polls (handy for cron-style single runs).
+after N polls (handy for cron-style single runs); a finite run exits with status `1`
+when the page could not be fetched or deliveries are still pending. Queued
+deliveries are retried before each poll, even while the source is unavailable.
 
 ### `cache` — inspect and manage caches
 

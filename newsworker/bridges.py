@@ -48,48 +48,67 @@ class SiteBridge:
         return fnmatch.fnmatch(path, self.path_pattern)
 
 
-def _bridge_from_dict(data, source_name=""):
+def _bridges_from_dict(data, source_name=""):
     match = data.get("match") or {}
-    host = match.get("host") or match.get("hosts")
-    if isinstance(host, list):
-        host = host[0] if host else ""
-    if not host:
+    hosts = match.get("hosts") or match.get("host")
+    if isinstance(hosts, str):
+        hosts = [hosts]
+    hosts = [str(host) for host in (hosts or []) if host]
+    if not hosts:
         raise ValueError("bridge missing match.host")
     spec_data = data.get("spec") or data.get("bridge") or data
     if "match" in spec_data:
         spec_data = {k: v for k, v in spec_data.items() if k != "match"}
     spec = FeedSpec.from_dict(spec_data)
-    return SiteBridge(
-        host=str(host),
-        path_pattern=str(match.get("path") or "*"),
-        spec=spec,
-        name=source_name or str(host),
-    )
+    return [
+        SiteBridge(
+            host=host,
+            path_pattern=str(match.get("path") or "*"),
+            spec=spec,
+            name=source_name or host,
+        )
+        for host in hosts
+    ]
+
+
+def _bridge_from_dict(data, source_name=""):
+    """Compatibility helper returning the bridge for the first listed host."""
+    return _bridges_from_dict(data, source_name)[0]
+
+
+def load_bridge_files(path) -> List[SiteBridge]:
+    """Load one bridge file; a ``match.hosts`` list yields one bridge per host."""
+    with open(path, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    return _bridges_from_dict(data, source_name=os.path.basename(path))
 
 
 def load_bridge_file(path):
-    with open(path, "r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
-    return _bridge_from_dict(data, source_name=os.path.basename(path))
+    return load_bridge_files(path)[0]
 
 
 def load_bridges(*directories) -> List[SiteBridge]:
-    """Loads all ``*.yaml`` / ``*.yml`` bridge files from ``directories`` (in order)."""
+    """Loads all ``*.yaml`` / ``*.yml`` bridge files from ``directories``.
+
+    Directories are listed lowest precedence first; bridges from later
+    directories are returned first, so a user bridge overrides a bundled one
+    that matches the same URL.
+    """
     bridges: List[SiteBridge] = []
-    for directory in directories:
+    for directory in reversed(directories):
         if not directory or not os.path.isdir(directory):
             continue
         pattern = os.path.join(directory, "*.y*ml")
         for path in sorted(glob.glob(pattern)):
             try:
-                bridges.append(load_bridge_file(path))
+                bridges.extend(load_bridge_files(path))
             except Exception as e:  # noqa: BLE001
                 log.warning("Skipping bridge %s: %s", path, e)
     return bridges
 
 
 def default_bridge_dirs(settings=None):
-    """Returns bundled then user bridge directories."""
+    """Returns bridge directories, lowest precedence (bundled) first."""
     from .settings import DEFAULT_HOME
 
     dirs = [_PACKAGE_BRIDGES]

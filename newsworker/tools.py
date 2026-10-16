@@ -5,10 +5,12 @@ Supportive functions to help news extraction algorithms
 """
 
 import datetime
+import hashlib
 import re
 import threading
 import time
-from urllib.parse import parse_qs, urljoin, urlparse
+from collections import Counter
+from urllib.parse import unquote_plus, urljoin, urlparse, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 from zoneinfo import ZoneInfo
 
@@ -538,42 +540,68 @@ def sanitize_feed_links(feed, fallback_url=None):
     return feed
 
 
-def clean_url(url):
-    """Removes just query parameters from url"""
-    # clean url from jsession param
-    THE_JS_KEY = ";jsessionid="
-    n = url.find(THE_JS_KEY)
-    if n > -1:
-        thepath = url[:n] + url[n + len(THE_JS_KEY) + 32 :]
-        url = thepath
-    o = urlparse(url)
+def assign_item_identities(items, page_url=None):
+    """Give items a ``unique_id`` derived from their own link.
 
-    # clean query
-    if len(o.query) > 0:
-        query = clean_urlquery(o.query)[0]
-        if len(query) > 0:
-            url = o.geturl().rsplit("?")[0] + "?" + query
-        else:
-            return o.geturl().rsplit("?")[0]
+    Strategies hash the date text, title, description and link; that hash
+    changes whenever a site edits a teaser, so ``watch`` and feed readers would
+    treat the edited item as new.  The hash is kept as ``content_hash`` (and
+    still serves as the id for items without a link of their own or whose link
+    is shared with other items on the page).
+    """
+    page = clean_url(page_url) if page_url else None
+    counts = Counter(item.get("link") for item in items if item.get("link"))
+    for item in items:
+        legacy = item.get("unique_id")
+        if legacy and not item.get("content_hash"):
+            item["content_hash"] = legacy
+        link = item.get("link")
+        if link and link != page and counts[link] == 1:
+            item["unique_id"] = hashlib.md5(("link:" + link).encode("utf-8")).hexdigest()
+    return items
+
+
+_JSESSIONID_RE = re.compile(r";jsessionid=[^?#/;]*", re.IGNORECASE)
+
+
+def clean_url(url):
+    """Remove session ids and tracking parameters, preserving everything else.
+
+    The remaining query keeps its original order, repeated keys, blank values
+    and percent-encoding byte for byte; the fragment is kept as well.
+    """
+    if not url:
         return url
-    return o.geturl()
+    url = _JSESSIONID_RE.sub("", url)
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    query = clean_urlquery(parts.query)[0]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
 def clean_urlquery(qs):
-    """Removes _junk_ query parameters left by analytics systems"""
-    items = parse_qs(qs, keep_blank_values=True)
-    results = {}
-    filtered = {}
-    for k, v in list(items.items()):
-        if k.lower() not in CLEANABLE_QUERY_KEYS:
-            results[k] = v
+    """Split ``qs`` into the cleaned raw query, kept and filtered parameters.
+
+    Returns ``(query, kept, filtered)`` where ``query`` is the original query
+    string minus tracking parameters (raw segments, not re-encoded) and
+    ``kept``/``filtered`` map decoded keys to lists of decoded values.
+    """
+    cleanable = {key.lower() for key in CLEANABLE_QUERY_KEYS}
+    kept_segments = []
+    kept, filtered = {}, {}
+    for segment in qs.split("&"):
+        if not segment:
+            continue
+        raw_key, _, raw_value = segment.partition("=")
+        key = unquote_plus(raw_key)
+        value = unquote_plus(raw_value)
+        if key.lower() in cleanable:
+            filtered.setdefault(key, []).append(value)
         else:
-            filtered[k] = v
-    q = []
-    for k, v in list(results.items()):
-        q.append("%s=%s" % (k, v[0]))
-    query = "&".join(q)
-    return query, results, filtered
+            kept_segments.append(segment)
+            kept.setdefault(key, []).append(value)
+    return "&".join(kept_segments), kept, filtered
 
 
 class Logger:

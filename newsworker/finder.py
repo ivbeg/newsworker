@@ -323,8 +323,10 @@ class FeedsFinder:
         try:
             fetched = self._fetch(url)
         except Exception as exc:
+            # Keep the result shape for library callers, but say that the page
+            # itself was unreachable: "no feeds" and "could not look" differ.
             log.error("Failed to fetch %s: %s", url, exc)
-            return {"url": url, "items": []}
+            return {"url": url, "items": [], "error": f"{type(exc).__name__}: {exc}"}
         content_type = (fetched.headers.get("Content-Type") or "").split(";", 1)[0].lower()
         root = None
         if content_type in _FEED_TYPES or fetched.body.lstrip().startswith((b"<?xml", b"{")):

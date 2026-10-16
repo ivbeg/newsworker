@@ -131,7 +131,10 @@ def test_service_pagination_and_fulltext(tmp_path, monkeypatch):
         return b"<html><body><article>Full body text for the story.</article></body></html>"
 
     svc.extractor.fetch = fake_fetch
-    monkeypatch.setattr("newsworker.service.extract_fulltext", lambda html, url=None: "full text")
+    monkeypatch.setattr(
+        "newsworker.service.extract_fulltext_with_kind",
+        lambda html, url=None: ("full text", "text"),
+    )
     feed = svc.get_feed(
         "https://example.com/page1", data=first, explicit_spec=simple_spec(), max_pages=2
     )

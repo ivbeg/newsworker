@@ -214,6 +214,7 @@ def test_watch_tracks_multiple_destinations_independently(tmp_path):
         "failed": 1,
         "pending": 1,
         "terminal": 0,
+        "fetch_error": None,
     }
     assert store.counts(channel="smtp") == {"delivered": 1}
     assert store.counts(channel="telegram") == {"retry": 1}

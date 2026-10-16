@@ -152,8 +152,22 @@ def extract_fulltext(html, url=None):
     Prefers ``trafilatura``; falls back to ``readability-lxml``. Returns ``None``
     when neither optional dependency is installed or extraction fails.
     """
+    return extract_fulltext_with_kind(html, url=url)[0]
+
+
+def extract_fulltext_with_kind(html, url=None):
+    """Like :func:`extract_fulltext` but also reports ``"text"`` or ``"html"``.
+
+    trafilatura yields plain text; the readability fallback yields an HTML
+    fragment, which must not be labelled as text downstream.
+    """
+    text, kind = _extract_fulltext(html, url)
+    return text, (kind if text else None)
+
+
+def _extract_fulltext(html, url):
     if not html:
-        return None
+        return None, None
     text = None
     try:
         import trafilatura
@@ -165,14 +179,14 @@ def extract_fulltext(html, url=None):
     except Exception as e:  # noqa: BLE001
         log.debug("trafilatura extraction failed for %s: %s", url, e)
     if text:
-        return text
+        return text, "text"
     try:
         from readability import Document
 
         payload = html.decode("utf-8", "replace") if isinstance(html, bytes) else html
-        return Document(payload).summary()
+        return Document(payload).summary(), "html"
     except ImportError:
-        return None
+        return None, None
     except Exception as e:  # noqa: BLE001
         log.debug("readability extraction failed for %s: %s", url, e)
-        return None
+        return None, None

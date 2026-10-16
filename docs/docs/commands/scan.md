@@ -19,6 +19,7 @@ newsworker scan URL [OPTIONS]
 | `--sitemap` | | `false` | Also discover feed URLs from the site's `/sitemap.xml`. |
 | `--no-verify` | | `false` | Skip fetching and parsing candidate feeds. |
 | `--output` | `-o` | *(stdout)* | Write the result to a file. |
+| `--fail-on-empty` | | `false` | Exit with status `3` when no feeds are found. An unreachable page always exits with `1`. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 
 ```bash

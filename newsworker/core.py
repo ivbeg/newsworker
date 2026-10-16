@@ -396,9 +396,15 @@ def analyze(
         if bool(url) == bool(source_file):
             raise typer.BadParameter("supply exactly one URL or --file source")
         source = (
-            DocumentSource.stdin(base_url=base_url or "", stream=sys.stdin.buffer)
+            DocumentSource.stdin(
+                base_url=base_url or "",
+                stream=sys.stdin.buffer,
+                max_bytes=settings.max_content_bytes,
+            )
             if source_file == "-"
-            else DocumentSource.file(source_file, base_url=base_url or "")
+            else DocumentSource.file(
+                source_file, base_url=base_url or "", max_bytes=settings.max_content_bytes
+            )
             if source_file
             else DocumentSource.url(url or "")
         )
@@ -522,6 +528,9 @@ def extract(
     undated: bool = typer.Option(
         False, "--undated", help="Enable conservative undated-listing fallback."
     ),
+    fail_on_empty: bool = typer.Option(
+        False, "--fail-on-empty", help="Exit with status 3 when no items are extracted."
+    ),
     json_logs: bool = typer.Option(
         False,
         "--json-logs",
@@ -600,9 +609,15 @@ def extract(
         if bool(url) == bool(source_file):
             raise typer.BadParameter("supply exactly one URL or --file source")
         source = (
-            DocumentSource.stdin(base_url=base_url or "", stream=sys.stdin.buffer)
+            DocumentSource.stdin(
+                base_url=base_url or "",
+                stream=sys.stdin.buffer,
+                max_bytes=settings.max_content_bytes,
+            )
             if source_file == "-"
-            else DocumentSource.file(source_file, base_url=base_url or "")
+            else DocumentSource.file(
+                source_file, base_url=base_url or "", max_bytes=settings.max_content_bytes
+            )
             if source_file
             else DocumentSource.url(url or "")
         )
@@ -629,6 +644,11 @@ def extract(
             logging.info(f"Feed written to {output}")
         else:
             print(rendered)
+        if fail_on_empty and not feed.get("items"):
+            logging.error("No news items were extracted from %s", url or source_file)
+            sys.exit(3)
+    except SystemExit:
+        raise
     except Exception as e:
         logging.error(f"Failed to extract feed from {url or source_file}: {e}")
         if verbose:
@@ -731,6 +751,9 @@ def scan(
     max_workers: int = typer.Option(
         8, "--max-workers", help="Maximum concurrent candidate verifications."
     ),
+    fail_on_empty: bool = typer.Option(
+        False, "--fail-on-empty", help="Exit with status 3 when no feeds are found."
+    ),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(
         False,
@@ -755,6 +778,8 @@ def scan(
             include_sitemap=sitemap,
             max_workers=max_workers,
         )
+        if r.get("error"):
+            raise RuntimeError(r["error"])
         rendered = format_scan(r, fmt=fmt, public_url=url)
         if output:
             with open(output, "w", encoding="utf-8") as handle:
@@ -762,6 +787,11 @@ def scan(
             logging.info(f"Scan results written to {output}")
         else:
             print(rendered)
+        if fail_on_empty and not r.get("items"):
+            logging.error("No feeds found on %s", url)
+            sys.exit(3)
+    except SystemExit:
+        raise
     except Exception as e:
         logging.error(f"Failed to scan {url}: {e}")
         if verbose:
@@ -852,31 +882,58 @@ def batch(
 
     os.makedirs(output_dir, exist_ok=True)
     ext = {"markdown": "md", "jsonfeed": "json"}.get(fmt, fmt)
-    results = service.get_feeds(urls, max_workers=max_workers)
+    urls = list(dict.fromkeys(urls))
+    runtime: dict = {}
+    try:
+        results = service.get_feeds(urls, max_workers=max_workers, runtime=runtime)
+    except TypeError as exc:  # a service without runtime reporting
+        if "runtime" not in str(exc):
+            raise
+        results = service.get_feeds(urls, max_workers=max_workers)
     written = 0
     from newsworker.batch import BatchResult, write_manifest
 
     records = []
     for url in urls:
         feed = results.get(url)
+        facts = runtime.get(url, {})
+        transport = facts.get("transport") or ("async" if settings.use_async else "thread")
+        elapsed_ms = float(facts.get("elapsed_ms") or (feed or {}).get("elapsed_ms") or 0.0)
         if not feed or "error" in feed:
             logging.warning("Skipping %s: %s", url, (feed or {}).get("error", "no result"))
             records.append(
                 BatchResult(
                     source=url,
                     status="failure",
-                    elapsed_ms=float((feed or {}).get("elapsed_ms") or 0.0),
-                    transport="async" if async_transport else "thread",
+                    elapsed_ms=elapsed_ms,
+                    transport=transport,
                     error_type=(feed or {}).get("error_type", "BatchError"),
                     error=(feed or {}).get("error", "no result"),
                 )
             )
             continue
-        rendered = format_feed(feed, fmt=fmt, public_url=url)
         name = hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
         path = os.path.join(output_dir, "%s.%s" % (name, ext))
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(rendered)
+        try:
+            rendered = format_feed(feed, fmt=fmt, public_url=url)
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                handle.write(rendered)
+            os.replace(tmp_path, path)
+        except Exception as exc:  # noqa: BLE001
+            # One unwritable source must not abort the batch before the manifest.
+            logging.warning("Could not write %s: %s", url, exc)
+            records.append(
+                BatchResult(
+                    source=url,
+                    status="failure",
+                    elapsed_ms=elapsed_ms,
+                    transport=transport,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+            )
+            continue
         written += 1
         provenance = feed.get("provenance") or {}
         warnings = list(provenance.get("warnings") or [])
@@ -885,9 +942,9 @@ def batch(
                 source=url,
                 status="partial" if warnings else "success",
                 output_path=os.path.abspath(path),
-                elapsed_ms=float(provenance.get("elapsed_ms") or 0.0),
-                transport="async" if async_transport else "thread",
-                cache_state=provenance.get("cache_state"),
+                elapsed_ms=elapsed_ms,
+                transport=transport,
+                cache_state=facts.get("cache_state"),
                 item_count=len(feed.get("items", [])),
                 strategy=provenance.get("strategy"),
                 confidence=provenance.get("confidence"),
@@ -911,7 +968,66 @@ class WatchIterationResult(list):
 
     @property
     def successful(self):
-        return not self.status.get("failed") and not self.status.get("pending")
+        return not (
+            self.status.get("failed")
+            or self.status.get("pending")
+            or self.status.get("terminal")
+            or self.status.get("fetch_error")
+        )
+
+
+def _feed_meta(feed):
+    return {key: feed.get(key) for key in ("title", "link", "description", "language")}
+
+
+def _deliver_records(channel, dedup, records, settings, lease_seconds=60):
+    """Send claimed outbox records through ``channel`` and record each outcome."""
+    from newsworker.delivery import DeliveryPayload, DeliveryResult, restore_item
+
+    delivered, failed, retried = [], 0, 0
+    if not records:
+        return delivered, failed, retried
+    max_attempts = getattr(settings, "delivery_retries", 3)
+    backoff = getattr(settings, "delivery_backoff", 1.0)
+    payloads = [
+        DeliveryPayload(
+            restore_item(record.payload),
+            record.feed_meta or {"link": record.feed},
+            record.idempotency_key,
+        )
+        for record in records
+    ]
+    send_batch = getattr(channel, "send_batch", None)
+    if send_batch is not None:
+        results = send_batch(payloads)
+    else:
+        results = []
+        for record, payload in zip(records, payloads, strict=True):
+            # Keep our lease alive across slow sends so another worker does not
+            # take over (and double-deliver) a record we are still sending.
+            if record.claim_token:
+                dedup.renew(record.idempotency_key, record.claim_token, lease_seconds)
+            try:
+                results.append(channel.send(payload))
+            except Exception as exc:  # noqa: BLE001
+                results.append(DeliveryResult("retryable", type(exc).__name__))
+    for record, result in zip(records, results, strict=True):
+        if result.successful:
+            if dedup.acknowledge(record.idempotency_key, record.claim_token):
+                delivered.append(record.payload)
+            continue
+        terminal = result.terminal or record.attempts >= max_attempts
+        dedup.fail(
+            record.idempotency_key,
+            result.detail or result.status,
+            backoff=backoff,
+            terminal=terminal,
+            token=record.claim_token,
+        )
+        failed += 1
+        if not terminal:
+            retried += 1
+    return delivered, failed, retried
 
 
 def _run_watch_iteration(
@@ -924,26 +1040,15 @@ def _run_watch_iteration(
     *,
     channels=None,
 ):
-    """One watch tick: extract, filter to new items, emit and/or deliver.
+    """One watch tick: drain due deliveries, poll the page, deliver new items.
 
-    Returns the list of new items (useful for tests).
+    Deliveries already queued are attempted before the page is fetched, so a
+    source outage does not hold back items discovered earlier.
     """
-    from newsworker.delivery import (
-        DeliveryPayload,
-        StdoutChannel,
-        WebhookChannel,
-    )
+    from newsworker.delivery import DeliveryPayload, StdoutChannel, WebhookChannel
     from newsworker.fetch import policy_from_settings
 
     runtime_settings = getattr(service, "settings", Settings())
-
-    try:
-        feed = service.get_feed(url, max_pages=max_pages, revalidate=True)
-    except TypeError as exc:
-        if "revalidate" not in str(exc):
-            raise
-        feed = service.get_feed(url, max_pages=max_pages)
-    items = feed.get("items", [])
     if channels is None:
         channels = [
             WebhookChannel(
@@ -952,12 +1057,14 @@ def _run_watch_iteration(
                 policy=policy_from_settings(runtime_settings, operation="delivery"),
             )
             if webhook
-            else StdoutChannel()
+            else StdoutChannel(fmt=fmt)
         ]
     channels = list(channels)
     if not channels:
         raise ValueError("at least one delivery channel is required")
     for channel in channels:
+        if isinstance(channel, StdoutChannel):
+            channel.fmt = fmt
         channel.validate_config()
 
     def destination_for(channel):
@@ -975,23 +1082,54 @@ def _run_watch_iteration(
                 result.append(item)
         return result
 
+    fetch_error = None
+    feed = None
+    if dedup is not None:
+        dedup.release_expired_claims()
+    delivered = []
+    failed = retried = 0
+    if dedup is not None:
+        for channel in channels:
+            prior = dedup.claim_due(
+                feed=url, channel=channel.name, destination=destination_for(channel)
+            )
+            got, bad, again = _deliver_records(channel, dedup, prior, runtime_settings)
+            delivered.extend(got)
+            failed += bad
+            retried += again
+
+    try:
+        try:
+            feed = service.get_feed(url, max_pages=max_pages, revalidate=True)
+        except TypeError as exc:
+            if "revalidate" not in str(exc):
+                raise
+            feed = service.get_feed(url, max_pages=max_pages)
+    except Exception as exc:  # noqa: BLE001
+        fetch_error = f"{type(exc).__name__}: {exc}"
+        logging.error("Watch fetch failed for %s: %s", url, exc)
+    items = (feed or {}).get("items", [])
+
     if dedup is None:
-        delivered = []
-        failed = 0
         for channel in channels:
             destination = destination_for(channel)
+            payloads = []
             for item in items:
                 from newsworker.dedup import DedupStore
 
                 key = DedupStore.idempotency_key(
-                    url,
-                    DedupStore._uid(item),
-                    channel.name,
-                    destination,
+                    url, DedupStore._uid(item), channel.name, destination
                 )
-                result = channel.send(DeliveryPayload(item, feed, key))
+                payloads.append(DeliveryPayload(item, feed, key))
+            send_batch = getattr(channel, "send_batch", None)
+            results = (
+                send_batch(payloads)
+                if send_batch is not None
+                else [channel.send(payload) for payload in payloads]
+            )
+            for payload, result in zip(payloads, results, strict=True):
                 if result.successful:
-                    delivered.append(item)
+                    delivered.append(payload.item)
                 else:
                     failed += 1
         return WatchIterationResult(
@@ -1000,54 +1138,28 @@ def _run_watch_iteration(
             delivered=len(delivered),
             failed=failed,
             pending=failed,
+            fetch_error=fetch_error,
         )
 
-    dedup.release_expired_claims()
-
-    def deliver_due(channel, records):
-        delivered_items = []
-        failed = 0
-        retried = 0
-        max_attempts = getattr(runtime_settings, "delivery_retries", 3)
-        backoff = getattr(runtime_settings, "delivery_backoff", 1.0)
-        for record in records:
-            result = channel.send(DeliveryPayload(record.payload, feed, record.idempotency_key))
-            if result.successful:
-                dedup.acknowledge(record.idempotency_key)
-                delivered_items.append(record.payload)
-            else:
-                terminal = result.terminal or record.attempts >= max_attempts
-                dedup.fail(
-                    record.idempotency_key,
-                    result.detail or result.status,
-                    backoff=backoff,
-                    terminal=terminal,
-                )
-                failed += 1
-                if not terminal:
-                    retried += 1
-        return delivered_items, failed, retried
-
-    # Each destination has an independent durable lifecycle. Drain its due work
-    # from prior runs before adding this poll's newly discovered items.
-    delivered = []
-    failed = 0
-    retried = 0
     inserted_uids = set()
-    pending = 0
-    terminal = 0
+    pending = terminal = 0
     for channel in channels:
         destination = destination_for(channel)
-        prior = dedup.claim_due(feed=url, channel=channel.name, destination=destination)
-        prior_delivered, prior_failed, prior_retried = deliver_due(channel, prior)
-        inserted = dedup.enqueue(url, items, channel=channel.name, destination=destination)
-        inserted_uids.update(record.uid for record in inserted)
-        current = dedup.claim_due(feed=url, channel=channel.name, destination=destination)
-        current_delivered, current_failed, current_retried = deliver_due(channel, current)
+        if feed is not None:
+            inserted = dedup.enqueue(
+                url,
+                items,
+                channel=channel.name,
+                destination=destination,
+                feed_meta=_feed_meta(feed),
+            )
+            inserted_uids.update(record.uid for record in inserted)
+            current = dedup.claim_due(feed=url, channel=channel.name, destination=destination)
+            got, bad, again = _deliver_records(channel, dedup, current, runtime_settings)
+            delivered.extend(got)
+            failed += bad
+            retried += again
         counts = dedup.counts(feed=url, channel=channel.name, destination=destination)
-        delivered.extend(prior_delivered + current_delivered)
-        failed += prior_failed + current_failed
-        retried += prior_retried + current_retried
         pending += counts.get("pending", 0) + counts.get("retry", 0) + counts.get("claimed", 0)
         terminal += counts.get("terminal", 0)
     status = {
@@ -1057,6 +1169,7 @@ def _run_watch_iteration(
         "failed": failed,
         "pending": pending,
         "terminal": terminal,
+        "fetch_error": fetch_error,
     }
     logging.info("watch_delivery %s", json.dumps(status, sort_keys=True))
     return WatchIterationResult(unique_items(delivered), **status)
@@ -1145,10 +1258,11 @@ def watch(
     signal.signal(signal.SIGTERM, _handle_signal)
 
     iterations = 0
+    last_result = None
     try:
         while not stop["flag"]:
             try:
-                result = _run_watch_iteration(
+                last_result = _run_watch_iteration(
                     service,
                     url,
                     fmt,
@@ -1157,16 +1271,12 @@ def watch(
                     max_pages,
                     channels=selected_channels,
                 )
-                if max_iterations == 1 and not result.successful:
-                    undelivered = result.status.get("pending", 0) + result.status.get("terminal", 0)
-                    message = "Watch completed with %d pending delivery item(s)" % undelivered
-                    logging.error(message)
-                    typer.echo(message, err=True)
-                    raise typer.Exit(code=1)
-            except typer.Exit:
-                raise
             except Exception as e:  # noqa: BLE001
                 logging.error("Watch iteration failed for %s: %s", url, e)
+                last_result = WatchIterationResult(fetch_error=str(e))
+            # Retention runs while watching, not only on exit, so a long-lived
+            # daemon's outbox does not grow without bound.
+            dedup.prune(settings.delivered_retention_days)
             iterations += 1
             if max_iterations and iterations >= max_iterations:
                 break
@@ -1178,6 +1288,17 @@ def watch(
     finally:
         dedup.prune(settings.delivered_retention_days)
         dedup.close()
+    if max_iterations and last_result is not None and not last_result.successful:
+        # Finite runs (cron) report problems through the exit status.
+        status = last_result.status
+        if status.get("fetch_error"):
+            message = "Watch could not fetch %s: %s" % (url, status["fetch_error"])
+        else:
+            undelivered = status.get("pending", 0) + status.get("terminal", 0)
+            message = "Watch completed with %d pending delivery item(s)" % undelivered
+        logging.error(message)
+        typer.echo(message, err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()

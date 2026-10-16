@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import importlib.metadata
 import json
@@ -14,11 +15,11 @@ import sys
 import time
 from dataclasses import dataclass, field
 from email.message import EmailMessage
-from typing import Any, Dict, Mapping, Optional, Protocol
+from typing import Any, Dict, List, Mapping, Optional, Protocol
 from urllib.parse import quote
 
 from .fetch import FetchPolicy, FetchRequest, RequestsTransport
-from .formats import _date_handler
+from .formats import _date_handler, format_feed
 from .tools import validate_url
 
 log = logging.getLogger(__name__)
@@ -105,8 +106,16 @@ class DeliveryRegistry:
 
 @dataclass
 class StdoutChannel:
+    """Write new items to a stream.
+
+    ``json`` (the default) writes one JSON object per line (JSON Lines). Any
+    other feed format writes one document per poll containing that poll's new
+    items, e.g. ``watch --format rss``.
+    """
+
     stream: Any = sys.stdout
     name: str = "stdout"
+    fmt: str = "json"
     capabilities: ChannelCapabilities = field(default_factory=lambda: ChannelCapabilities())
 
     @property
@@ -118,11 +127,37 @@ class StdoutChannel:
             raise ValueError("stdout channel stream is not writable")
 
     def send(self, payload: DeliveryPayload) -> DeliveryResult:
-        self.stream.write(
-            json.dumps(payload.item, default=_date_handler, ensure_ascii=False) + "\n"
-        )
-        self.stream.flush()
-        return DeliveryResult("success")
+        return self.send_batch([payload])[0]
+
+    def send_batch(self, payloads: List[DeliveryPayload]) -> List[DeliveryResult]:
+        if not payloads:
+            return []
+        try:
+            if self.fmt in ("json", "jsonl"):
+                for payload in payloads:
+                    self.stream.write(
+                        json.dumps(payload.item, default=_date_handler, ensure_ascii=False) + "\n"
+                    )
+            else:
+                feed = dict(payloads[0].feed)
+                feed["items"] = [restore_item(payload.item) for payload in payloads]
+                self.stream.write(format_feed(feed, fmt=self.fmt))
+            self.stream.flush()
+        except Exception as exc:  # noqa: BLE001
+            return [DeliveryResult("retryable", _safe_error(exc)) for _ in payloads]
+        return [DeliveryResult("success") for _ in payloads]
+
+
+def restore_item(item: Mapping[str, Any]) -> Dict[str, Any]:
+    """Turn a JSON-serialised outbox item back into the internal item shape."""
+    restored = dict(item)
+    value = restored.get("pubdate")
+    if isinstance(value, str):
+        try:
+            restored["pubdate"] = datetime.datetime.fromisoformat(value)
+        except ValueError:
+            restored["pubdate"] = None
+    return restored
 
 
 @dataclass
@@ -363,20 +398,33 @@ def deliver_webhook(
             if attempt + 1 < retries:
                 time.sleep(backoff * (attempt + 1))
         return False
-    key = (
-        idempotency_key
-        or hashlib.sha256(
-            (url + json.dumps(items, default=_date_handler, sort_keys=True)).encode()
+    # Each item is a separate request, so each needs its own idempotency key; a
+    # receiver honouring one shared key would drop every item after the first.
+    keys = [
+        hashlib.sha256(
+            "\x1f".join(
+                (
+                    idempotency_key or url,
+                    json.dumps(item, default=_date_handler, sort_keys=True),
+                )
+            ).encode("utf-8")
         ).hexdigest()
-    )
+        for item in items
+    ]
     channel = WebhookChannel(url=url, timeout=timeout, policy=policy, session=session)
     channel.validate_config()
+    remaining = list(zip(items, keys, strict=True))
     for attempt in range(retries):
-        results = [channel.send(DeliveryPayload(item, feed or {}, key)) for item in items]
-        if all(result.successful for result in results):
+        failed = []
+        for item, key in remaining:
+            result = channel.send(DeliveryPayload(item, feed or {}, key))
+            if result.terminal:
+                return False
+            if not result.successful:
+                failed.append((item, key))
+        if not failed:
             return True
-        if any(result.terminal for result in results):
-            return False
+        remaining = failed  # retry only the units that failed, with stable keys
         if attempt + 1 < retries:
             time.sleep(backoff * (attempt + 1))
     return False

@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 from .bridges import default_bridge_dirs, load_bridges, select_bridge
 from .cache import ContentCache, SpecCache, key_for
 from .diagnostics import ExtractionDiagnostics
-from .enrich import enrich_feed, extract_fulltext
+from .enrich import enrich_feed, extract_fulltext_with_kind
 from .extractor import FeedExtractor
 from .fetch import policy_from_settings
 from .plugins import load_plugins, select_plugin
@@ -19,7 +19,12 @@ from .runtime import ExtractionContext, SingleFlight, closing_context
 from .settings import Settings
 from .sources import DocumentSource
 from .spec import FeedSpec, SpecAnalyzer, SpecExtractor
-from .tools import decode_html, find_next_link, sanitize_feed_links
+from .tools import (
+    assign_item_identities,
+    decode_html,
+    find_next_link,
+    sanitize_feed_links,
+)
 
 log = logging.getLogger(__name__)
 
@@ -118,9 +123,16 @@ class FeedService:
                 if stale is None:
                     raise RuntimeError("upstream returned 304 without a cached body")
                 self.content_cache.touch(url)
-                response_meta.update(meta)
-                response_meta["cache_state"] = "revalidated"
-                return stale, response_meta
+                fresh_validators = {
+                    key: response_meta.get(key) for key in ("etag", "last_modified")
+                }
+                if self.use_cache:
+                    self.content_cache.update_meta(url, fresh_validators)
+                merged = dict(meta)
+                merged.update(response_meta)
+                merged.update({k: v for k, v in fresh_validators.items() if v})
+                merged["cache_state"] = "revalidated"
+                return stale, merged
             response_meta["cache_state"] = "miss" if stale is None else "changed"
             if self.use_cache:
                 self._store_content(url, data, response_meta)
@@ -146,10 +158,16 @@ class FeedService:
         except OSError as exc:
             log.warning("Failed to cache content for %s: %s", url, exc)
 
+    def _spec_cache_enabled(self, context: ExtractionContext) -> bool:
+        # A local file or stdin document must not read or overwrite the spec
+        # inferred for the live site at the same base URL.
+        return self.use_cache and context.source not in {"file", "stdin"}
+
     def _get_or_build_spec(
-        self, url: str, data: bytes, context: ExtractionContext
+        self, url: str, data: bytes, context: ExtractionContext, *, rebuild: bool = False
     ) -> Optional[FeedSpec]:
-        if self.use_cache:
+        use_cache = self._spec_cache_enabled(context)
+        if use_cache and not rebuild:
             spec = self.spec_cache.get(url)
             if spec is not None:
                 if context.diagnostics:
@@ -157,20 +175,21 @@ class FeedService:
                 return spec
 
         def build():
-            if self.use_cache:
+            if use_cache and not rebuild:
                 cached = self.spec_cache.get(url)
                 if cached is not None:
                     return cached
             analyzer = SpecAnalyzer(extractor=self.extractor)
             spec = analyzer.analyze(url, data=data, user_agent=self.settings.user_agent)
-            if self.use_cache and spec is not None and spec.fields:
+            if use_cache and spec is not None and spec.fields:
                 try:
                     self.spec_cache.set(url, spec)
                 except OSError as exc:
                     log.warning("Failed to cache spec for %s: %s", url, exc)
             return spec
 
-        return self._spec_flights.call(key_for(url), build)
+        flight_key = ("rebuild:" if rebuild else "") + key_for(url)
+        return self._spec_flights.call(flight_key, build)
 
     def get_feed(
         self,
@@ -233,23 +252,26 @@ class FeedService:
                             f"Browser fallback failed: {type(exc).__name__}"
                         )
                 else:
+                    extraction_url = context.response_meta.get("effective_url") or extraction_url
                     feed = self._extract(extraction_url, rendered, context=context)
             sanitize_feed_links(feed, fallback_url=extraction_url)
+            assign_item_identities(feed.get("items", []), page_url=extraction_url)
             enrich_feed(feed)
             if self.settings.full_text:
-                self._add_full_text(feed)
+                self._add_full_text(feed, context)
             provenance = feed.setdefault("provenance", {})
             provenance["source"] = context.source
             if diagnostics:
                 diagnostics.score(feed)
                 diagnostics.stop("total")
+                # Only content-derived facts belong in the feed itself, so an
+                # unchanged page renders to identical bytes (stable ETags).
+                # Timings and cache state stay in the diagnostics object.
                 provenance.update(
                     {
                         "strategy": diagnostics.chosen_strategy,
                         "confidence": diagnostics.confidence,
                         "warnings": list(diagnostics.warnings),
-                        "elapsed_ms": diagnostics.timings_ms.get("total", 0.0),
-                        "cache_state": context.response_meta.get("cache_state"),
                         "effective_url": diagnostics.effective_url or extraction_url,
                     }
                 )
@@ -288,19 +310,25 @@ class FeedService:
                 spec, strategy = self._get_or_build_spec(url, data, context), "spec"
         started = time.monotonic()
         if spec is not None and spec.fields:
-            feed = SpecExtractor(extractor=self.extractor).extract(
-                url, spec, data=data, user_agent=self.settings.user_agent
-            )
+            feed = self._apply_spec(url, data, spec, strategy or "spec", started, context)
+            if feed.get("items") or strategy != "spec":
+                # Explicit specs and bridges express user intent: an empty
+                # result is reported, not silently replaced.
+                return feed
+            # An automatically inferred spec matched nothing; the layout most
+            # likely changed. Re-analyse once and keep the new spec only if it works.
             if diagnostics:
-                diagnostics.add_attempt(
-                    strategy or "spec",
-                    "success" if feed.get("items") else "empty",
-                    item_count=len(feed.get("items", [])),
-                    elapsed_ms=(time.monotonic() - started) * 1000,
-                    selectors={"items": spec.items.selector},
+                diagnostics.warnings.append("Cached spec matched no items; re-analysing the page")
+            rebuilt = self._get_or_build_spec(url, data, context, rebuild=True)
+            if rebuilt is not None and rebuilt.fields:
+                feed = self._apply_spec(
+                    url, data, rebuilt, "rebuilt_spec", time.monotonic(), context
                 )
-                diagnostics.chosen_strategy = strategy or "spec"
-            return feed
+                if feed.get("items"):
+                    return feed
+            elif self._spec_cache_enabled(context):
+                self.spec_cache.discard(url)
+            started = time.monotonic()
         feed, _session = self.extractor.get_feed(
             url,
             data=data,
@@ -317,6 +345,22 @@ class FeedService:
             diagnostics.chosen_strategy = "dynamic"
         return feed
 
+    def _apply_spec(self, url, data, spec, strategy, started, context):
+        feed = SpecExtractor(extractor=self.extractor).extract(
+            url, spec, data=data, user_agent=self.settings.user_agent
+        )
+        diagnostics = context.diagnostics
+        if diagnostics:
+            diagnostics.add_attempt(
+                strategy,
+                "success" if feed.get("items") else "empty",
+                item_count=len(feed.get("items", [])),
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                selectors={"items": spec.items.selector},
+            )
+            diagnostics.chosen_strategy = strategy
+        return feed
+
     def _extract_undated(self, data: bytes, url: str, context: ExtractionContext) -> dict:
         from .undated import extract_undated_listing
 
@@ -326,6 +370,8 @@ class FeedService:
             url,
             min_items=self.settings.undated_min_items,
             min_confidence=self.settings.undated_min_confidence,
+            language=self.settings.default_language or None,
+            content_language=context.content_language,
         )
         if context.diagnostics:
             context.diagnostics.add_attempt(
@@ -388,15 +434,29 @@ class FeedService:
             try:
                 next_data = self._fetch(next_url, revalidate=revalidate, context=context)
             except Exception as exc:
-                log.debug("Pagination fetch failed for %s: %s", next_url, exc)
+                log.warning("Pagination stopped at %s: %s", next_url, exc)
+                if context.diagnostics:
+                    context.diagnostics.warnings.append(
+                        f"Pagination stopped after {pages} page(s): {type(exc).__name__}"
+                    )
                 break
-            page_spec = spec or self._get_or_build_spec(next_url, next_data, context)
+            # Listing pages share one layout: reuse the first page's spec rather
+            # than analysing and caching one spec per ?page=N URL.
+            page_spec = spec or (
+                self.spec_cache.get(url) if self._spec_cache_enabled(context) else None
+            )
             page_feed = self._extract(next_url, next_data, explicit_spec=page_spec, context=context)
-            feed.setdefault("items", []).extend(page_feed.get("items", []))
+            items = feed.setdefault("items", [])
+            known = {item.get("link") or item.get("unique_id") for item in items}
+            for item in page_feed.get("items", []):
+                identity = item.get("link") or item.get("unique_id")
+                if identity not in known:
+                    known.add(identity)
+                    items.append(item)
             current_url, current_data = next_url, next_data
             pages += 1
 
-    def _add_full_text(self, feed: dict) -> None:
+    def _add_full_text(self, feed: dict, context: Optional[ExtractionContext] = None) -> None:
         items = [item for item in feed.get("items", []) if item.get("link")]
         if not items:
             return
@@ -406,16 +466,24 @@ class FeedService:
             try:
                 html = self.extractor.fetch(item["link"], self.settings.user_agent, context=context)
             except Exception as exc:
-                log.debug("Full-text fetch failed for %s: %s", item["link"], exc)
-                return
-            text = extract_fulltext(html, url=item["link"])
+                log.warning("Full-text fetch failed for %s: %s", item["link"], exc)
+                return False
+            text, kind = extract_fulltext_with_kind(html, url=item["link"])
             if text:
                 item["content"] = text
-                item["content_kind"] = "text"
+                item["content_kind"] = kind or "text"
+            return True
 
         workers = max(1, min(self.settings.full_text_workers, len(items)))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            list(pool.map(worker, items))
+            fetched = list(pool.map(worker, items))
+        failed = fetched.count(False)
+        if failed:
+            message = f"Full text unavailable for {failed} of {len(items)} item(s)"
+            if context is not None and context.diagnostics is not None:
+                context.diagnostics.warnings.append(message)
+            else:
+                feed.setdefault("provenance", {}).setdefault("warnings", []).append(message)
 
     def _worker_service(self):
         """Compatibility helper preserving explicitly configured extensions."""
@@ -433,13 +501,24 @@ class FeedService:
         max_workers: int = 4,
         force_refresh: bool = False,
         use_async: Optional[bool] = None,
+        runtime: Optional[Dict[str, dict]] = None,
     ) -> Dict[str, dict]:
+        """Build feeds for ``urls`` concurrently.
+
+        ``runtime``, when given, is filled per URL with operational facts that
+        do not belong in the feed itself: ``elapsed_ms``, ``cache_state`` and
+        the ``transport`` actually used.
+        """
         urls = list(dict.fromkeys(urls))
         if not urls:
             return {}
         async_enabled = self.settings.use_async if use_async is None else use_async
         if async_enabled:
-            return self._get_feeds_async(urls, max_workers, force_refresh)
+            from .async_fetch import aiohttp_available
+
+            if aiohttp_available():
+                return self._get_feeds_async(urls, max_workers, force_refresh, runtime)
+            log.warning("aiohttp unavailable; falling back to threaded transport")
 
         import threading
 
@@ -452,14 +531,27 @@ class FeedService:
             if service is None:
                 service = self._worker_service()
                 local.service = service
+            new_context = getattr(service, "new_context", None)
+            context = new_context(base_url=url) if new_context else None
             try:
-                return service.get_feed(url, force_refresh=force_refresh)
+                if context is None:
+                    return service.get_feed(url, force_refresh=force_refresh)
+                return service.get_feed(url, force_refresh=force_refresh, context=context)
             except Exception as exc:
                 return {
                     "error": str(exc),
                     "error_type": type(exc).__name__,
                     "elapsed_ms": (time.monotonic() - started) * 1000,
                 }
+            finally:
+                if runtime is not None:
+                    runtime[url] = {
+                        "elapsed_ms": (time.monotonic() - started) * 1000,
+                        "cache_state": context.response_meta.get("cache_state")
+                        if context is not None
+                        else None,
+                        "transport": "thread",
+                    }
 
         workers = max(1, min(max_workers, len(urls)))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -473,16 +565,17 @@ class FeedService:
                     results[url] = {"error": str(exc), "error_type": type(exc).__name__}
         return {url: results[url] for url in urls}
 
-    def _get_feeds_async(self, urls, max_workers, force_refresh):
-        from .async_fetch import aiohttp_available, fetch_urls_concurrent
+    def _get_feeds_async(self, urls, max_workers, force_refresh, runtime=None):
+        from .async_fetch import fetch_urls_concurrent
 
-        if not aiohttp_available():
-            log.warning("aiohttp unavailable; falling back to threaded transport")
-            return self.get_feeds(urls, max_workers, force_refresh, use_async=False)
+        fetch_started = time.monotonic()
         fetched = fetch_urls_concurrent(urls, self.settings, max_workers=max_workers)
+        fetch_ms = (time.monotonic() - fetch_started) * 1000
         results = {}
         for url in urls:
             started = time.monotonic()
+            if runtime is not None:
+                runtime[url] = {"transport": "async", "fetch_phase_ms": fetch_ms}
             payload = fetched.get(url)
             if isinstance(payload, Exception):
                 results[url] = {
@@ -508,6 +601,13 @@ class FeedService:
                     "error_type": type(exc).__name__,
                     "elapsed_ms": (time.monotonic() - started) * 1000,
                 }
+            if runtime is not None:
+                runtime[url].update(
+                    {
+                        "elapsed_ms": fetch_ms + (time.monotonic() - started) * 1000,
+                        "cache_state": "async_fetch",
+                    }
+                )
         return results
 
     def get_feed_with_diagnostics(self, url: str, **kwargs):

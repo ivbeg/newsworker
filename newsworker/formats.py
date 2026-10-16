@@ -36,6 +36,7 @@ The feed dictionary has the following shape::
 
 import csv
 import datetime
+import hashlib
 import io
 import json
 from xml.etree import ElementTree as ET
@@ -106,6 +107,45 @@ def to_json(feed):
     return json.dumps(feed, indent=4, default=_date_handler, ensure_ascii=False)
 
 
+def newest_pubdate(feed):
+    """Return the most recent item publication time as an aware datetime, or None."""
+    dates = [_ensure_tz(item.get("pubdate")) for item in feed.get("items", [])]
+    dates = [value for value in dates if value is not None]
+    return max(dates) if dates else None
+
+
+def content_fingerprint(feed, fmt="json", public_url=None):
+    """Hash of what a feed says, independent of when it was rendered.
+
+    Used for weak HTTP validators: two renderings of the same items share it
+    even if a format embeds a generation time.
+    """
+    projection = {
+        "fmt": fmt,
+        "self": public_url,
+        "title": feed.get("title"),
+        "language": feed.get("language"),
+        "items": [
+            {
+                key: item.get(key)
+                for key in (
+                    "unique_id",
+                    "title",
+                    "link",
+                    "description",
+                    "pubdate",
+                    "content",
+                    "author",
+                    "categories",
+                )
+            }
+            for item in feed.get("items", [])
+        ],
+    }
+    payload = json.dumps(projection, sort_keys=True, default=_date_handler, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _build_feedgen(feed, public_url=None):
     from feedgen.feed import FeedGenerator
 
@@ -121,6 +161,12 @@ def _build_feedgen(feed, public_url=None):
         fg.link(href=link, rel="alternate")
     if feed.get("language"):
         fg.language(feed["language"])
+    newest = newest_pubdate(feed)
+    if newest is not None:
+        # feedgen defaults these to "now", which changes the bytes of an
+        # unchanged feed on every request.
+        fg.lastBuildDate(newest)
+        fg.updated(newest)
 
     for item in feed.get("items", []):
         entry = fg.add_entry()

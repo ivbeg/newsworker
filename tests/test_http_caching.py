@@ -148,8 +148,10 @@ def test_server_etag_and_conditional_304():
         resp.read()
         assert resp.status == 200
         etag = resp.getheader("ETag")
-        assert etag
-        assert resp.getheader("Last-Modified")
+        assert etag and etag.startswith('W/"')
+        # The stub's only item has no publication date, so there is no
+        # meaningful modification time to report.
+        assert resp.getheader("Last-Modified") is None
 
         conn.request(
             "GET",
@@ -178,3 +180,30 @@ def test_server_metrics_endpoint_behaviour():
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_server_etag_is_stable_across_rebuilds_and_self_link_points_at_feed():
+    srv, port = _start_server()
+    try:
+        etags, bodies = [], []
+        for _ in range(2):
+            conn = http.client.HTTPConnection("127.0.0.1", port)
+            conn.request("GET", "/feed?url=http://example.com/news&format=rss")
+            resp = conn.getresponse()
+            bodies.append(resp.read().decode("utf-8"))
+            etags.append(resp.getheader("ETag"))
+            conn.close()
+        assert etags[0] == etags[1]
+        assert "/feed?url=http%3A%2F%2Fexample.com%2Fnews&amp;format=rss" in bodies[0]
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_if_none_match_uses_weak_comparison():
+    from newsworker.server import _etag_matches
+
+    assert _etag_matches('W/"abc"', 'W/"abc"')
+    assert _etag_matches('"abc", W/"x"', 'W/"abc"')
+    assert _etag_matches("*", 'W/"abc"')
+    assert not _etag_matches('"abd"', 'W/"abc"')
