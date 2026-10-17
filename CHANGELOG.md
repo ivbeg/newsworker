@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowed qddate session active for later requests.
 
 ### Added
+- **`newsworker explain`** — text, JSON or standalone HTML report of why a page
+  yields the items it does: every repeated date group with its score and the
+  one chosen, strategies tried, the spec a fresh analysis would write, the
+  items, and hints for common failures (no dates, links to the listing page,
+  rebuilt spec, structured or undated fallbacks).
 - **Signed feed links** — with `feed_signing_key` set, `newsworker feed-url
   URL` prints a `/feed` link carrying an HMAC signature that authorises that
   one page and format, so RSS readers (which cannot send API tokens) can

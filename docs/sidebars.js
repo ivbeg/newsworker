@@ -49,6 +49,7 @@ const sidebars = {
         'commands/extract',
         'commands/serve',
         'commands/feed-url',
+        'commands/explain',
         'commands/scan',
         'commands/analyze',
         'commands/batch',
