@@ -32,6 +32,7 @@ ENV_PREFIX = "NEWSWORKER_"
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _SECRET_FIELDS = {
     "api_tokens",
+    "feed_signing_key",
     "cookies_file",
     "proxy",
     "smtp_password",
@@ -97,6 +98,10 @@ class Settings:
     # Externally visible base URL of the feed server (for rel="self" links),
     # e.g. "https://feeds.example.org". Defaults to http://host:port.
     public_base_url: str = ""
+    # Secret for signed /feed links (``newsworker feed-url``): a valid ``sig``
+    # authorises that one source URL and format, for readers that cannot send
+    # an API token. Setting it also makes /feed require a token or signature.
+    feed_signing_key: str = ""
 
     # Watch/outbox and delivery.
     watch_interval: float = 300.0
@@ -232,6 +237,8 @@ class Settings:
         for name, value in nonnegative.items():
             if value < 0:
                 raise SettingsError(f"{name} must not be negative")
+        if self.feed_signing_key and len(self.feed_signing_key) < 16:
+            raise SettingsError("feed_signing_key must be at least 16 characters")
         if not 1 <= int(self.port) <= 65535:
             raise SettingsError("port must be between 1 and 65535")
         if not 1 <= int(self.smtp_port) <= 65535:

@@ -133,6 +133,7 @@ newsworker [COMMAND] [ARGS] [OPTIONS]
 Commands:
   extract    Extract feed records from a web page
   serve      Run a local HTTP server exposing pages as feeds
+  feed-url   Print a (signed) subscription URL for the feed server
   scan       Scan a page and find existing feeds
   analyze    Analyze a page and generate a reusable YAML parsing spec
   batch      Extract feeds from many pages concurrently
@@ -244,11 +245,16 @@ Example — start the server and subscribe from a reader:
 newsworker serve --port 8787
 ```
 
-Then add this URL to your RSS reader (URL-encode the page URL):
+Then add this URL to your RSS reader (URL-encode the page URL), or print it with
+`newsworker feed-url "https://example.com/news"`:
 
 ```text
 http://127.0.0.1:8787/feed?url=https%3A%2F%2Fexample.com%2Fnews&format=atom
 ```
+
+On a shared server, set `feed_signing_key` (and `public_base_url`):
+`newsworker feed-url` then prints a signed link that works in readers that
+cannot send an API token. See [feed server](docs/docs/integrations/feed-server.md).
 
 The first request for a URL builds and caches a parsing spec dynamically; later
 requests reuse the cached spec and serve the cached page content until its TTL

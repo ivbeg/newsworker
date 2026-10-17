@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowed qddate session active for later requests.
 
 ### Added
+- **Signed feed links** — with `feed_signing_key` set, `newsworker feed-url
+  URL` prints a `/feed` link carrying an HMAC signature that authorises that
+  one page and format, so RSS readers (which cannot send API tokens) can
+  subscribe to a protected server. `rel="self"` carries the signed link.
 - **Polite fetching** — requests to one site are paced across every worker in
   the process: `per_host_concurrency` (default 2), `per_host_delay`, robots.txt
   `Crawl-delay` / `Request-rate`, and `Retry-After` on 429/503 responses. Waits

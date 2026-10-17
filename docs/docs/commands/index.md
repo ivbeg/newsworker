@@ -14,6 +14,7 @@ options. Add `--verbose` / `-v` to any command for detailed execution logs.
 |---------|------|
 | `extract` | [`/commands/extract`](/commands/extract) |
 | `serve` | [`/commands/serve`](/commands/serve) |
+| `feed-url` | [`/commands/feed-url`](/commands/feed-url) |
 | `scan` | [`/commands/scan`](/commands/scan) |
 | `analyze` | [`/commands/analyze`](/commands/analyze) |
 | `batch` | [`/commands/batch`](/commands/batch) |
