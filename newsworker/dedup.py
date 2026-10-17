@@ -116,9 +116,7 @@ class DedupStore:
                 if not uid:
                     continue
                 key = self.idempotency_key(feed, uid, channel, destination)
-                legacy_seen = self._conn.execute(
-                    "SELECT ts FROM seen WHERE feed=? AND uid=?", (feed, uid)
-                ).fetchone()
+                legacy_seen = self._known_before(feed, uid, item, channel, destination)
                 status = "delivered" if legacy_seen else "pending"
                 attempts = 1 if legacy_seen else 0
                 delivered_at = legacy_seen["ts"] if legacy_seen else None
@@ -146,6 +144,33 @@ class DedupStore:
                 if cursor.rowcount and not legacy_seen:
                     inserted.append(self.get(key))
         return [record for record in inserted if record is not None]
+
+    def _known_before(
+        self, feed: str, uid: str, item: dict[str, Any], channel: str, destination: str
+    ) -> sqlite3.Row | None:
+        """A record showing ``item`` was already handled, under its id or its old one.
+
+        Before 1.4 an item's id was a hash of its text; it is now derived from
+        its link and the text hash is kept as ``content_hash``. Looking up both
+        keeps an upgrade from delivering every item on a watched page again.
+        """
+        ids = [uid]
+        alias = item.get("content_hash")
+        if alias and alias != uid:
+            ids.append(str(alias))
+        for candidate in ids:
+            row = self._conn.execute(
+                "SELECT ts FROM seen WHERE feed=? AND uid=?", (feed, candidate)
+            ).fetchone()
+            if row is not None:
+                return row
+        if len(ids) > 1:
+            return self._conn.execute(
+                "SELECT COALESCE(delivered_at, updated_at) AS ts FROM outbox "
+                "WHERE feed=? AND uid=? AND channel=? AND destination=?",
+                (feed, ids[1], channel, destination),
+            ).fetchone()
+        return None
 
     def get(self, key: str) -> OutboxRecord | None:
         row = self._conn.execute(
