@@ -19,6 +19,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failure while extracting with cached date patterns no longer leaves the
   narrowed qddate session active for later requests.
 
+### Added
+- **Extraction corpus and quality gate** — 182 labelled listing pages across 8
+  languages and 13 CMS layouts (`tests/corpus`), scored by the new
+  `newsworker.evaluation` module. CI fails when precision, recall, title or date
+  accuracy drops, and publishes the per-case report in the job summary.
+- **Live smoke check** — `benchmarks/live_check.py` extracts a few public news
+  pages weekly and fails on missing items, dates or links (replaces the
+  example.com smoke run, which had no news to find).
+- **Flat listings** — pages whose items are sibling elements with no wrapper
+  (heading, date line, teaser, "read more") are now analysed as heading-led
+  groups (`items.group: siblings` in specs). Seen on postgresql.org.
+
+### Fixed (accuracy)
+- **Article links** — the headline link is chosen instead of the first link in
+  an item, which was often a category or tag link (#19).
+
+### Changed (requests)
+- **User-Agent** — requests now identify as
+  `newsworker/<version> (+https://github.com/ivbeg/newsworker)` instead of
+  posing as Chrome 23. Sites such as w3.org and gnu.org reject the old string;
+  `robots.txt` rules for `newsworker` now match. Use `--user-agent` or the
+  `user_agent` setting to override.
+
 ### Fixed (reliability)
 - **Stale inferred specs** — when a cached, automatically inferred spec matches
   no items (the site changed its layout), the page is re-analysed once and the

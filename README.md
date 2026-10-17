@@ -163,7 +163,7 @@ newsworker extract URL [OPTIONS]
 | `--since` | | — | Only items on or after this date (`YYYY-MM-DD`). |
 | `--until` | | — | Only items on or before this date (`YYYY-MM-DD`). |
 | `--full-text` | | `false` | Follow each item link and extract the full article body into `content` (needs the `fulltext` extra: `pip install newsworker[fulltext]`). |
-| `--user-agent` | | *(built-in)* | Override the User-Agent used for fetching. |
+| `--user-agent` | | `newsworker/<version> (+URL)` | Override the User-Agent used for fetching. |
 | `--language` | | *(auto)* | Override the auto-detected feed language (e.g. `en`, `fr`). |
 | `--proxy` | | — | Proxy URL for outgoing requests (e.g. `http://host:port`). |
 | `--timeout` | | `30` | HTTP request timeout in seconds. |
@@ -308,7 +308,7 @@ newsworker analyze URL [OPTIONS]
 | Option | Alias | Default | Description |
 | --- | --- | --- | --- |
 | `--output` | `-o` | *(stdout)* | Path to write the YAML spec. |
-| `--user-agent` | | *(built-in)* | Override the User-Agent used for fetching. |
+| `--user-agent` | | `newsworker/<version> (+URL)` | Override the User-Agent used for fetching. |
 | `--language` | | *(auto)* | Override the auto-detected feed language (e.g. `en`, `fr`). |
 | `--proxy` | | — | Proxy URL for outgoing requests (e.g. `http://host:port`). |
 | `--timeout` | | `30` | HTTP request timeout in seconds. |
@@ -597,8 +597,13 @@ feed, session = extractor.get_feed(
 
 ### Set a custom User-Agent
 
+By default requests identify themselves as
+`newsworker/<version> (+https://github.com/ivbeg/newsworker)`, so `robots.txt`
+rules for `newsworker` apply and site owners can see who is fetching. Override
+it per call, with `--user-agent`, or with the `user_agent` setting:
+
 ```python
-USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 Chrome/23 Safari/537.11"
+USER_AGENT = "my-monitor/2.0 (+https://example.org/contact)"
 feed, session = extractor.get_feed(
     url="https://www.eib.org/en/index.htm", user_agent=USER_AGENT
 )

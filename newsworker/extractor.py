@@ -31,6 +31,7 @@ from .tools import (
     looks_like_fuzzy_date,
     parse_datetime_attr,
     parse_fuzzy_date,
+    pick_link_node,
     resolve_feed_language,
     validate_url,
 )
@@ -481,6 +482,7 @@ class FeedExtractor:
         description_parts = []  # Collect text parts for efficient joining
         url = None
         links = []
+        link_nodes = []
         images = []
         the_date = None
         for ann in anns:
@@ -511,6 +513,7 @@ class FeedExtractor:
                 clr = clean_url(get_abs_url(base_url, ann.node.attrib["href"]))
                 if clr not in links:
                     links.append(clr)
+                    link_nodes.append(ann.node)
             if TAG_TYPE_IMG in ann.attrs and "src" in ann.node.attrib:
                 clr = clean_url(get_abs_url(base_url, ann.node.attrib["src"]))
                 if clr not in images:
@@ -550,7 +553,9 @@ class FeedExtractor:
         }
         item["extra"] = {"links": links, "images": images}
         if len(links) > 0:
-            item["link"] = clean_url(get_abs_url(base_url, links[0]))
+            chosen = pick_link_node(link_nodes, title)
+            index = link_nodes.index(chosen) if chosen is not None else 0
+            item["link"] = clean_url(get_abs_url(base_url, links[index]))
         else:
             item["link"] = clean_url(base_url)
         return item

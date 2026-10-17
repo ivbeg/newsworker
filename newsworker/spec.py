@@ -44,6 +44,7 @@ from .tools import (
     decode_html,
     get_abs_url,
     parse_datetime_attr,
+    pick_link_node,
     resolve_feed_language,
 )
 
@@ -316,6 +317,9 @@ class ItemsRule:
     selector_type: str = "css"  # css | xpath (informational; auto-detected too)
     container: Optional[str] = None
     stride: int = 1
+    #: ``"siblings"``: each matched node starts an item that also takes the
+    #: following siblings up to the next match (flat, wrapper-less listings).
+    group: Optional[str] = None
 
     def to_dict(self):
         data = {
@@ -326,6 +330,8 @@ class ItemsRule:
             data["container"] = self.container
         if self.stride and self.stride != 1:
             data["stride"] = self.stride
+        if self.group:
+            data["group"] = self.group
         return data
 
     @classmethod
@@ -336,6 +342,7 @@ class ItemsRule:
             selector_type=data.get("selector_type", "css"),
             container=data.get("container"),
             stride=int(data.get("stride", 1) or 1),
+            group=data.get("group"),
         )
 
 
@@ -457,6 +464,8 @@ def validate_spec_dict(data):
         raise SpecValidationError("items.stride", "must be an integer") from exc
     if stride < 1:
         raise SpecValidationError("items.stride", "must be at least 1")
+    if items.get("group") not in (None, "siblings"):
+        raise SpecValidationError("items.group", "must be 'siblings' when set")
     fields = data.get("fields", {}) or {}
     if not isinstance(fields, dict):
         raise SpecValidationError("fields", "must be a mapping")
@@ -505,6 +514,13 @@ def _validate_selector(path, selector):
 
 class SpecAnalysisError(Exception):
     """Raised when analysis cannot produce a usable parsing spec."""
+
+
+_HEADING_TAGS_ALL = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+
+
+def _contains(ancestor, node):
+    return any(parent is ancestor for parent in node.iterancestors())
 
 
 def _walk_elements(node):
@@ -631,10 +647,13 @@ class SpecAnalyzer:
                     title, title_source = el, "tail"
                 elif description is None:
                     description, description_source = el, "tail"
-            if el.tag == "a" and "href" in el.attrib and link is None:
-                link = el
             if el.tag == "img" and "src" in el.attrib and image is None:
                 image = el
+        title_text = _element_text(title) if title is not None else None
+        link = pick_link_node(
+            [el for el in _walk_elements(item_root) if el.tag == "a" and "href" in el.attrib],
+            title_text,
+        )
         return {
             "title": (title, title_source),
             "description": (description, description_source),
@@ -740,14 +759,23 @@ class SpecAnalyzer:
             text_samples=self._item_text_samples(item_roots, date_by_root),
         )
 
-        # Item selector: prefer a semantic tag.class shared by item roots.
-        spec.items = self._build_items_rule(document, snode, item_roots)
+        flat = self._flat_layout(snode, item_roots)
+        if flat is not None:
+            # Heading, date line and teaser are siblings with no wrapper per
+            # item: the heading before each date starts the item.
+            spec.items, spec.fields = (
+                flat[0],
+                self._build_scope_field_rules(flat[1], date_by_root, patterns),
+            )
+        else:
+            # Item selector: prefer a semantic tag.class shared by item roots.
+            spec.items = self._build_items_rule(document, snode, item_roots)
 
-        # Field rules: use the first item root that has a usable date + text.
-        spec.fields = self._build_field_rules(item_roots, date_by_root, patterns)
+            # Field rules: use the first item root that has a usable date + text.
+            spec.fields = self._build_field_rules(item_roots, date_by_root, patterns)
 
         # Validate against the same document; fall back to positional if empty.
-        if not self._validate(document, spec):
+        if flat is None and not self._validate(document, spec):
             spec.items = self._positional_items_rule(document, snode, item_roots)
             if not self._validate(document, spec):
                 # Keep the semantic attempt; extraction may still work partially.
@@ -770,6 +798,88 @@ class SpecAnalyzer:
                     "Built selectors could not parse dates from news items on this page"
                 )
         return spec
+
+    @staticmethod
+    def _previous_element(node):
+        previous = node.getprevious()
+        while previous is not None and not isinstance(previous.tag, str):
+            previous = previous.getprevious()
+        return previous
+
+    def _flat_layout(self, snode, item_roots):
+        """Detect items made of sibling elements led by a heading.
+
+        Returns ``(items_rule, sample_scope)`` or ``None``. Applies when at least
+        90% of the date-bearing children of the container are directly preceded
+        by an undated heading; each item then runs from its heading to the next.
+        """
+        # A headline may itself contain a date ("2026-10-07: ..."); such a
+        # heading is the lead of the item that follows, not an item of its own.
+        roots = [root for root in item_roots if str(root.tag).lower() not in _HEADING_TAGS_ALL]
+        if len(roots) < 2:
+            return None
+        leads = []
+        for root in roots:
+            previous = self._previous_element(root)
+            if previous is not None and str(previous.tag).lower() in _HEADING_TAGS_ALL:
+                leads.append(previous)
+        if len(leads) < max(2, int(len(roots) * 0.9 + 0.999)):
+            return None
+        selector = css_for_item_element(leads[0]) or str(leads[0].tag).lower()
+        try:
+            matched = snode.cssselect(selector)
+        except Exception:
+            return None
+        matched = [node for node in matched if node.getparent() is snode]
+        if any(lead not in matched for lead in leads) or len(matched) > len(leads) + 1:
+            return None
+        rule = ItemsRule(
+            selector=selector,
+            selector_type="css",
+            container=snode.getroottree().getpath(snode),
+            group="siblings",
+        )
+        return rule, _sibling_groups([leads[0], leads[1]])[0]
+
+    def _build_scope_field_rules(self, scope, date_by_root, patterns):
+        """Field rules for an item spread over sibling elements (``scope``).
+
+        Each selector is relative to the scope member holding the target; the
+        extractor tries scope members in order, so the leading heading wins
+        for the title and link.
+        """
+        heading = scope[0]
+        date_root = next((node for node in scope if node in date_by_root), None)
+        if date_root is None:
+            return {}
+        date_node = date_by_root[date_root]
+        fields = {}
+        date_source = "text" if (date_node.text and date_node.text.strip()) else "tail"
+        if patterns and HTML_TIME_PATTERN in patterns and date_node.get("datetime"):
+            date_source = "attr:datetime"
+        fields["date"] = FieldRule(
+            selector=relative_selector(date_root, date_node, DATE_CLASSES_KEYWORDS),
+            source=date_source,
+            patterns=patterns or None,
+            required=True,
+        )
+        fields["title"] = FieldRule(selector="", source="content")
+        title_text = _element_text(heading)
+        link = pick_link_node(
+            [el for member in scope for el in _walk_elements(member) if el.tag == "a"],
+            title_text,
+        )
+        if link is not None:
+            holder = next(member for member in scope if link is member or _contains(member, link))
+            fields["link"] = FieldRule(
+                selector=relative_selector(holder, link),
+                source="attr:href",
+                absolute=True,
+            )
+        tail = (date_root.tail or "").strip()
+        if len(tail) > 10:
+            fields["description"] = FieldRule(selector="", source="tail")
+        return fields
 
     def _min_items_matched(self, item_count):
         """Minimum nodes a CSS item selector must match inside the container."""
@@ -960,6 +1070,8 @@ def _select_item_scopes(document, items_rule):
         scope_root = containers[0]
     nodes = select_nodes(scope_root, items_rule.selector)
     nodes = [n for n in nodes if isinstance(getattr(n, "tag", None), str)]
+    if getattr(items_rule, "group", None) == "siblings":
+        return _sibling_groups(nodes)
     stride = items_rule.stride or 1
     if stride <= 1:
         return [[n] for n in nodes]
@@ -969,14 +1081,30 @@ def _select_item_scopes(document, items_rule):
     return scopes
 
 
+def _sibling_groups(starts):
+    """Each start node plus its following siblings, up to the next start node."""
+    markers = {id(node) for node in starts}
+    scopes = []
+    for node in starts:
+        scope = [node]
+        sibling = node.getnext()
+        while sibling is not None and id(sibling) not in markers:
+            if isinstance(sibling.tag, str):
+                scope.append(sibling)
+            sibling = sibling.getnext()
+        scopes.append(scope)
+    return scopes
+
+
 def _extract_value(scope, rule):
     """Extracts a raw string value for a field rule from an item scope."""
     for node in scope:
         targets = select_nodes(node, rule.selector)
         for target in targets:
             value = _read_source(target, rule.source)
+            value = value.strip() if value else value
             if value:
-                return value.strip()
+                return value
     return None
 
 

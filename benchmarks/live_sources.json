@@ -1,0 +1,8 @@
+{
+  "comment": "Public news listings checked weekly by the network-smoke CI job. Keep the list short, use pages that allow crawling, and set conservative minimums.",
+  "sources": [
+    {"url": "https://www.debian.org/News/", "min_items": 10},
+    {"url": "https://www.postgresql.org/about/newsarchive/", "min_items": 5},
+    {"url": "https://www.kernel.org/", "min_items": 3}
+  ]
+}

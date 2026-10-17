@@ -15,10 +15,17 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) "
-    "Chrome/23.0.1271.64 Safari/537.11"
-)
+
+def _default_user_agent() -> str:
+    from . import __version__
+
+    return f"newsworker/{__version__} (+https://github.com/ivbeg/newsworker)"
+
+
+#: An honest, identifiable agent: robots.txt rules for "newsworker" apply to it,
+#: and site owners can see who is fetching. Several sites reject the browser
+#: string used before 1.4 as an impersonation attempt.
+DEFAULT_USER_AGENT = _default_user_agent()
 DEFAULT_HOME = os.path.join(os.path.expanduser("~"), ".newsworker")
 DEFAULT_CONFIG_PATH = os.path.join(DEFAULT_HOME, "config.yaml")
 ENV_PREFIX = "NEWSWORKER_"
