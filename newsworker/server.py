@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -169,6 +170,15 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             supplied = authorization[7:].strip()
         return any(hmac.compare_digest(str(supplied), str(token)) for token in tokens)
 
+    def _may_force_refresh(self):
+        """``?refresh=1`` is honoured for loopback clients or token-authenticated calls."""
+        if self._tokens():
+            return self._authorized()
+        try:
+            return ipaddress.ip_address(self.client_address[0]).is_loopback
+        except ValueError:
+            return False
+
     def _client_identity(self):
         if getattr(self.settings, "trust_proxy_client_ip", False):
             forwarded = self.headers.get("X-Forwarded-For", "")
@@ -288,6 +298,11 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             )
             return
         force_refresh = params.get("refresh", ["0"])[0].lower() in {"1", "true", "yes"}
+        refresh_ignored = force_refresh and not self._may_force_refresh()
+        if refresh_ignored:
+            # An anonymous remote client must not be able to make this server
+            # re-fetch third-party pages on demand (cache bypass amplification).
+            force_refresh = False
         semaphore = getattr(self.server, "build_semaphore", None)
         if semaphore is None:
             semaphore = threading.BoundedSemaphore(
@@ -330,6 +345,8 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             "Last-Modified": formatdate(usegmt=True),
             "Cache-Control": "max-age=%d" % max(0, getattr(self.settings, "content_ttl", 0)),
         }
+        if refresh_ignored:
+            extra["Warning"] = '299 newsworker "refresh ignored for unauthenticated remote clients"'
         if params.get("diagnostics", ["0"])[0].lower() in {"1", "true", "yes"}:
             if diagnostics is not None:
                 extra["X-Newsworker-Confidence"] = f"{diagnostics.confidence:.3f}"

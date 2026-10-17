@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+import contextvars
 import ipaddress
 import socket
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.util.retry import Retry
 
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 SAFE_SCHEMES = {"http", "https"}
+
+#: Request headers that must never follow a redirect to another origin.
+SENSITIVE_HEADERS = frozenset(
+    {"authorization", "cookie", "proxy-authorization", "x-api-key", "x-auth-token"}
+)
 
 
 class FetchError(RuntimeError):
@@ -64,6 +74,8 @@ class FetchPolicy:
     user_agent: str = "newsworker"
     extra_headers: Mapping[str, str] = field(default_factory=dict)
     cookies: Any = None
+    #: Honour HTTP(S)_PROXY / NO_PROXY / .netrc from the environment.
+    trust_env: bool = False
 
 
 @dataclass(frozen=True)
@@ -182,21 +194,135 @@ def _bounded_body(response: requests.Response, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-class RequestsTransport:
-    """Manual-redirect requests adapter enforcing :class:`FetchPolicy`."""
+# The policy and proxy state of the request being sent on this thread/task. The
+# guarded connections below read it when a socket is opened.
+_ACTIVE_GUARD: contextvars.ContextVar[Optional[Tuple[FetchPolicy, bool]]] = contextvars.ContextVar(
+    "newsworker_active_guard", default=None
+)
 
-    def __init__(self, session: Optional[requests.Session] = None):
+
+def check_connected_address(host: str, sock: socket.socket) -> None:
+    """Reject a socket whose peer is a blocked address under the active policy.
+
+    The check runs on the address the socket actually connected to, so a DNS
+    answer that changes between validation and connection (DNS rebinding)
+    cannot reach a private address.
+    """
+    state = _ACTIVE_GUARD.get()
+    if state is None:
+        return
+    policy, proxied = state
+    if proxied or not policy.block_private_hosts or policy.trusted_proxy:
+        return
+    try:
+        peer = sock.getpeername()[0]
+        address = ipaddress.ip_address(str(peer).split("%", 1)[0])
+    except (OSError, ValueError, IndexError):
+        return
+    if not is_unsafe_address(address):
+        return
+    host = (host or "").rstrip(".").lower()
+    allowed = _normalize_allowed(policy.allowed_hosts)
+    if policy.allow_private_hosts and allowed and host in allowed:
+        return
+    sock.close()
+    raise AddressPolicyError(f"Connection to {host!r} reached blocked address {address}")
+
+
+class GuardedHTTPConnection(HTTPConnection):
+    def _new_conn(self):  # type: ignore[override]
+        sock = super()._new_conn()
+        check_connected_address(self.host, sock)
+        return sock
+
+
+class GuardedHTTPSConnection(HTTPSConnection):
+    def _new_conn(self):  # type: ignore[override]
+        sock = super()._new_conn()
+        check_connected_address(self.host, sock)
+        return sock
+
+
+class GuardedHTTPConnectionPool(HTTPConnectionPool):
+    ConnectionCls = GuardedHTTPConnection
+
+
+class GuardedHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = GuardedHTTPSConnection
+
+
+class GuardedHTTPAdapter(HTTPAdapter):
+    """Requests adapter whose direct connections enforce the address policy."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        super().init_poolmanager(*args, **kwargs)
+        self.poolmanager.pool_classes_by_scheme = {
+            "http": GuardedHTTPConnectionPool,
+            "https": GuardedHTTPSConnectionPool,
+        }
+
+
+def new_session(retries: Optional[Retry] = None) -> requests.Session:
+    """Build a session that checks connected addresses and ignores the environment."""
+    session = requests.Session()
+    session.trust_env = False
+    adapter = GuardedHTTPAdapter(
+        max_retries=retries if retries is not None else 0, pool_connections=10, pool_maxsize=20
+    )
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _origin(url: str) -> Tuple[str, str, Optional[int]]:
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    port = parts.port or {"http": 80, "https": 443}.get(scheme)
+    return scheme, (parts.hostname or "").rstrip(".").lower(), port
+
+
+def strip_cross_origin_headers(
+    headers: Dict[str, str], policy: FetchPolicy, *, keep: Iterable[str] = ()
+) -> Dict[str, str]:
+    """Drop credentials and user-supplied headers before leaving the origin."""
+    configured = {key.lower() for key in policy.extra_headers}
+    retained = {key.lower() for key in keep}
+    return {
+        key: value
+        for key, value in headers.items()
+        if key.lower() in retained
+        or (key.lower() not in SENSITIVE_HEADERS and key.lower() not in configured)
+    }
+
+
+class RequestsTransport:
+    """Manual-redirect requests adapter enforcing :class:`FetchPolicy`.
+
+    Without an explicit ``session`` every thread gets its own guarded session,
+    so concurrent fetches proceed in parallel.  An explicit shared session is
+    still supported for compatibility and is serialised with a lock.
+    """
+
+    def __init__(
+        self,
+        session: Optional[requests.Session] = None,
+        *,
+        session_factory: Optional[Callable[[], requests.Session]] = None,
+    ):
         self._shared_session = session
         self._shared_lock = threading.RLock() if session is not None else None
+        self._session_factory = session_factory
         self._local = threading.local()
 
     @property
     def session(self):
         if self._shared_session is not None:
             return self._shared_session
+        if self._session_factory is not None:
+            return self._session_factory()
         session = getattr(self._local, "session", None)
         if session is None:
-            session = requests.Session()
+            session = new_session()
             self._local.session = session
         return session
 
@@ -217,9 +343,17 @@ class RequestsTransport:
             headers["User-agent"] = policy.user_agent
         headers.update(dict(request.headers))
         proxies = {"http": policy.proxy, "https": policy.proxy} if policy.proxy else None
+        session = self.session
+        if hasattr(session, "trust_env"):
+            session.trust_env = policy.trust_env
+        start_origin = _origin(requested_url)
 
         for redirect_index in range(policy.redirect_limit + 1):
             validate_destination(current_url, policy)
+            proxied = bool(policy.proxy) or bool(
+                policy.trust_env and requests.utils.get_environ_proxies(current_url)
+            )
+            token = _ACTIVE_GUARD.set((policy, proxied))
             try:
                 kwargs = {
                     "headers": headers,
@@ -231,14 +365,19 @@ class RequestsTransport:
                     "stream": True,
                 }
                 if method == "GET":
-                    response = self.session.get(current_url, **kwargs)
+                    response = session.get(current_url, **kwargs)
                 else:
                     kwargs["data"] = body
-                    response = self.session.request(method, current_url, **kwargs)
+                    response = session.request(method, current_url, **kwargs)
             except requests.Timeout as exc:
                 raise FetchTimeout(f"Request timed out after {policy.timeout}s") from exc
             except requests.RequestException as exc:
+                blocked = _find_cause(exc, AddressPolicyError)
+                if blocked is not None:
+                    raise blocked from exc
                 raise FetchError(str(exc)) from exc
+            finally:
+                _ACTIVE_GUARD.reset(token)
 
             status_code = getattr(response, "status_code", 200)
             if status_code in REDIRECT_STATUSES and response.headers.get("Location"):
@@ -249,6 +388,10 @@ class RequestsTransport:
                     raise RedirectPolicyError(f"Redirect limit {policy.redirect_limit} exceeded")
                 next_url = urljoin(current_url, response.headers["Location"])
                 validate_destination(next_url, policy)
+                if _origin(next_url) != start_origin:
+                    # Credentials belong to the origin they were configured for;
+                    # requests' own redirect stripping is bypassed by manual redirects.
+                    headers = strip_cross_origin_headers(headers, policy, keep=("User-agent",))
                 chain.append(next_url)
                 if status_code == 303 or (status_code in (301, 302) and method == "POST"):
                     method, body = "GET", None
@@ -290,7 +433,29 @@ class RequestsTransport:
         raise RedirectPolicyError("Redirect handling exhausted")
 
 
+def _find_cause(exc: BaseException, kind: type) -> Optional[BaseException]:
+    """Find a ``kind`` exception wrapped by requests/urllib3 around ``exc``."""
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, kind):
+            return current
+        seen.add(id(current))
+        for arg in getattr(current, "args", ()):
+            candidates = (arg, getattr(arg, "reason", None))
+            for candidate in candidates:
+                if isinstance(candidate, BaseException) and isinstance(candidate, kind):
+                    return candidate
+        current = current.__cause__ or current.__context__
+    return None
+
+
 def policy_from_settings(settings: Any, *, operation: str = "source") -> FetchPolicy:
+    """Build the outbound policy for page fetches or for delivery channels.
+
+    Delivery requests never inherit the source ``extra_headers``: those carry
+    credentials for the pages being read, not for webhooks or bot APIs.
+    """
     max_bytes = settings.max_content_bytes
     if operation == "delivery":
         max_bytes = min(max_bytes, getattr(settings, "delivery_max_response_bytes", 1024 * 1024))
@@ -305,5 +470,6 @@ def policy_from_settings(settings: Any, *, operation: str = "source") -> FetchPo
         trusted_proxy=getattr(settings, "trusted_proxy", False),
         proxy=settings.proxy or None,
         user_agent=settings.user_agent,
-        extra_headers=dict(settings.extra_headers),
+        extra_headers=dict(settings.extra_headers) if operation != "delivery" else {},
+        trust_env=bool(getattr(settings, "trust_env_proxy", False)),
     )

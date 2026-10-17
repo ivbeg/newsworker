@@ -13,15 +13,34 @@ limits, and returns requested and effective URLs with response metadata. Parsers
 receive bounded bytes and never fetch a candidate URL themselves.
 
 Loopback, private, link-local, multicast, unspecified, and reserved addresses
-are blocked by default. Intranet crawling is an explicit opt-in and still
-requires a host allow-list. Proxy-based remote DNS reduces local verification;
-enable `trusted_proxy` only when that trade-off is intentional.
+are blocked by default. The check runs twice: on the resolved addresses before
+the request, and on the address the socket actually connected to, so a DNS
+answer that changes in between (DNS rebinding) cannot reach an internal service.
+Intranet crawling is an explicit opt-in and still requires a host allow-list.
+Proxy-based remote DNS reduces local verification; enable `trusted_proxy` only
+when that trade-off is intentional.
+
+Credentials stay with the origin they were configured for. On a redirect to a
+different scheme, host or port, `Authorization`, `Cookie`, `X-API-Key` and every
+header from `extra_headers` / `--header` are dropped. Delivery channels
+(webhooks, Telegram) never inherit the source `extra_headers`.
+
+`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and `.netrc` are ignored unless
+`trust_env_proxy: true` is set; configure a proxy explicitly with `proxy` /
+`--proxy` instead.
+
+Item links and images are limited to `http`/`https`; `javascript:`, `data:` and
+other schemes found on a page are dropped before any output is produced.
 
 The stdlib server supports static bearer tokens (`Authorization: Bearer …`) and
 `X-API-Key`, constant-time token comparison, per-client token buckets, a global
 feed build semaphore, request IDs, explicit CORS origins, and separate
 `/health/live` and `/health/ready` routes. `/health` remains a liveness alias.
-HTML responses include a restrictive CSP and `X-Content-Type-Options: nosniff`.
+HTML responses include a restrictive CSP and `X-Content-Type-Options: nosniff`;
+the exported HTML preview carries the same policy in a `<meta>` tag.
+`?refresh=1` bypasses the caches only for loopback clients or, when API tokens
+are configured, for authenticated requests; other clients get the cached feed
+and a `Warning` header, so the server cannot be used to hammer third-party sites.
 
 Do not expose the container port publicly without configuring
 `NEWSWORKER_API_TOKENS` and preferably an outbound `NEWSWORKER_ALLOWED_HOSTS`
