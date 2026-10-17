@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from it and a test keeps the two in sync; it now states that Italian page
   text is not detected (the language comes from page metadata).
 - **`watch --once`** polls every source once and exits, for cron.
+- **Home page form** — `newsworker serve` answers browsers at `/` with a
+  form: paste a news page URL, preview the items found and copy the feed link
+  for a reader. No script; protected servers show it only to token holders
+  or, with just a signing key, to the local operator.
 - **Mastodon delivery** — `--channel mastodon` posts each item as a status
   (`mastodon_instance`, `mastodon_token`, `mastodon_visibility`, default
   `unlisted`). The outbox key is sent as `Idempotency-Key`, mentions in titles

@@ -30,7 +30,7 @@ newsworker serve [OPTIONS]
 | `GET /health/live` | Liveness. |
 | `GET /health/ready` | Readiness. |
 | `GET /metrics` | Prometheus metrics when `newsworker[metrics]` is installed; otherwise `404`. |
-| `GET /` | Short usage help. |
+| `GET /` | In a browser: a form to paste a news page URL, preview its items and copy the feed link. Other clients get short usage help. |
 
 `format` is one of `atom` (default), `rss`, `json`, `jsonfeed`, `csv`, `html`,
 `markdown`, `yaml`. Server clients may opt into bounded confidence and warning
@@ -43,6 +43,18 @@ newsworker serve --port 8787
 ```text
 http://127.0.0.1:8787/feed?url=https%3A%2F%2Fexample.com%2Fnews&format=atom
 ```
+
+## Home page
+
+Open `http://127.0.0.1:8787/` in a browser, paste a news page URL and choose a
+format: the page lists the items newsworker finds and shows the link to add to
+a feed reader. It runs no script and posts only to itself.
+
+On a protected server the form follows the same rules as `/feed`: with
+`api_tokens` the request must carry a token, and with only a
+`feed_signing_key` signed links are shown to clients on the same machine (the
+operator), so visitors cannot mint links for arbitrary pages. Everyone else sees
+a note to ask the operator for a link (`newsworker feed-url`).
 
 :::caution Security
 The server fetches whatever URL is passed to `/feed?url=`, so it is a
