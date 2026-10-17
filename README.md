@@ -57,7 +57,7 @@ The result is a structured feed you can serialize into whatever format you need.
 
 ## Installation
 
-Requires **Python 3.9+**.
+Requires **Python 3.10+**.
 
 ```bash
 pip install newsworker              # runtime
@@ -78,11 +78,13 @@ pip install -e ".[dev]"
 
 ### Docker
 
-Run the feed server in a container (binds to `0.0.0.0:8787`):
+Run the feed server in a container. The server listens on `0.0.0.0:8787` inside
+the container; publish the port on loopback only unless you have configured API
+tokens and an allow-list (see [Security](docs/docs/guides/security.md)):
 
 ```bash
 docker build -t newsworker .
-docker run --rm -p 8787:8787 -v newsworker-home:/home/newsworker/.newsworker newsworker
+docker run --rm -p 127.0.0.1:8787:8787 -v newsworker-home:/home/newsworker/.newsworker newsworker
 ```
 
 Or with Compose (persists config/cache in a named volume):
@@ -509,7 +511,11 @@ caches for a single run/request.
 | `csv`  | Flat table: `title, url, feedtype, num_entries, language, confidence`. |
 | `opml` | OPML 2.0 subscription list — the standard interchange format for importing feeds into readers. |
 
-Dates coming from HTML are timezone-naive; when rendering RSS/Atom they are assumed to be **UTC** (a requirement of the feed formats).
+Publication dates are timezone-aware UTC values. Offsets written on the page
+(`<time datetime="…+03:00">`, `10:00 +0300`, `10:00 GMT+3`) are honoured; dates
+without an offset are interpreted in the `default_timezone` setting (UTC by
+default). Two-digit years are expanded to the nearest century that is not in the
+future, and implausible dates (before 1970 or more than a year ahead) are ignored.
 
 ---
 
@@ -681,7 +687,9 @@ script detectors are partial; see [language support](docs/docs/guides/language-s
 
 - Not every language-specific date format is supported yet.
 - Right-aligned dates such as `Published - 27-01-2018` are intentionally unsupported — supporting them measurably increases false positives.
-- Pages that expose no dates in item text or URLs are not yet supported.
+- Pages that expose no dates at all are handled only by the opt-in, conservative
+  `--undated` fallback (repeated cards with titles and links); results carry no
+  publication dates.
 
 ---
 

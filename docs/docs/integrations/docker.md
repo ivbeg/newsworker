@@ -9,7 +9,7 @@ Run the feed server in a container (binds to `0.0.0.0:8787` inside the image):
 
 ```bash
 docker build -t newsworker .
-docker run --rm -p 8787:8787 -v newsworker-home:/home/newsworker/.newsworker newsworker
+docker run --rm -p 127.0.0.1:8787:8787 -v newsworker-home:/home/newsworker/.newsworker newsworker
 ```
 
 Or with Compose (persists config/cache in a named volume):

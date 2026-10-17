@@ -522,7 +522,6 @@ def clean_url(url):
         else:
             return o.geturl().rsplit("?")[0]
         return url
-    #    print o
     return o.geturl()
 
 

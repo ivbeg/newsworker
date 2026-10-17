@@ -230,7 +230,9 @@ def _wordpress_mixed_category_html():
         "Fifth headline long enough for the analyzer here",
         "Sixth headline long enough for the analyzer here",
     ]
-    for idx, (category, date, title) in enumerate(zip(categories, dates, titles), start=1):
+    for idx, (category, date, title) in enumerate(
+        zip(categories, dates, titles, strict=True), start=1
+    ):
         articles.append(
             """
       <article class="fusion-post-grid post-%d type-post status-publish hentry %s">

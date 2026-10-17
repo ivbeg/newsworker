@@ -16,8 +16,8 @@ class ExtractionContext:
     """Mutable state belonging to one logical feed build.
 
     Extractors may be shared, but this object must not be shared between builds.
-    A qddate parser is created lazily because construction is relatively costly and
-    not every strategy needs it.
+    The qddate parser is borrowed lazily from a per-thread cache because
+    construction is relatively costly and not every strategy needs it.
     """
 
     source: str = "network"
@@ -35,9 +35,9 @@ class ExtractionContext:
     @property
     def date_parser(self) -> Any:
         if self._date_parser is None:
-            from qddate import DateParser
+            from .dates import thread_date_parser
 
-            self._date_parser = DateParser(generate=True)
+            self._date_parser = thread_date_parser()
         return self._date_parser
 
     def close(self) -> None:

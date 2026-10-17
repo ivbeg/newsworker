@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Two-digit years** — `25/7/22` and `16.10.26` resolve to 2022 and 2026 instead
+  of years 22 and 26 AD (#14).
+- **Offsets written in text** — `10:00:00 +0300`, `10:00 -0500` and
+  `10:00 GMT+3` are converted to UTC instead of being read as UTC wall time.
+  The signed `timezone` token reported by newer qddate releases is understood.
+- **Implausible dates** (before 1970 or more than a year ahead) are ignored
+  rather than clustered as news dates; dates printed without a year roll back to
+  the previous year around New Year.
+- A failure while extracting with cached date patterns no longer leaves the
+  narrowed qddate session active for later requests.
+
 ### Changed
+- **Python 3.10+** is required; Python 3.14 is tested. Python 3.9 reached
+  end of life in October 2025.
+- Importing `newsworker` no longer configures the root logger or silences
+  urllib3's `InsecureRequestWarning` process-wide. The CLI configures logging in
+  `cli()`, and `--insecure` silences the warning for that run only.
+- The qddate parser is built once per thread and reused, instead of once per
+  request (about 33 ms per feed build on a laptop).
+- Replaced lxml's deprecated `getchildren()` and removed dead debug comments.
+- README and docs: publish the Docker port on `127.0.0.1` in examples; describe
+  timezone handling and the `--undated` fallback accurately.
 - Reorganized documentation into a Docusaurus site under `docs/` (Getting
   Started, Use Cases, CLI Reference, Guides, Integrations, Development), with a
   GitHub Pages workflow at `.github/workflows/deploy-docs.yml`.

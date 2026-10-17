@@ -37,6 +37,7 @@ from lxml import etree
 from lxml.html import fromstring
 
 from .consts import DATE_CLASSES_KEYWORDS, NEWS_CLASSES_KEYWORDS
+from .dates import end_session, start_session
 from .extractor import FeedExtractor
 from .tools import (
     clean_url,
@@ -527,7 +528,7 @@ class SpecAnalyzer:
     def _normalize_snode(snode):
         """Returns ``snode``, descending into ``tbody`` when it is a table."""
         if snode.tag == "table":
-            for child in snode.getchildren():
+            for child in list(snode):
                 if child.tag == "tbody":
                     return child
         return snode
@@ -1025,12 +1026,12 @@ def _parse_date_text(ext, text, patterns):
     if not text:
         return None
     if patterns:
-        ext.indexer.startSession(patterns)
+        start_session(ext.indexer, patterns)
     try:
         match, _key, _data, _matched_text, the_date = ext.match_text(text)
     finally:
         if patterns:
-            ext.indexer.endSession()
+            end_session(ext.indexer)
     if match:
         return the_date
     return None
