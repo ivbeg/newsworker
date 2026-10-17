@@ -12,8 +12,9 @@ import datetime as dt
 import hashlib
 import json
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
+from .model import Feed
 from .tools import clean_url, get_abs_url, parse_datetime_attr
 
 _FEED_TYPES = (
@@ -189,10 +190,10 @@ def _from_json_feed(data: bytes, url: str, default_timezone: str) -> dict[str, A
 
 def parse_native_feed(
     data: bytes, url: str, *, content_type: str | None = None, default_timezone: str = "UTC"
-) -> dict[str, Any] | None:
+) -> Feed | None:
     """Return the internal feed dict for a native feed, or ``None`` if it is not one."""
     if not looks_like_feed(data, content_type):
         return None
     if data.lstrip()[:1] == b"{":
-        return _from_json_feed(data, url, default_timezone)
-    return _from_feedparser(data, url)
+        return cast("Feed | None", _from_json_feed(data, url, default_timezone))
+    return cast("Feed | None", _from_feedparser(data, url))

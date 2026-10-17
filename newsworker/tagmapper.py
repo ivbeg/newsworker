@@ -86,7 +86,7 @@ class TagPath:
             self.__tag_names.reverse()
         self.key = "_".join(map(str, self.__shifts))
         md = hashlib.md5(usedforsecurity=False)
-        md.update(self.key.encode("utf8") if type(self.key) == str else self.key)
+        md.update(self.key.encode("utf8"))
         self.hash = md.hexdigest()
 
     def __cmp__(self, tagpath):

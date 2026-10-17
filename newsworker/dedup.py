@@ -322,7 +322,9 @@ class DedupStore:
                 fields = (
                     item.get("title"),
                     item.get("link"),
-                    pubdate.isoformat() if hasattr(pubdate, "isoformat") else pubdate,
+                    pubdate.isoformat()
+                    if pubdate is not None and hasattr(pubdate, "isoformat")
+                    else pubdate,
                 )
                 row = self._conn.execute(
                     "SELECT version, content_hash FROM items WHERE feed=? AND uid=?", (feed, uid)
@@ -351,7 +353,8 @@ class DedupStore:
         self, feed: str | None = None, *, since: float | None = None
     ) -> list[dict[str, Any]]:
         """Recorded items, newest first; ``since`` filters on ``first_seen``."""
-        where, params = [], []
+        where: list[str] = []
+        params: list[Any] = []
         if feed is not None:
             where.append("feed = ?")
             params.append(feed)

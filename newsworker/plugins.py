@@ -9,6 +9,8 @@ the internal feed dict.
 import logging
 from typing import Any
 
+from .model import Feed
+
 log = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP = "newsworker.extractors"
@@ -21,8 +23,8 @@ class BaseExtractorPlugin:
         """Return True when this plugin should handle ``url``."""
         raise NotImplementedError
 
-    def extract(self, url: str, data: bytes | None = None, **kwargs: Any) -> dict:
-        """Return the internal feed dictionary for ``url``."""
+    def extract(self, url: str, data: bytes | None = None, **kwargs: Any) -> Feed:
+        """Return the feed for ``url`` (see :class:`newsworker.model.Feed`)."""
         raise NotImplementedError
 
 
@@ -54,7 +56,7 @@ def load_plugins(extra: list[Any] | None = None) -> list[Any]:
         if hasattr(eps, "select"):
             group = eps.select(group=ENTRY_POINT_GROUP)
         else:
-            group = eps.get(ENTRY_POINT_GROUP, ())  # type: ignore[union-attr]
+            group = eps.get(ENTRY_POINT_GROUP, ())  # type: ignore[union-attr, arg-type]
     except Exception as e:  # noqa: BLE001
         log.debug("Could not enumerate entry points: %s", e)
         return plugins

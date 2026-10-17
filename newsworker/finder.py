@@ -191,7 +191,7 @@ class FeedsFinder:
     ):
         start = urljoin(base_url, "/sitemap.xml")
         queue = [(start, 0)]
-        visited = set()
+        visited: set[str] = set()
         candidates: dict[str, FeedCandidate] = {}
         urls_seen = 0
         while queue and len(visited) < max_documents and urls_seen < max_urls:

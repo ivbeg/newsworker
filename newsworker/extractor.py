@@ -6,6 +6,7 @@ import hashlib
 import threading
 from copy import copy
 from dataclasses import replace
+from typing import Any
 
 from lxml import etree
 from lxml.html import fromstring
@@ -102,9 +103,15 @@ class FeedExtractor:
         #: Explicit language override; empty/None means auto-detect.
         self.default_language = default_language or None
         self.default_timezone = "UTC"
+        #: Address policy used when no ``base_policy`` is set (plain library use).
+        self.redirect_limit = 5
+        self.allowed_hosts: tuple = ()
+        self.block_private_hosts = True
+        self.allow_private_hosts = False
+        self.trusted_proxy = False
         #: Outbound policy from :func:`newsworker.fetch.policy_from_settings`;
         #: when unset (plain library use) it is assembled from the attributes above.
-        self.base_policy = None
+        self.base_policy: FetchPolicy | None = None
         # One pooled, address-guarded session per thread: concurrent fetches
         # (server requests, full-text workers) no longer queue behind a lock.
         self._http_sessions = threading.local()
@@ -298,7 +305,7 @@ class FeedExtractor:
 
     def _pick_title_from_anns(self, anns):
         """Prefers heading text over the first long text node in document order."""
-        by_tag = {tag: [] for tag in _HEADING_TAGS}
+        by_tag: dict[str, list] = {tag: [] for tag in _HEADING_TAGS}
         for ann in anns:
             if ann.node.tag is etree.Comment:
                 continue
@@ -365,7 +372,7 @@ class FeedExtractor:
             (match, t_key, t_data, the_text, the_date) = self.match_date(node)
             if match:
                 path = TagPath(node)
-                if last is not None and path.level == last_path.level:
+                if last is not None and last_path is not None and path.level == last_path.level:
                     snode = TagPath.getSharedNode(node, last)
                     if shared_node is None:
                         shared_node = snode
@@ -391,7 +398,7 @@ class FeedExtractor:
         builds the candidate item blocks (:meth:`_build_item_blocks`) and turns
         each block into a feed item (:meth:`_item_from_block`).
         """
-        cache_block = {"pats": []}
+        cache_block: dict[str, Any] = {"pats": []}
         self.log.save("process_clusters", "Start cluster processing")
         self.session["debug"]["tagblocks"] = []
         self.session["debug"]["annotations"] = []
@@ -423,7 +430,7 @@ class FeedExtractor:
         common gap.
         """
         res = []
-        avg_diff = {}
+        avg_diff: dict[Any, Any] = {}
         last_block = None
         for i in range(len(data) - 1, -1, -1):
             if i != len(data) - 1:
