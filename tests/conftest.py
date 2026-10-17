@@ -80,3 +80,17 @@ def sample_scan_results():
             },
         ],
     }
+
+
+@pytest.fixture(autouse=True)
+def _fresh_host_scheduler():
+    """Per-host pacing is process-wide; keep one test's Retry-After or
+    Crawl-delay for 127.0.0.1 from slowing or failing the next."""
+    from newsworker.fetch import HOSTS
+    from newsworker.tools import clear_robots_cache
+
+    HOSTS.clear()
+    clear_robots_cache()
+    yield
+    HOSTS.clear()
+    clear_robots_cache()

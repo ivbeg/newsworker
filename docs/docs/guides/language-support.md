@@ -13,14 +13,16 @@ is not sufficient.
 
 | Language | Date | Metadata | Text | Extraction |
 | --- | --- | --- | --- | --- |
-| English, French, German, Italian, Portuguese, Russian, Spanish | tested | tested | tested | supported |
-| Bulgarian, Czech, Ukrainian | incomplete upstream patterns | tested | partial | partial |
+| English, French, German, Italian, Portuguese, Russian, Spanish, Ukrainian | tested | tested | tested | supported |
+| Bulgarian, Czech | incomplete upstream patterns | tested | partial | partial |
 | Arabic, Chinese, Greek, Hebrew, Hindi, Japanese, Korean, Thai | unsupported | tested | tested by script | partial |
 
 The source of truth is `newsworker.language.LANGUAGE_SUPPORT`; localized date
-examples are in `tests/fixtures/languages/matrix.json`. The minimum tested
-qddate release is 1.0.4. General-purpose missing date patterns belong upstream
-in qddate rather than in a second newsworker date engine.
+examples are in `tests/fixtures/languages/matrix.json`, and the extraction
+corpus (`tests/corpus`) covers listing layouts, absolute and relative dates in
+all eight supported languages. newsworker requires qddate 1.0.16 or newer.
+General-purpose missing date patterns belong upstream in qddate rather than in
+a second newsworker date engine.
 
 An explicit `--language` override wins over every automatic signal. With
 diagnostics enabled, automatic selection reports `automatic_evidence`,

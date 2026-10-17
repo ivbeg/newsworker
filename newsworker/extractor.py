@@ -6,6 +6,7 @@ import contextvars
 import hashlib
 import threading
 from copy import copy
+from dataclasses import replace
 
 from lxml import etree
 from lxml.html import fromstring
@@ -19,7 +20,7 @@ from .consts import (
     TAG_TYPE_TAIL,
     TAG_TYPE_TEXT,
 )
-from .dates import build_match_datetime, end_session, start_session
+from .dates import build_match_datetime
 from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport, new_session
 from .runtime import ExtractionContext
 from .tagmapper import TagBlock, TagPath
@@ -102,6 +103,9 @@ class FeedExtractor:
         #: Explicit language override; empty/None means auto-detect.
         self.default_language = default_language or None
         self.default_timezone = "UTC"
+        #: Outbound policy from :func:`newsworker.fetch.policy_from_settings`;
+        #: when unset (plain library use) it is assembled from the attributes above.
+        self.base_policy = None
         # One pooled, address-guarded session per thread: concurrent fetches
         # (server requests, full-text workers) no longer queue behind a lock.
         self._http_sessions = threading.local()
@@ -112,8 +116,15 @@ class FeedExtractor:
         """This thread's HTTP session (retries 429/5xx with backoff)."""
         session = getattr(self._http_sessions, "session", None)
         if session is None:
+            # 429/Retry-After are left to the host scheduler, whose waits are
+            # bounded; urllib3 would sleep for however long the server asks.
             session = new_session(
-                Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+                Retry(
+                    total=3,
+                    backoff_factor=1,
+                    status_forcelist=[500, 502, 503, 504],
+                    respect_retry_after_header=False,
+                )
             )
             self._http_sessions.session = session
         return session
@@ -593,20 +604,7 @@ class FeedExtractor:
                 headers["If-None-Match"] = conditional["etag"]
             if conditional.get("last_modified"):
                 headers["If-Modified-Since"] = conditional["last_modified"]
-        policy = FetchPolicy(
-            timeout=self.timeout,
-            max_bytes=max_bytes if max_bytes is not None else self.max_bytes,
-            verify_tls=self.verify_tls,
-            redirect_limit=getattr(self, "redirect_limit", 5),
-            allowed_hosts=tuple(getattr(self, "allowed_hosts", ()) or ()),
-            block_private_hosts=getattr(self, "block_private_hosts", True),
-            allow_private_hosts=getattr(self, "allow_private_hosts", False),
-            trusted_proxy=getattr(self, "trusted_proxy", False),
-            proxy=self.proxy,
-            user_agent=user_agent or "newsworker",
-            extra_headers=self.extra_headers,
-            cookies=self._load_cookies(),
-        )
+        policy = self._policy(user_agent, max_bytes)
         result = self.transport.fetch(FetchRequest(url=url, headers=headers), policy)
         active.response_meta = {
             **result.validators,
@@ -621,47 +619,52 @@ class FeedExtractor:
             )
         return result
 
-    def _can_fetch_policy(self, url, user_agent):
-        """Retrieve robots.txt through the same bounded transport and policy."""
-        from urllib.parse import urljoin, urlparse
-        from urllib.robotparser import RobotFileParser
+    def _policy(self, user_agent=None, max_bytes=None):
+        """The outbound policy for one request (cookies are loaded lazily)."""
+        base = self.base_policy or FetchPolicy(
+            timeout=self.timeout,
+            max_bytes=self.max_bytes,
+            verify_tls=self.verify_tls,
+            redirect_limit=getattr(self, "redirect_limit", 5),
+            allowed_hosts=tuple(getattr(self, "allowed_hosts", ()) or ()),
+            block_private_hosts=getattr(self, "block_private_hosts", True),
+            allow_private_hosts=getattr(self, "allow_private_hosts", False),
+            trusted_proxy=getattr(self, "trusted_proxy", False),
+            proxy=self.proxy,
+            extra_headers=self.extra_headers,
+        )
+        return replace(
+            base,
+            user_agent=user_agent or base.user_agent,
+            max_bytes=max_bytes if max_bytes is not None else base.max_bytes,
+            cookies=self._load_cookies(),
+        )
 
-        from . import tools
+    def _can_fetch_policy(self, url, user_agent):
+        """Consult robots.txt (fetched through the same bounded transport and
+        policy) and apply its ``Crawl-delay`` to the host's request pacing."""
+        from urllib.parse import urlparse
+
+        from .fetch import HOSTS
+        from .tools import robots_rules
 
         parsed = urlparse(url)
         root = f"{parsed.scheme}://{parsed.netloc}"
-        with tools._ROBOTS_LOCK:
-            cached = tools._ROBOTS_CACHE.get(root, tools._ROBOTS_MISSING)
-        if cached is tools._ROBOTS_MISSING:
-            parser = RobotFileParser()
-            robots_url = urljoin(root, "/robots.txt")
-            policy = FetchPolicy(
-                timeout=self.timeout,
-                max_bytes=min(self.max_bytes, 512 * 1024),
-                verify_tls=self.verify_tls,
-                redirect_limit=getattr(self, "redirect_limit", 5),
-                allowed_hosts=tuple(getattr(self, "allowed_hosts", ()) or ()),
-                block_private_hosts=getattr(self, "block_private_hosts", True),
-                allow_private_hosts=getattr(self, "allow_private_hosts", False),
-                trusted_proxy=getattr(self, "trusted_proxy", False),
-                proxy=self.proxy,
-                user_agent=user_agent or "newsworker",
-                extra_headers=self.extra_headers,
-                cookies=self._load_cookies(),
-            )
-            try:
-                result = self.transport.fetch(FetchRequest(robots_url), policy)
-                parser.set_url(robots_url)
-                parser.parse(result.body.decode("utf-8", "replace").splitlines())
-            except Exception:
-                parser = None
-            with tools._ROBOTS_LOCK:
-                tools._ROBOTS_CACHE[root] = parser
-            cached = parser
-        if cached is None:
+        policy = replace(self._policy(user_agent), max_bytes=min(self.max_bytes, 512 * 1024))
+        rules = robots_rules(
+            root, lambda robots_url: self.transport.fetch(FetchRequest(robots_url), policy).body
+        )
+        if rules is None:
             return True
+        agent = user_agent or "*"
         try:
-            return cached.can_fetch(user_agent or "*", url)
+            delay = rules.crawl_delay(agent)
+            if delay is None:
+                rate = rules.request_rate(agent)
+                delay = rate.seconds / rate.requests if rate and rate.requests else None
+            if delay:
+                HOSTS.note_crawl_delay((parsed.hostname or "").lower(), float(delay))
+            return rules.can_fetch(agent, url)
         except Exception:
             return True
 
@@ -725,11 +728,11 @@ class FeedExtractor:
         self.init_session()
         if cached_p is None:
             return self._build_feed(url, data, user_agent)
-        start_session(self.indexer, cached_p)
+        self.indexer.start_session(list(cached_p))
         try:
             return self._build_feed(url, data, user_agent)
         finally:
-            end_session(self.indexer)
+            self.indexer.end_session()
 
     def _build_feed(self, url, data, user_agent):
         if data is None:

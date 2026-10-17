@@ -32,7 +32,10 @@ content_cache_max_entries: 0     # max cached pages on disk (0 = unbounded)
 content_cache_max_bytes: 0       # max total cached-page size on disk (0 = unbounded)
 spec_cache_max_entries: 0        # max cached specs on disk (0 = unbounded)
 verify_tls: true                 # verify TLS certificates on outgoing requests
-respect_robots: true             # honor robots.txt before fetching
+respect_robots: true             # honor robots.txt (incl. Crawl-delay) before fetching
+per_host_concurrency: 2          # requests in flight per site, across all workers (0 = unlimited)
+per_host_delay: 0                # minimum seconds between requests to one site
+max_host_wait: 30                # longest wait for a slot or a Retry-After window (seconds)
 request_timeout: 30              # HTTP request timeout (seconds)
 proxy: ""                        # proxy URL for outgoing requests ("" = none)
 extra_headers: {}                # extra HTTP headers sent with every request
@@ -42,6 +45,8 @@ bridges_dir: ""                  # user site-bridge YAML dir ("" = ~/.newsworker
 use_async: false                 # use aiohttp for batch --async (needs [async] extra)
 full_text: false                 # follow item links and populate content (needs [fulltext])
 full_text_workers: 4             # concurrency for --full-text fetches
+structured_data: true            # use JSON-LD / microdata article lists when present
+trust_env_proxy: false           # honor HTTP(S)_PROXY / NO_PROXY / .netrc
 ```
 
 Cached specs live under `<cache_dir>/specs/` and cached page content under

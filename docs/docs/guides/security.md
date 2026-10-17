@@ -29,6 +29,14 @@ header from `extra_headers` / `--header` are dropped. Delivery channels
 `trust_env_proxy: true` is set; configure a proxy explicitly with `proxy` /
 `--proxy` instead.
 
+Crawled sites are paced per host across every worker in the process: at most
+`per_host_concurrency` requests in flight (default 2), at least `per_host_delay`
+seconds between request starts, raised to the site's robots.txt `Crawl-delay`
+(capped at 60 s). A `429` or `503` with `Retry-After` pauses that host; a request
+that would wait longer than `max_host_wait` fails fast with a `rate_limited`
+error instead of holding a worker. robots.txt rules are fetched through the same
+policy and cached for at most a day.
+
 Item links and images are limited to `http`/`https`; `javascript:`, `data:` and
 other schemes found on a page are dropped before any output is produced.
 

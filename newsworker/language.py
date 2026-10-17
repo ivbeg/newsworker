@@ -25,6 +25,7 @@ _DATE_LANGUAGES = {
     "pt": "Portuguese",
     "ru": "Russian",
     "es": "Spanish",
+    "uk": "Ukrainian",
 }
 _TEXT_ONLY = {
     "ar": "Arabic",
@@ -37,7 +38,6 @@ _TEXT_ONLY = {
     "zh": "Chinese",
     "bg": "Bulgarian",
     "cs": "Czech",
-    "uk": "Ukrainian",
 }
 
 

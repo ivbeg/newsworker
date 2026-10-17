@@ -19,17 +19,17 @@ drops, so changes to the heuristics are measured instead of guessed.
 | Scoring | `newsworker.evaluation` |
 
 The corpus covers 8 languages (en, ru, de, fr, es, it, pt, uk), their common
-date styles, and 13 layouts taken from real CMS output: WordPress, Drupal views,
+date styles, and layouts taken from real CMS output: WordPress, Drupal views,
 Bootstrap cards, tables, plain lists, date after title, sidebars and pagers that
 also carry dates, a category link before the headline, "read more" links, date
-plus clock time, and flat listings with no wrapper per item.
+plus clock time, flat listings with no wrapper per item, relative dates
+("3 hours ago", "вчера"), and pages whose dates exist only in JSON-LD or
+microdata.
 
 Items are matched by link. The report gives precision and recall of items, and
 the share of matched items whose title and date are right. The gate requires
-every case in the fully supported languages to be extracted exactly, and
-overall precision ≥ 0.98, recall ≥ 0.92, title and date accuracy ≥ 0.98.
-Ukrainian month names need qddate ≥ 1.0.13; on older qddate those cases are
-measured but not required.
+every case to be extracted exactly: precision, recall, title and date
+accuracy are all 1.00.
 
 Real site snapshots are not committed: their content is third-party copyright.
 `benchmarks/live_check.py` checks a few public pages weekly instead
