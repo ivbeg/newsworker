@@ -16,6 +16,8 @@ Loopback, private, link-local, multicast, unspecified, and reserved addresses
 are blocked by default. The check runs twice: on the resolved addresses before
 the request, and on the address the socket actually connected to, so a DNS
 answer that changes in between (DNS rebinding) cannot reach an internal service.
+The asynchronous transport (`--async`) checks the addresses its resolver hands
+to the connection, which has the same effect.
 Intranet crawling is an explicit opt-in and still requires a host allow-list.
 Proxy-based remote DNS reduces local verification; enable `trusted_proxy` only
 when that trade-off is intentional.

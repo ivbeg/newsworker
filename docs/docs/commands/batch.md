@@ -34,5 +34,9 @@ pip install 'newsworker[async]'
 newsworker batch --urls-file urls.txt -d out --async
 ```
 
+Both transports apply the same fetch policy, robots.txt rules, per-host pacing,
+cookies (`cookies_file`) and content cache: a fresh cached page is not fetched
+again and a stale one is revalidated with `If-None-Match` / `If-Modified-Since`.
+
 See [batch manifests](/guides/batch) for artifact naming, record fields, and
 exit codes.
