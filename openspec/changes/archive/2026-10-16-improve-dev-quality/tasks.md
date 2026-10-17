@@ -14,4 +14,4 @@
 ## 4. Documentation strategy
 - [x] 4.1 Remove Sphinx/autodoc stubs (`docs/*.rst`, stale `docs/*.md`, `make docs`)
 - [x] 4.2 Add `docs/README.md` with MkDocs Material + mkdocstrings bootstrap guide
-- [ ] 4.3 (Optional follow-up) Adopt MkDocs site and CI `mkdocs build --strict`
+- [x] 4.3 (Optional follow-up) Adopt MkDocs site and CI `mkdocs build --strict` — superseded: the docs site uses Docusaurus, built in CI (`npm run build`)
