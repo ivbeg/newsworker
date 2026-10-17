@@ -68,6 +68,7 @@ const sidebars = {
         'guides/output-formats',
         'guides/parsing-specs',
         'guides/settings',
+        'guides/settings-reference',
         'guides/runtime-configuration',
         'guides/local-input',
         'guides/batch',

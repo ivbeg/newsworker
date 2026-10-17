@@ -65,6 +65,18 @@ pins forward):
 uv pip compile pyproject.toml --extra test --python-version 3.10 --universal --no-header -o requirements-lock.txt
 ```
 
+## Generated documentation
+
+Two pages are generated from the code and tests fail when they drift:
+
+- the settings reference — edit `newsworker/settings_doc.py`, then run
+  `python -m newsworker.settings_doc`;
+- the language table in the language-support guide — update
+  `newsworker/language.py`, then paste `newsworker languages --format markdown`.
+
+`tests/test_cli_docs.py` also checks that every command-line option is mentioned
+on its command page under `docs/docs/commands/`.
+
 ## Releasing
 
 1. Bump `__version__` in `newsworker/__init__.py` and turn `## [Unreleased]` in
