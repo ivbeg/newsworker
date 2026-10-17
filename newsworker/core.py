@@ -1111,6 +1111,11 @@ def watch(
         "--max-iterations",
         help="Stop after N polls (0 = run until interrupted).",
     ),
+    deliver_updates: bool = typer.Option(
+        False,
+        "--deliver-updates",
+        help="Deliver an item again when its title, text, link or date changes.",
+    ),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -1192,13 +1197,14 @@ def watch(
                         webhook,
                         max_pages,
                         channels=selected_channels,
+                        deliver_updates=deliver_updates,
                     )
                 except Exception as e:  # noqa: BLE001
                     logging.error("Watch iteration failed for %s: %s", source, e)
                     last_results[source] = WatchIterationResult(fetch_error=str(e))
             # Retention runs while watching, not only on exit, so a long-lived
             # daemon's outbox does not grow without bound.
-            dedup.prune(settings.delivered_retention_days)
+            dedup.prune(settings.delivered_retention_days, settings.history_retention_days)
             iterations += 1
             if max_iterations and iterations >= max_iterations:
                 break
@@ -1208,7 +1214,7 @@ def watch(
                 time.sleep(min(1, interval - slept))
                 slept += 1
     finally:
-        dedup.prune(settings.delivered_retention_days)
+        dedup.prune(settings.delivered_retention_days, settings.history_retention_days)
         dedup.close()
     failed = {source: r for source, r in last_results.items() if not r.successful}
     if max_iterations and failed:
@@ -1243,6 +1249,75 @@ def mcp(
     except RuntimeError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
+
+
+@app.command()
+def history(
+    url: Optional[str] = typer.Argument(None, help="Only this watched source."),
+    format: str = typer.Option("jsonl", "--format", "-f", help="jsonl or csv."),
+    since: Optional[str] = typer.Option(
+        None, "--since", help="Only items first seen on or after this date (YYYY-MM-DD)."
+    ),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write to a file."),
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
+):
+    """Export the item history recorded by watch (first/last seen, versions)."""
+    import csv
+    import io
+
+    from newsworker.dedup import DedupStore
+
+    fmt = format.lower()
+    if fmt not in {"jsonl", "csv"}:
+        raise typer.BadParameter("format must be jsonl or csv", param_hint="--format")
+    since_ts = None
+    if since:
+        try:
+            since_ts = (
+                datetime.datetime.strptime(since, "%Y-%m-%d")
+                .replace(tzinfo=datetime.timezone.utc)
+                .timestamp()
+            )
+        except ValueError as exc:
+            raise typer.BadParameter("use YYYY-MM-DD", param_hint="--since") from exc
+    settings = Settings.resolve(config)
+    path = os.path.join(settings.resolved_cache_dir(), "seen.sqlite3")
+    if not os.path.exists(path):
+        typer.echo("No watch history yet.", err=True)
+        raise typer.Exit(code=0)
+    store = DedupStore(path)
+    try:
+        rows = store.history(url, since=since_ts)
+    finally:
+        store.close()
+    columns = ["feed", "uid", "version", "title", "link", "pubdate", "first_seen", "last_seen"]
+
+    def stamp(value):
+        if value is None:
+            return None
+        return datetime.datetime.fromtimestamp(value, tz=datetime.timezone.utc).isoformat()
+
+    records = [
+        {
+            **{key: row.get(key) for key in columns},
+            "first_seen": stamp(row["first_seen"]),
+            "last_seen": stamp(row["last_seen"]),
+        }
+        for row in rows
+    ]
+    if fmt == "jsonl":
+        rendered = "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records)
+    else:
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(records)
+        rendered = buffer.getvalue()
+    if output:
+        with open(output, "w", encoding="utf-8") as handle:
+            handle.write(rendered)
+    else:
+        typer.echo(rendered, nl=False)
 
 
 @app.command()

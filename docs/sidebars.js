@@ -50,6 +50,7 @@ const sidebars = {
         'commands/serve',
         'commands/feed-url',
         'commands/explain',
+        'commands/history',
         'commands/scan',
         'commands/analyze',
         'commands/batch',

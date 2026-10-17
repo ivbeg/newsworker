@@ -24,6 +24,7 @@ newsworker watch URL [OPTIONS]
 | `--format` | `-f` | `json` | Stdout output: `json` writes one JSON object per line (JSON Lines); `rss`, `atom`, `jsonfeed`, `csv`, `html`, `markdown` and `yaml` write one document per poll with that poll's new items. |
 | `--max-pages` | | `1` | Pages to follow per poll (pagination). |
 | `--max-iterations` | | `0` | Stop after N polls (`0` = run until interrupted). |
+| `--deliver-updates` | | `false` | Deliver an item again (marked `updated`) when its title, text, link or date changes. |
 | `--config` | `-c` | *(default)* | Path to settings YAML. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 

@@ -141,6 +141,7 @@ Commands:
   feed-url   Print a (signed) subscription URL for the feed server
   explain    Explain why a page yields the items it does (text/HTML report)
   mcp        Serve extract/scan/explain as MCP tools for AI assistants
+  history    Export the item history recorded by watch (versions, first/last seen)
   scan       Scan a page and find existing feeds
   analyze    Analyze a page and generate a reusable YAML parsing spec
   batch      Extract feeds from many pages concurrently
@@ -427,6 +428,7 @@ store under the cache dir), and emits or POSTs only new items.
 | `--format` | `-f` | `json` | Stdout output: JSON Lines for `json`, one document per poll for other formats. |
 | `--max-pages` | | `1` | Pages to follow per poll (pagination). |
 | `--max-iterations` | | `0` | Stop after N polls (`0` = run until interrupted). |
+| `--deliver-updates` | | `false` | Deliver an item again (marked `updated`) when its title, text, link or date changes. |
 | `--config` | `-c` | *(default)* | Path to settings YAML. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 
@@ -519,6 +521,7 @@ full_text_workers: 4             # concurrency for --full-text fetches
 structured_data: true            # use JSON-LD / microdata article lists when present
 native_feeds: true               # read RSS/Atom/JSON Feed responses as feeds
 trust_env_proxy: false           # honor HTTP(S)_PROXY / NO_PROXY / .netrc
+history_retention_days: 365      # item history kept by watch (0 = forever)
 ```
 
 Cached specs live under `<cache_dir>/specs/` and cached page content under

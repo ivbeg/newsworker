@@ -263,7 +263,10 @@ class SMTPChannel:
 
 
 def _item_text(item: Mapping[str, Any]) -> tuple:
-    return str(item.get("title") or "News update"), str(item.get("link") or "")
+    title = str(item.get("title") or "News update")
+    if item.get("updated"):
+        title = "Updated: " + title
+    return title, str(item.get("link") or "")
 
 
 def _send_json(
