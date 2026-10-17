@@ -80,14 +80,17 @@ pip install -e ".[dev]"
 
 ### Docker
 
-Run the feed server in a container. The server listens on `0.0.0.0:8787` inside
-the container; publish the port on loopback only unless you have configured API
-tokens and an allow-list (see [Security](docs/docs/guides/security.md)):
+Run the feed server from the published image (`linux/amd64` and `linux/arm64`).
+The server listens on `0.0.0.0:8787` inside the container; publish the port on
+loopback only unless you have configured API tokens and an allow-list (see
+[Security](docs/docs/guides/security.md)):
 
 ```bash
-docker build -t newsworker .
-docker run --rm -p 127.0.0.1:8787:8787 -v newsworker-home:/home/newsworker/.newsworker newsworker
+docker run --rm -p 127.0.0.1:8787:8787 -v newsworker-home:/home/newsworker/.newsworker ghcr.io/ivbeg/newsworker
+docker run --rm ghcr.io/ivbeg/newsworker extract https://example.com/news -f rss   # any subcommand
 ```
+
+Build it yourself with `docker build -t newsworker .`.
 
 Or with Compose (persists config/cache in a named volume):
 

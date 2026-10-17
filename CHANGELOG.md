@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowed qddate session active for later requests.
 
 ### Added
+- **Release automation** — pushing a `vX.Y.Z` tag checks the version, builds
+  and validates the distributions, creates the GitHub release from the
+  CHANGELOG, and publishes a multi-arch image to `ghcr.io/ivbeg/newsworker`.
+  PyPI upload via trusted publishing is opt-in (`PYPI_TRUSTED_PUBLISHING`).
+  The image now runs any subcommand (`ENTRYPOINT newsworker`, default `serve`),
+  includes Prometheus metrics, has a health check, and uses Python 3.13.
 - **MCP server** — `newsworker mcp` (extra `mcp`) serves `extract_news`,
   `find_feeds` and `explain_page` as read-only Model Context Protocol tools
   over stdio, using the CLI's fetch policy, caches and settings.
