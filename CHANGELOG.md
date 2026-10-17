@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowed qddate session active for later requests.
 
 ### Added
+- **`watch` over many sources** — `--urls-file` and `--from-opml` (with
+  `--opml-pages`) watch a whole list in one process. Sources are polled in
+  turn with per-host pacing, failures are isolated, and a finite run reports
+  every failed source.
 - **Native feeds** — a URL that serves RSS, Atom or JSON Feed is read as a
   feed (strategy `native_feed`) and normalised to the same item contract:
   publisher entry ids (kept as `unique_id`/`native_id`), dates with offsets,
