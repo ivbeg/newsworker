@@ -27,6 +27,10 @@ SETTINGS_HELP: dict[str, dict[str, str]] = {
         "request_timeout": "Timeout of one HTTP request, in seconds.",
         "max_content_bytes": "Largest response body accepted, in bytes.",
         "verify_tls": "Verify TLS certificates.",
+        "legacy_tls_ciphers": (
+            "Also offer TLS 1.2 ciphers without forward secrecy (static RSA key exchange) "
+            "for servers that accept nothing else; certificates are still verified."
+        ),
         "respect_robots": "Honour robots.txt, including `Crawl-delay` and `Request-rate`.",
         "proxy": "Proxy URL for outgoing requests (empty = direct).",
         "trust_env_proxy": "Honour `HTTP(S)_PROXY`, `NO_PROXY` and `.netrc` from the environment.",

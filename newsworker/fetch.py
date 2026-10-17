@@ -5,8 +5,11 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import email.utils
+import functools
 import ipaddress
+import re
 import socket
+import ssl
 import threading
 import time
 from collections import OrderedDict
@@ -20,6 +23,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.util.retry import Retry
+from urllib3.util.ssl_ import create_urllib3_context
 
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 SAFE_SCHEMES = {"http", "https"}
@@ -28,6 +32,13 @@ SAFE_SCHEMES = {"http", "https"}
 SENSITIVE_HEADERS = frozenset(
     {"authorization", "cookie", "proxy-authorization", "x-api-key", "x-auth-token"}
 )
+
+#: Cipher list for ``legacy_tls_ciphers``: OpenSSL's defaults, which keep the
+#: TLS 1.2 suites with static RSA key exchange that Python's own list drops.
+#: Certificate checks and OpenSSL security level 2 still apply.
+LEGACY_TLS_CIPHERS = "DEFAULT"
+
+_HANDSHAKE_FAILURE = re.compile(r"handshake[ _]failure", re.IGNORECASE)
 
 
 class FetchError(RuntimeError):
@@ -76,6 +87,9 @@ class FetchPolicy:
     timeout: float = 30.0
     max_bytes: int = 10 * 1024 * 1024
     verify_tls: bool = True
+    #: Also offer the TLS 1.2 suites Python leaves out (static RSA key
+    #: exchange, no forward secrecy) for servers that accept nothing else.
+    legacy_tls_ciphers: bool = False
     redirect_limit: int = 5
     allowed_hosts: tuple[str, ...] = ()
     block_private_hosts: bool = True
@@ -422,6 +436,30 @@ class GuardedHTTPSConnectionPool(HTTPSConnectionPool):
     ConnectionCls = GuardedHTTPSConnection
 
 
+@functools.lru_cache(maxsize=2)
+def legacy_ssl_context(verify: bool) -> ssl.SSLContext:
+    """A shared TLS context offering :data:`LEGACY_TLS_CIPHERS`.
+
+    One context per verification mode, so connection pools keyed on it are reused.
+    Trust anchors come from requests, which hands each pool its CA bundle.
+    """
+    return create_urllib3_context(
+        cert_reqs=ssl.CERT_REQUIRED if verify else ssl.CERT_NONE,
+        ciphers=LEGACY_TLS_CIPHERS,
+    )
+
+
+def with_tls_hint(message: str, policy: FetchPolicy) -> str:
+    """Point at ``legacy_tls_ciphers`` when a server refused the TLS handshake."""
+    if policy.legacy_tls_ciphers or not _HANDSHAKE_FAILURE.search(message):
+        return message
+    return (
+        f"{message}. The server may accept only legacy TLS ciphers without forward "
+        "secrecy; if you trust it, retry with --legacy-tls-ciphers "
+        "(setting legacy_tls_ciphers: true)."
+    )
+
+
 class GuardedHTTPAdapter(HTTPAdapter):
     """Requests adapter whose direct connections enforce the address policy."""
 
@@ -431,6 +469,15 @@ class GuardedHTTPAdapter(HTTPAdapter):
             "http": GuardedHTTPConnectionPool,
             "https": GuardedHTTPSConnectionPool,
         }
+
+    def build_connection_pool_key_attributes(self, request, verify, cert=None):
+        host_params, pool_kwargs = super().build_connection_pool_key_attributes(
+            request, verify, cert
+        )
+        state = _ACTIVE_GUARD.get()
+        if state is not None and state[0].legacy_tls_ciphers and host_params["scheme"] == "https":
+            pool_kwargs["ssl_context"] = legacy_ssl_context(verify is not False)
+        return host_params, pool_kwargs
 
 
 def new_session(retries: Retry | None = None) -> requests.Session:
@@ -548,7 +595,7 @@ class RequestsTransport:
                     blocked = _find_cause(exc, AddressPolicyError)
                     if blocked is not None:
                         raise blocked from exc
-                    raise FetchError(str(exc)) from exc
+                    raise FetchError(with_tls_hint(str(exc), policy)) from exc
                 finally:
                     _ACTIVE_GUARD.reset(token)
 
@@ -642,6 +689,7 @@ def policy_from_settings(settings: Any, *, operation: str = "source") -> FetchPo
         timeout=settings.request_timeout,
         max_bytes=max_bytes,
         verify_tls=settings.verify_tls,
+        legacy_tls_ciphers=bool(getattr(settings, "legacy_tls_ciphers", False)),
         redirect_limit=getattr(settings, "redirect_limit", 5),
         allowed_hosts=tuple(getattr(settings, "allowed_hosts", ()) or ()),
         block_private_hosts=getattr(settings, "block_private_hosts", True),

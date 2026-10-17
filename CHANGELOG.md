@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Legacy TLS ciphers** — `legacy_tls_ciphers` (CLI `--legacy-tls-ciphers` on
+  `analyze` and `extract`, env `NEWSWORKER_LEGACY_TLS_CIPHERS`) lets newsworker
+  also offer TLS 1.2 ciphers with static RSA key exchange, for servers that
+  accept nothing else (for example `minfin.am`). Off by default; certificates
+  are still verified. A TLS handshake failure now suggests the option.
+
+### Changed
+- Requires `requests` 2.32.2 or newer.
+
 ## [1.4.0] - 2026-10-17
 
 Reliability, accuracy and reach: correct dates and time zones, self-healing

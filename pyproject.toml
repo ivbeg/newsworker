@@ -21,7 +21,7 @@ dependencies = [
     "typer>=0.9,<1",
     "feedgen>=1.0,<2",
     "pyyaml>=6,<7",
-    "requests>=2.31,<3",
+    "requests>=2.32.2,<3",
     "urllib3>=1.26,<3",
     "feedparser>=6,<7",
 ]

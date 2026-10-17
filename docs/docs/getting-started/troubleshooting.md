@@ -32,6 +32,11 @@ For pages without a news listing, use dynamic extraction (`extract` without
 ## Fetch blocked or empty
 
 - TLS failures: only use `--insecure` when you understand the risk.
+- `SSLV3_ALERT_HANDSHAKE_FAILURE`: the server accepts only old TLS 1.2 ciphers
+  with static RSA key exchange, which Python no longer offers. If you trust the
+  site, pass `--legacy-tls-ciphers`; commands without the flag read
+  `legacy_tls_ciphers: true` or `NEWSWORKER_LEGACY_TLS_CIPHERS=true`.
+  Certificates are still verified; only forward secrecy is lost.
 - `robots.txt` denials: `--ignore-robots` overrides per run; the default is to honor robots.
 - Private/loopback hosts are blocked unless you opt into intranet crawling. See
   [security](/guides/security) and [runtime configuration](/guides/runtime-configuration).

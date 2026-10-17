@@ -33,6 +33,7 @@ newsworker extract URL [OPTIONS]
 | `--header` | | — | Extra HTTP header `Key: Value` (repeatable). |
 | `--cookies` | | — | Path to a Netscape/Mozilla cookie jar file. |
 | `--insecure` | | `false` | Disable TLS certificate verification for this run. |
+| `--legacy-tls-ciphers` | | `false` | Also offer TLS 1.2 ciphers without forward secrecy, for servers that accept nothing else. |
 | `--ignore-robots` | | `false` | Fetch even when `robots.txt` disallows it. |
 | `--json-logs` | | `false` | Emit logs as structured JSON. |
 | `--no-cache` | | `false` | Bypass the spec and content caches for this run. |

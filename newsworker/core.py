@@ -99,6 +99,7 @@ def _configure_fetch_settings(
     *,
     user_agent=None,
     insecure=False,
+    legacy_tls_ciphers=False,
     ignore_robots=False,
     timeout=None,
     proxy=None,
@@ -113,6 +114,8 @@ def _configure_fetch_settings(
         settings.user_agent = user_agent
     if insecure:
         settings.verify_tls = False
+    if legacy_tls_ciphers:
+        settings.legacy_tls_ciphers = True
     if ignore_robots:
         settings.respect_robots = False
     if timeout is not None:
@@ -133,6 +136,7 @@ def _resolve_fetch_settings(
     *,
     user_agent=None,
     insecure=False,
+    legacy_tls_ciphers=False,
     ignore_robots=False,
     timeout=None,
     proxy=None,
@@ -148,6 +152,8 @@ def _resolve_fetch_settings(
     if insecure:
         cli["verify_tls"] = False
         _silence_insecure_warnings()
+    if legacy_tls_ciphers:
+        cli["legacy_tls_ciphers"] = True
     if ignore_robots:
         cli["respect_robots"] = False
     if timeout is not None:
@@ -182,6 +188,7 @@ def _extractor_from_settings(settings):
     extractor.block_private_hosts = settings.block_private_hosts
     extractor.allow_private_hosts = settings.allow_private_hosts
     extractor.trusted_proxy = settings.trusted_proxy
+    extractor.legacy_tls_ciphers = settings.legacy_tls_ciphers
     return extractor
 
 
@@ -374,6 +381,11 @@ def analyze(
         "--insecure",
         help="Disable TLS certificate verification for this run (not recommended).",
     ),
+    legacy_tls_ciphers: bool = typer.Option(
+        False,
+        "--legacy-tls-ciphers",
+        help="Also offer TLS 1.2 ciphers without forward secrecy, for old servers.",
+    ),
     ignore_robots: bool = typer.Option(
         False,
         "--ignore-robots",
@@ -407,6 +419,7 @@ def analyze(
             config,
             user_agent=user_agent,
             insecure=insecure,
+            legacy_tls_ciphers=legacy_tls_ciphers,
             ignore_robots=ignore_robots,
             timeout=timeout,
             proxy=proxy,
@@ -574,6 +587,11 @@ def extract(
         "--insecure",
         help="Disable TLS certificate verification for this run (not recommended).",
     ),
+    legacy_tls_ciphers: bool = typer.Option(
+        False,
+        "--legacy-tls-ciphers",
+        help="Also offer TLS 1.2 ciphers without forward secrecy, for old servers.",
+    ),
     ignore_robots: bool = typer.Option(
         False,
         "--ignore-robots",
@@ -614,6 +632,7 @@ def extract(
             config,
             user_agent=user_agent,
             insecure=insecure,
+            legacy_tls_ciphers=legacy_tls_ciphers,
             ignore_robots=ignore_robots,
             timeout=timeout,
             proxy=proxy,

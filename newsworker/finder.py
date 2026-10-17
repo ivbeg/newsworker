@@ -94,6 +94,7 @@ class FeedsFinder:
             timeout=self.settings.request_timeout,
             max_bytes=self.settings.max_content_bytes,
             verify_tls=self.settings.verify_tls,
+            legacy_tls_ciphers=self.settings.legacy_tls_ciphers,
             redirect_limit=self.settings.redirect_limit,
             allowed_hosts=tuple(self.settings.allowed_hosts),
             block_private_hosts=self.settings.block_private_hosts,

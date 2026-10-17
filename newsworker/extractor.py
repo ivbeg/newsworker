@@ -109,6 +109,7 @@ class FeedExtractor:
         self.block_private_hosts = True
         self.allow_private_hosts = False
         self.trusted_proxy = False
+        self.legacy_tls_ciphers = False
         #: Outbound policy from :func:`newsworker.fetch.policy_from_settings`;
         #: when unset (plain library use) it is assembled from the attributes above.
         self.base_policy: FetchPolicy | None = None
@@ -639,6 +640,7 @@ class FeedExtractor:
             timeout=self.timeout,
             max_bytes=self.max_bytes,
             verify_tls=self.verify_tls,
+            legacy_tls_ciphers=getattr(self, "legacy_tls_ciphers", False),
             redirect_limit=getattr(self, "redirect_limit", 5),
             allowed_hosts=tuple(getattr(self, "allowed_hosts", ()) or ()),
             block_private_hosts=getattr(self, "block_private_hosts", True),
