@@ -27,17 +27,27 @@ def test_items_seen_by_1_3_are_not_queued_again(tmp_path):
     legacy.close()
 
     store = DedupStore(path)
-    inserted = store.enqueue(
-        FEED,
-        [_item("https://example.com/1", "old-1"), _item("https://example.com/2", "old-2")],
-        channel="webhook",
-        destination="hook",
-    )
+    try:
+        inserted = store.enqueue(
+            FEED,
+            [_item("https://example.com/1", "old-1"), _item("https://example.com/2", "old-2")],
+            channel="webhook",
+            destination="hook",
+        )
+    finally:
+        store.close()
     assert [record.uid for record in inserted] == ["link-id-2"]
 
 
 def test_outbox_rows_under_the_old_id_count_as_known(tmp_path):
     store = DedupStore(str(tmp_path / "dedup.sqlite"))
+    try:
+        _check_outbox_alias(store)
+    finally:
+        store.close()
+
+
+def _check_outbox_alias(store):
     first = store.enqueue(
         FEED, [{"title": "t", "unique_id": "old-1"}], channel="webhook", destination="hook"
     )
