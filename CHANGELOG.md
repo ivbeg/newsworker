@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowed qddate session active for later requests.
 
 ### Added
+- **MCP server** — `newsworker mcp` (extra `mcp`) serves `extract_news`,
+  `find_feeds` and `explain_page` as read-only Model Context Protocol tools
+  over stdio, using the CLI's fetch policy, caches and settings.
 - **Slack, Discord and Matrix delivery** — `--channel slack|discord|matrix`,
   configured with `slack_webhook_url`, `discord_webhook_url` and
   `matrix_homeserver` / `matrix_token` / `matrix_room` (secrets are redacted).

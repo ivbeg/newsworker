@@ -52,6 +52,7 @@ metrics = ["prometheus_client"]
 fulltext = ["trafilatura"]
 async = ["aiohttp"]
 browser = ["playwright>=1.45,<2"]
+mcp = ["mcp>=1.10,<2"]
 
 [project.scripts]
 newsworker = "newsworker.__main__:main"
@@ -121,6 +122,7 @@ files = [
     "newsworker/language.py",
     "newsworker/undated.py",
     "newsworker/native.py",
+    "newsworker/mcp_server.py",
     "newsworker/spec/model.py",
     "newsworker/spec/selectors.py",
     "newsworker/spec/execute.py",
