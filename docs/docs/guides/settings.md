@@ -46,6 +46,7 @@ use_async: false                 # use aiohttp for batch --async (needs [async] 
 full_text: false                 # follow item links and populate content (needs [fulltext])
 full_text_workers: 4             # concurrency for --full-text fetches
 structured_data: true            # use JSON-LD / microdata article lists when present
+native_feeds: true               # read RSS/Atom/JSON Feed responses as feeds
 trust_env_proxy: false           # honor HTTP(S)_PROXY / NO_PROXY / .netrc
 ```
 

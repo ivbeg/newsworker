@@ -229,44 +229,56 @@ class FeedService:
                     context=context,
                 )
             extraction_url = context.response_meta.get("effective_url") or url
-            feed = self._extract(
-                extraction_url,
-                data,
-                explicit_spec=explicit_spec,
-                context=context,
+            native = (
+                None
+                if explicit_spec is not None or not getattr(self.settings, "native_feeds", True)
+                else self._native_feed(data, extraction_url, context)
             )
-            if max_pages and max_pages > 1:
-                self._follow_pagination(
+            if native is not None:
+                feed = native
+            else:
+                feed = self._extract(
                     extraction_url,
                     data,
-                    explicit_spec,
-                    feed,
-                    max_pages,
+                    explicit_spec=explicit_spec,
                     context=context,
-                    revalidate=revalidate,
                 )
-            if getattr(self.settings, "structured_data", True):
-                feed = self._apply_structured_data(feed, data, extraction_url, context)
-            if not feed.get("items") and self.settings.undated_fallback:
-                feed = self._extract_undated(data, extraction_url, context)
-            if (
-                not feed.get("items")
-                and self.settings.render_fallback
-                and not context.metadata_get("rendered", False)
-                and _looks_client_rendered(data)
-            ):
-                try:
-                    rendered = self._render(url, context)
-                except Exception as exc:
-                    if diagnostics:
-                        diagnostics.warnings.append(
-                            f"Browser fallback failed: {type(exc).__name__}"
+                if max_pages and max_pages > 1:
+                    self._follow_pagination(
+                        extraction_url,
+                        data,
+                        explicit_spec,
+                        feed,
+                        max_pages,
+                        context=context,
+                        revalidate=revalidate,
+                    )
+                if getattr(self.settings, "structured_data", True):
+                    feed = self._apply_structured_data(feed, data, extraction_url, context)
+                if not feed.get("items") and self.settings.undated_fallback:
+                    feed = self._extract_undated(data, extraction_url, context)
+                if (
+                    not feed.get("items")
+                    and self.settings.render_fallback
+                    and not context.metadata_get("rendered", False)
+                    and _looks_client_rendered(data)
+                ):
+                    try:
+                        rendered = self._render(url, context)
+                    except Exception as exc:
+                        if diagnostics:
+                            diagnostics.warnings.append(
+                                f"Browser fallback failed: {type(exc).__name__}"
+                            )
+                    else:
+                        extraction_url = (
+                            context.response_meta.get("effective_url") or extraction_url
                         )
-                else:
-                    extraction_url = context.response_meta.get("effective_url") or extraction_url
-                    feed = self._extract(extraction_url, rendered, context=context)
+                        feed = self._extract(extraction_url, rendered, context=context)
             sanitize_feed_links(feed, fallback_url=extraction_url)
-            assign_item_identities(feed.get("items", []), page_url=extraction_url)
+            if native is None:
+                # Native feeds keep the publisher's entry ids.
+                assign_item_identities(feed.get("items", []), page_url=extraction_url)
             enrich_feed(feed)
             if self.settings.full_text:
                 self._add_full_text(feed, context)
@@ -370,6 +382,42 @@ class FeedService:
                 selectors={"items": spec.items.selector},
             )
             diagnostics.chosen_strategy = strategy
+        return feed
+
+    def _native_feed(self, data, url, context):
+        """Normalise an RSS/Atom/JSON Feed response, or ``None`` for HTML pages."""
+        from .native import parse_native_feed
+
+        headers = context.response_meta.get("headers") or {}
+        content_type = headers.get("Content-Type") or headers.get("content-type")
+        started = time.monotonic()
+        try:
+            feed = parse_native_feed(
+                data,
+                url,
+                content_type=content_type,
+                default_timezone=self.settings.default_timezone,
+            )
+        except Exception as exc:  # noqa: BLE001 - fall back to HTML extraction
+            log.warning("Could not parse %s as a native feed: %s", url, exc)
+            return None
+        if feed is None:
+            return None
+        feed["language"] = self.settings.default_language or resolve_feed_language(
+            stored_language=feed.get("language"),
+            content_language=context.content_language,
+            text_samples=[item["title"] for item in feed["items"] if item.get("title")],
+        )
+        diagnostics = context.diagnostics
+        if diagnostics:
+            diagnostics.add_attempt(
+                "native_feed",
+                "success" if feed["items"] else "empty",
+                item_count=len(feed["items"]),
+                elapsed_ms=(time.monotonic() - started) * 1000,
+            )
+            diagnostics.chosen_strategy = "native_feed"
+            diagnostics.metadata["native_format"] = feed.get("native_format")
         return feed
 
     def _apply_structured_data(self, feed, data, url, context):
