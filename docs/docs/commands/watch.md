@@ -24,6 +24,7 @@ newsworker watch URL [OPTIONS]
 | `--format` | `-f` | `json` | Stdout output: `json` writes one JSON object per line (JSON Lines); `rss`, `atom`, `jsonfeed`, `csv`, `html`, `markdown` and `yaml` write one document per poll with that poll's new items. |
 | `--max-pages` | | `1` | Pages to follow per poll (pagination). |
 | `--max-iterations` | | `0` | Stop after N polls (`0` = run until interrupted). |
+| `--once` | | `false` | Poll every source once and exit; same as `--max-iterations 1`. |
 | `--deliver-updates` | | `false` | Deliver an item again (marked `updated`) when its title, text, link or date changes. |
 | `--config` | `-c` | *(default)* | Path to settings YAML. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
@@ -35,8 +36,8 @@ newsworker watch "https://example.com/news" --channel webhook \
   --webhook https://hooks.example/new --max-pages 3
 ```
 
-The loop shuts down cleanly on Ctrl-C / SIGTERM. Use `--max-iterations N` to
-stop after N polls (handy for cron-style single runs).
+The loop shuts down cleanly on Ctrl-C / SIGTERM. Use `--once` from cron (one
+poll of every source, then exit) or `--max-iterations N` to stop after N polls.
 
 With several sources, each poll visits them one after another; per-host pacing
 keeps the load on any one site bounded, a failing source does not stop the

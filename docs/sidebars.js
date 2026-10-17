@@ -58,6 +58,7 @@ const sidebars = {
         'commands/cache',
         'commands/spec',
         'commands/parsedate',
+        'commands/languages',
       ],
     },
     {

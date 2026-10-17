@@ -71,3 +71,38 @@ LANGUAGE_SUPPORT.update(
 
 def support_for(code: str) -> LanguageSupport | None:
     return LANGUAGE_SUPPORT.get(code.lower().split("-", 1)[0])
+
+
+_COLUMNS = (
+    ("date", "Date"),
+    ("metadata", "Metadata"),
+    ("text", "Text"),
+    ("extraction", "Extraction"),
+)
+
+
+def support_groups():
+    """Languages grouped by identical support levels, best supported first."""
+    groups: Dict[tuple, list] = {}
+    for entry in LANGUAGE_SUPPORT.values():
+        levels = tuple(getattr(entry, key) for key, _ in _COLUMNS)
+        groups.setdefault(levels, []).append(entry)
+    rank = {"supported": 0, "partial": 1}
+    return sorted(
+        ((levels, sorted(entries, key=lambda e: e.name)) for levels, entries in groups.items()),
+        key=lambda group: (
+            rank.get(group[0][3], 2),
+            -sum(level == "tested" for level in group[0]),
+            group[1][0].name,
+        ),
+    )
+
+
+def support_markdown() -> str:
+    """The support matrix as the Markdown table shown in the documentation."""
+    header = "| Language | " + " | ".join(title for _, title in _COLUMNS) + " |"
+    lines = [header, "| --- |" + " --- |" * len(_COLUMNS)]
+    for levels, entries in support_groups():
+        names = ", ".join(f"{e.name} (`{e.code}`)" for e in entries)
+        lines.append(f"| {names} | " + " | ".join(levels) + " |")
+    return "\n".join(lines) + "\n"

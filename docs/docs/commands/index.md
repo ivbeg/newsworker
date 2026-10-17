@@ -24,6 +24,7 @@ options. Add `--verbose` / `-v` to any command for detailed execution logs.
 | `cache` | [`/commands/cache`](/commands/cache) |
 | `spec` | [`/commands/spec`](/commands/spec) |
 | `parsedate` | [`/commands/parsedate`](/commands/parsedate) |
+| `languages` | [`/commands/languages`](/commands/languages) |
 
 Shared fetch flags (`--user-agent`, `--proxy`, `--timeout`, `--header`,
 `--cookies`, `--insecure`, `--ignore-robots`, `--language`, `--config`) appear
