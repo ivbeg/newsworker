@@ -67,7 +67,7 @@ python-dateutil==2.9.0.post0
     # via feedgen
 pyyaml==6.0.3
     # via newsworker (pyproject.toml)
-qddate==1.0.16
+qddate==1.0.17
     # via newsworker (pyproject.toml)
 requests==2.34.2
     # via newsworker (pyproject.toml)
