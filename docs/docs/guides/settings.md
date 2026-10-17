@@ -17,7 +17,9 @@ work:
 Settings are read from a YAML file, by default `~/.newsworker/config.yaml`
 (created with defaults on first run). Point to a different file with
 `--config` / `-c`. Environment variables and CLI flags override file values;
-see [runtime configuration](/guides/runtime-configuration).
+see [runtime configuration](/guides/runtime-configuration). The example below
+shows the common settings; the [settings reference](/guides/settings-reference)
+lists every one with its default and environment variable.
 
 ```yaml
 cache_dir: ~/.newsworker/cache   # where cached specs and page content live

@@ -15,8 +15,9 @@ docker run --rm -p 127.0.0.1:8787:8787 \
 ```
 
 The default command is the feed server on `0.0.0.0:8787` inside the container,
-with a health check on `/health/live` and Prometheus metrics at `/metrics`. Any
-other subcommand works as well:
+with a health check on `/health/live`. The image includes the `metrics` extra;
+expose Prometheus metrics at `/metrics` with `-e NEWSWORKER_METRICS_ENABLED=true`.
+Any other subcommand works as well:
 
 ```bash
 docker run --rm ghcr.io/ivbeg/newsworker extract https://example.com/news -f rss

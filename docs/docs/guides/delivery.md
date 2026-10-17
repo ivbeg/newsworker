@@ -1,6 +1,6 @@
 ---
 title: "Watch delivery"
-description: "Outbox guarantees and stdout, webhook, SMTP, Telegram, Slack, Discord and Matrix channels"
+description: "Outbox guarantees and stdout, webhook, SMTP, Telegram, Slack, Discord, Matrix and Mastodon channels"
 ---
 
 # Watch delivery guarantees and channels

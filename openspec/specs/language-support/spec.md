@@ -2,7 +2,6 @@
 
 ## Purpose
 Evidence-based support for non-English pages: a language matrix, fixture packs, upstream qddate coordination and language overrides.
-
 ## Requirements
 ### Requirement: Evidence-based Language Support Matrix
 The project SHALL classify language support from committed fixtures for date parsing,
@@ -43,4 +42,12 @@ explain ambiguous or fallback results when diagnostics are requested.
 #### Scenario: Automatic detection is ambiguous
 - **WHEN** no language receives sufficient evidence
 - **THEN** the configured default SHALL be used and diagnostics SHALL report the ambiguity
+
+### Requirement: Generated Language Documentation
+The language table in the documentation SHALL be generated from the support
+matrix in code, and a test SHALL fail when they differ.
+
+#### Scenario: Support level changes
+- **WHEN** a language's support level changes in code without updating the docs
+- **THEN** the test suite SHALL fail
 

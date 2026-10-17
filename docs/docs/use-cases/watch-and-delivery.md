@@ -1,6 +1,6 @@
 ---
 title: "Watch and delivery"
-description: "Poll a page and deliver only new items to stdout, webhooks, SMTP, or Telegram"
+description: "Poll pages and deliver only new items to stdout, webhooks, e-mail or chat"
 ---
 
 # Watch and delivery
@@ -15,6 +15,11 @@ newsworker watch "https://example.com/news" --channel webhook \
 newsworker watch "https://example.com/news" --channel smtp \
   --smtp-recipient alerts@example.com
 ```
+
+Watch many sources at once with `--urls-file` or `--from-opml`, post to chat
+with `--channel slack|discord|matrix|mastodon|telegram`, and use `--once` from
+cron. `watch` also records item history (`newsworker history`) and, with
+`--deliver-updates`, delivers an edited item again.
 
 Items enter a SQLite outbox. Delivery is acknowledged only after the destination
 reports success. Pending/retry state survives restart. Receivers should honor

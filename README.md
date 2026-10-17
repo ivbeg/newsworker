@@ -6,7 +6,7 @@
 
 > Turn any news page into an RSS/Atom feed — even when the site publishes no feed at all.
 
-`newsworker` is a Python 3 library and command-line tool that **extracts news feeds from plain HTML pages**. It is built for the common case where a site publishes fresh news but offers no RSS/ATOM feed, and where generic "page change" monitors are too noisy to be useful.
+`newsworker` is a Python library and command-line tool that **extracts news feeds from plain HTML pages**. It is built for the common case where a site publishes fresh news but offers no RSS/Atom feed, and where generic "page change" monitors are too noisy to be useful. It can also watch many sources and deliver only new items (webhook, e-mail, Telegram, Slack, Discord, Matrix, Mastodon), serve feeds to RSS readers, and give AI assistants news tools over MCP.
 
 The extracted feed can be emitted as **JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML, Markdown, YAML or OPML**, so you can plug it straight into a feed reader, a pipeline, or your own storage.
 
@@ -25,10 +25,13 @@ The extracted feed can be emitted as **JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML
   - [`analyze` — generate a reusable spec](#analyze--generate-a-reusable-spec)
   - [`batch` — extract feeds from many pages](#batch--extract-feeds-from-many-pages)
   - [Plugins, bridges and async transport](#plugins-bridges-and-async-transport)
-  - [`watch` — poll a page and deliver only new items](#watch--poll-a-page-and-deliver-only-new-items)
+  - [`watch` — poll pages and deliver only new items](#watch--poll-pages-and-deliver-only-new-items)
+  - [`history` — export what watch has seen](#history--export-what-watch-has-seen)
+  - [`mcp` — news tools for AI assistants](#mcp--news-tools-for-ai-assistants)
   - [`cache` — inspect and manage caches](#cache--inspect-and-manage-caches)
   - [`spec` — validate a parsing spec](#spec--validate-a-parsing-spec)
   - [`parsedate` — inspect date parsing](#parsedate--inspect-date-parsing)
+  - [`languages` — what is supported](#languages--what-is-supported)
 - [Settings and caching](#settings-and-caching)
 - [Output formats](#output-formats)
 - [Library usage](#library-usage)
@@ -48,11 +51,13 @@ The extracted feed can be emitted as **JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML
 
 The core idea is simple. Most news pages carry a **publication date** next to each item — `2017-09-27`, `1 jul 2016`, `18/06/2018`, and hundreds of other variants. `newsworker`:
 
-1. **Finds every date** on the page using [qddate](https://github.com/ivbeg/qddate), a fast pattern-based date parser that recognizes 340+ date formats across many languages.
+1. **Finds every date** on the page using [qddate](https://github.com/ivbeg/qddate), a fast pattern-based date parser (over 1,000 date and time formats across many languages), plus `<time datetime>` attributes and relative dates such as "3 hours ago" or "вчера".
 2. **Clusters** repeated, similarly-structured date nodes to tell apart a *page* date (footer, "last updated") from the *news list* area.
 3. **Reconstructs each news item** around its date node, pulling out the title, description, link and image.
 
 The result is a structured feed you can serialize into whatever format you need.
+
+Date clustering is one strategy among several. A URL that already serves RSS, Atom or JSON Feed is read as a feed; plugins and site bridges come next, then cached specs, date clustering, JSON-LD/microdata, and the opt-in undated and browser-rendering fallbacks. `newsworker explain URL` shows which one produced the result and why — see [how it works](docs/docs/getting-started/how-it-works.md).
 
 ---
 
@@ -149,6 +154,7 @@ Commands:
   cache      Inspect and manage the spec and content caches
   spec       Validate a parsing spec without fetching
   parsedate  Parse a date/time string (debugging helper)
+  languages  Show the language support matrix
 ```
 
 Add `--verbose` / `-v` to any command for detailed execution logs. Run
@@ -184,6 +190,11 @@ newsworker extract URL [OPTIONS]
 | `--no-cache` | | `false` | Bypass the spec and content caches for this run. |
 | `--refresh` | | `false` | Force re-fetching the page, ignoring cached content. |
 | `--fail-on-empty` | | `false` | Exit with status `3` when no items are extracted (useful in cron/CI). |
+| `--file` | | — | Extract from a local HTML file instead of a URL (`-` for stdin). |
+| `--base-url` | | — | Base URL used to resolve links in local HTML. |
+| `--render` | | `false` | Render the page in a headless browser first (`browser` extra). |
+| `--undated` | | `false` | Allow the conservative fallback for listings that print no dates. |
+| `--explain` / `--explain-json` | | `false` | Print extraction diagnostics to stderr. |
 | `--config` | `-c` | *(default)* | Path to a settings YAML file (see [Settings and caching](#settings-and-caching)). |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 
@@ -243,9 +254,10 @@ Endpoints:
 | Route | Description |
 | --- | --- |
 | `GET /feed?url=<page>&format=atom` | Build a feed from `<page>`. `format` is one of `atom` (default), `rss`, `json`, `jsonfeed`, `csv`, `html`, `markdown`, `yaml`. Add `&refresh=1` to bypass the caches for one request. Responses include `ETag` / `Last-Modified`; send `If-None-Match` to receive `304 Not Modified`. |
-| `GET /health` | Health check (returns `ok`). |
-| `GET /metrics` | Prometheus metrics when `prometheus_client` is installed (`newsworker[metrics]`); otherwise `404`. |
-| `GET /` | Short usage help. |
+| `GET /health`, `/health/live` | Liveness (JSON with the version). |
+| `GET /health/ready` | Readiness: cache directory and free feed workers. |
+| `GET /metrics` | Prometheus metrics with the `metrics` extra and `metrics_enabled: true`; otherwise `404`. |
+| `GET /` | In a browser: a form to paste a page URL, preview its items and copy the feed link. Other clients get short usage help. |
 
 Example — start the server and subscribe from a reader:
 
@@ -288,7 +300,11 @@ newsworker scan URL [OPTIONS]
 | --- | --- | --- | --- |
 | `--format` | `-f` | `json` | Output format: `json`, `rss`, `atom`, `csv`, `opml`. |
 | `--sitemap` | | `false` | Also discover feed URLs from the site's `/sitemap.xml`. |
+| `--no-verify` | | `false` | Return candidates without fetching them for verification. |
+| `--max-workers` | | `8` | Candidate feeds verified at the same time. |
+| `--fail-on-empty` | | `false` | Exit with status `3` when no feeds are found. |
 | `--output` | `-o` | *(stdout)* | Write the result to a file instead of printing it. |
+| `--config` | `-c` | *(default)* | Path to a settings YAML file. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 
 Examples:
@@ -369,6 +385,9 @@ Extracts feeds from a list of pages concurrently, writing one file per URL.
 | `--max-workers` | | `4` | Concurrent workers (thread pool, or aiohttp when `--async`). |
 | `--async` | | `false` | Use the optional aiohttp transport (`newsworker[async]`). |
 | `--no-cache` | | `false` | Bypass caches for this run. |
+| `--manifest` | | — | Write a per-source manifest (status, items, timings, errors). |
+| `--manifest-format` | | `json` | Manifest format: `json` or `csv`. |
+| `--failure-policy` | | `strict` | `strict` exits non-zero on any failed source; `partial-success` only when all fail. |
 | `--config` | `-c` | *(default)* | Path to settings YAML. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 
@@ -388,7 +407,7 @@ newsworker batch --urls-file urls.txt -d out --async
 
 **Third-party plugins** register extractors via the `newsworker.extractors` setuptools
 entry-point group. Each plugin implements `matches(url)` and
-`extract(url, data=None, **kwargs)` returning the internal feed dict. Matching plugins
+`extract(url, data=None, **kwargs)` returning a feed dict (`newsworker.model.Feed`). Matching plugins
 are consulted before built-in spec/dynamic extraction.
 
 **Site bridges** are YAML files with a `match:` block (`host`, optional `path` fnmatch)
@@ -411,12 +430,14 @@ spec:
 ```
 
 **Async batch fetches** (`batch --async`) use `aiohttp` when the `[async]` extra is
-installed; otherwise the command falls back to the default thread pool.
+installed, with the same fetch policy and content cache as the threaded transport;
+otherwise the command falls back to the default thread pool.
 
-### `watch` — poll a page and deliver only new items
+### `watch` — poll pages and deliver only new items
 
-Polls a page on an interval, tracks which items it has already seen (in a SQLite
-store under the cache dir), and emits or POSTs only new items.
+Polls one page, a list of pages or an OPML file on an interval, tracks which items
+it has already seen (in a SQLite store under the cache dir), and emits or delivers
+only new items. Every item is also recorded in an item history (`newsworker history`).
 
 | Option | Alias | Default | Description |
 | --- | --- | --- | --- |
@@ -425,9 +446,12 @@ store under the cache dir), and emits or POSTs only new items.
 | `--interval` | `-i` | `300` | Seconds between polls. |
 | `--channel` | | `stdout` | Repeatable destination: `stdout`, `webhook`, `smtp`, `telegram`, `slack`, `discord`, `matrix`, `mastodon`. |
 | `--webhook` | | — | POST new items as JSON to this URL (with retry/backoff). |
+| `--smtp-recipient` | | — | Recipient for the `smtp` channel. |
+| `--telegram-chat-id` | | — | Chat for the `telegram` channel. |
 | `--format` | `-f` | `json` | Stdout output: JSON Lines for `json`, one document per poll for other formats. |
 | `--max-pages` | | `1` | Pages to follow per poll (pagination). |
 | `--max-iterations` | | `0` | Stop after N polls (`0` = run until interrupted). |
+| `--once` | | `false` | Poll every source once and exit (for cron). |
 | `--deliver-updates` | | `false` | Deliver an item again (marked `updated`) when its title, text, link or date changes. |
 | `--config` | `-c` | *(default)* | Path to settings YAML. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
@@ -443,10 +467,30 @@ newsworker watch --from-opml subscriptions.opml --channel telegram --telegram-ch
 newsworker watch "https://example.com/news" -i 600 --webhook https://hooks.example/new --max-pages 3
 ```
 
-The loop shuts down cleanly on Ctrl-C / SIGTERM. Use `--max-iterations N` to stop
-after N polls (handy for cron-style single runs); a finite run exits with status `1`
-when the page could not be fetched or deliveries are still pending. Queued
+The loop shuts down cleanly on Ctrl-C / SIGTERM. Use `--once` from cron or
+`--max-iterations N` to stop after N polls; a finite run exits with status `1`
+when a source could not be fetched or deliveries are still pending. Queued
 deliveries are retried before each poll, even while the source is unavailable.
+SMTP, Telegram, Slack, Discord, Matrix and Mastodon credentials come from the
+settings; see [delivery](docs/docs/guides/delivery.md).
+
+### `history` — export what watch has seen
+
+`watch` records every item with its first and last appearance and a version that
+grows when the title, text, link or date changes. Export it as JSON Lines or CSV:
+
+```bash
+newsworker history "https://example.com/news" --since 2026-10-01 -f csv -o history.csv
+```
+
+Add `--deliver-updates` to `watch` to be notified about edited items.
+
+### `mcp` — news tools for AI assistants
+
+`newsworker mcp` (extra `mcp`) runs a Model Context Protocol server on stdio with
+three read-only tools: `extract_news`, `find_feeds` and `explain_page`. They use the
+same fetch policy, caches and settings as the CLI. Register it in a client as a
+stdio server running `newsworker mcp`; see [MCP server](docs/docs/integrations/mcp.md).
 
 ### `cache` — inspect and manage caches
 
@@ -473,6 +517,16 @@ A debugging helper that shows how `qddate` interprets a date string.
 
 ```bash
 newsworker parsedate "18/06/2018"
+```
+
+### `languages` — what is supported
+
+Prints the evidence-based language matrix: whether dates, page metadata and page
+text are recognised for each language, and whether extraction is supported or
+partial (`--format text|json|markdown`).
+
+```bash
+newsworker languages
 ```
 
 ---
@@ -522,7 +576,12 @@ structured_data: true            # use JSON-LD / microdata article lists when pr
 native_feeds: true               # read RSS/Atom/JSON Feed responses as feeds
 trust_env_proxy: false           # honor HTTP(S)_PROXY / NO_PROXY / .netrc
 history_retention_days: 365      # item history kept by watch (0 = forever)
+default_timezone: UTC            # time zone for dates printed without an offset
 ```
+
+Every setting — server access control, delivery channels, rendering and undated
+fallbacks — is listed with its default and `NEWSWORKER_*` environment variable in
+the [settings reference](docs/docs/guides/settings-reference.md).
 
 Cached specs live under `<cache_dir>/specs/` and cached page content under
 `<cache_dir>/content/`, keyed by a hash of the source URL. Use `--no-cache`
@@ -588,7 +647,7 @@ extractor = FeedExtractor(filtered_text_length=150)
 feed, session = extractor.get_feed(url="https://www.eib.org/en/index.htm")
 ```
 
-`feed` is a dictionary shaped like:
+`feed` is a dictionary shaped like `newsworker.model.Feed` (a `TypedDict` that documents every key):
 
 ```python
 {
@@ -600,7 +659,7 @@ feed, session = extractor.get_feed(url="https://www.eib.org/en/index.htm")
         {
             "title": "Blockchain Challenge: coders at the EIB",
             "description": "...",
-            "pubdate": datetime.datetime(2018, 6, 18, 0, 0),
+            "pubdate": datetime.datetime(2018, 6, 18, 0, 0, tzinfo=datetime.timezone.utc),
             "unique_id": "f9d359f76118076c5331ffec3cdb82eb",
             "link": "https://www.youtube.com/watch?v=YlKa2LZgxhE",
             "author": "Jane Doe",          # optional, when detected
@@ -701,21 +760,18 @@ print(format_scan(results, fmt="opml"))
 
 ## Features
 
-- **MCP server** (`newsworker mcp`): `extract_news`, `find_feeds` and `explain_page` tools for AI
-  assistants and IDEs, with the same fetch policy as the CLI.
-- Reads **RSS, Atom and JSON Feed** natively: when a URL already serves a feed, its entries are
-  normalised (publisher ids, dates, authors, categories, content) instead of being scraped.
-- Identifies news blocks on arbitrary HTML pages using **date patterns** — 340+ patterns via [qddate](https://github.com/ivbeg/qddate), plus HTML `<time datetime="...">` attributes.
-- Very fast pattern matching built on `pyparsing`.
-- Discovers existing RSS/Atom feeds (`scan`), including optional **sitemap.xml** lookup, and falls back to HTML extraction when none exist.
-- Multiple output formats for `extract` (JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML, Markdown, YAML) and `scan` (JSON, RSS, Atom, CSV, OPML).
-- Reusable YAML **specs** for fast, deterministic re-crawling of known layouts (documented in [parsing specs](docs/docs/guides/parsing-specs.md)); **site bridges** for host/path overrides.
-- **Third-party plugins** via the `newsworker.extractors` entry-point group.
-- Local **feed server** with conditional GET (`ETag`/`304`), optional Prometheus metrics, and Docker/Compose deployment.
-- **Batch** and **watch** workflows with deduplication, webhooks, and optional async fetching.
-- Pattern caching, spec/content caches with CLI management (`cache stats|list|clear`).
-- Safe-by-default fetching: TLS verification and `robots.txt` compliance, with per-run overrides, plus proxy/header/cookie/timeout controls.
-- Automatic feed-language detection from page metadata and item text, fuzzy relative-date parsing, and optional per-item **author**, **categories**, and **full-text** enrichment.
+- Identifies news blocks on arbitrary HTML pages using **date patterns** via [qddate](https://github.com/ivbeg/qddate), HTML `<time datetime>` attributes and relative dates in eight languages; datelines (`GENEVA, 29 July 2022`) and day spans are understood.
+- Reads **RSS, Atom and JSON Feed** natively and **JSON-LD / microdata** article lists; opt-in fallbacks for undated listings and JavaScript-rendered pages.
+- Discovers existing feeds (`scan`): autodiscovery, JSON Feed, sitemaps and WebSub hubs.
+- Reusable YAML **specs** that heal themselves when a site changes layout, **site bridges** and third-party **plugins**.
+- `explain` shows why a page yields what it does; `languages` shows what is supported.
+- Output as JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML, Markdown, YAML or OPML.
+- **Feed server** with conditional GET, signed links for RSS readers, API tokens, rate limits, a browser form, health checks and optional Prometheus metrics.
+- **watch** over one page, a URL list or OPML with a durable outbox, item history and update notifications, delivering to webhooks, e-mail, Telegram, Slack, Discord, Matrix and Mastodon.
+- **batch** extraction with manifests and an optional aiohttp transport.
+- **MCP server** (`newsworker mcp`) with `extract_news`, `find_feeds` and `explain_page` tools for AI assistants.
+- **Safe, polite fetching**: TLS verification, `robots.txt`, private-address blocking checked at connection time, per-host pacing with `Crawl-delay` / `Retry-After`, bounded responses, credentials kept to their origin.
+- Docker image on GHCR (`linux/amd64`, `linux/arm64`).
 
 ---
 
@@ -724,7 +780,7 @@ print(format_scan(results, fmt="opml"))
 Fixture-backed full date/extraction support currently covers English, French, German,
 Italian, Portuguese, Russian, Spanish and Ukrainian, including relative dates such as
 "3 hours ago" / "вчера в 14:30". Bulgarian, Czech, and additional script detectors are
-partial; see [language support](docs/docs/guides/language-support.md).
+partial; run `newsworker languages` or see [language support](docs/docs/guides/language-support.md).
 
 ---
 
@@ -740,7 +796,7 @@ partial; see [language support](docs/docs/guides/language-support.md).
 ## Limitations
 
 - Not every language-specific date format is supported yet.
-- Right-aligned dates such as `Published - 27-01-2018` are intentionally unsupported — supporting them measurably increases false positives.
+- A date after a label is read only when the label is short (up to four words before a comma or a spaced dash, as in `Published - 27-01-2018`); dates inside sentences are not, to keep false positives out.
 - Pages that expose no dates at all are handled only by the opt-in, conservative
   `--undated` fallback (repeated cards with titles and links); results carry no
   publication dates.
@@ -783,9 +839,13 @@ make docs          # production build
 ```
 
 - [Getting started](docs/docs/getting-started/quick-start.md) — install, first extract, cookbook
-- [CLI reference](docs/docs/commands/index.md) — `extract`, `serve`, `scan`, `analyze`, `batch`, `watch`
+- [CLI reference](docs/docs/commands/index.md) — every command and option
 - [Parsing specs](docs/docs/guides/parsing-specs.md) — YAML format, field reference, `analyze` pipeline
+- [Settings reference](docs/docs/guides/settings-reference.md) — every setting, default and environment variable
 - [Runtime configuration](docs/docs/guides/runtime-configuration.md) — CLI / env / YAML precedence
+- [Delivery](docs/docs/guides/delivery.md) — watch outbox and channels
+- [MCP server](docs/docs/integrations/mcp.md) — tools for AI assistants
+- [Upgrading to 1.4](docs/docs/guides/migration-1-4.md) — behaviour changes from 1.3
 - [Security](docs/docs/guides/security.md) — fetch policy and server access controls
 - [Contributing](docs/docs/development/contributing.md) — local checks and OpenSpec workflow
 
@@ -802,13 +862,13 @@ Development setup:
 
 ```bash
 pip install -e ".[dev]"     # editable install with dev tools
-# or, for a reproducible pinned environment:
-pip install -r requirements.txt
+# or, exactly the dependency set CI's `locked` job tests:
+pip install -r requirements-lock.txt && pip install --no-deps -e .
 
 pre-commit install          # run ruff/format/whitespace hooks on commit
-make test                   # pytest (175+ tests, offline fixtures)
-make lint                   # ruff
-mypy                        # incremental type checking (see [tool.mypy])
+make test                   # pytest (450+ tests, offline fixtures, 232-page corpus)
+make lint                   # ruff format + lint
+mypy                        # type-checks the whole package
 ```
 
 Spec-driven changes live under `openspec/`; see `openspec/AGENTS.md` before adding features.
