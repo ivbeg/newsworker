@@ -25,7 +25,8 @@ its tools to AI assistants over MCP.
 ## Project Conventions
 
 ### Code Style
-- Ruff format and lint (pinned in pre-commit and CI); mypy on a growing module list.
+- Ruff format and lint (pinned in pre-commit and CI; UP, SIM, bandit and C901 ≤ 15 with a
+  `noqa` ratchet); mypy on the whole package.
 - Module docstrings describe responsibility; comments explain why, not what.
 - Prefer stdlib; new required dependencies must be justified. Optional features
   live behind extras and degrade with a clear message when the extra is missing.
@@ -44,18 +45,25 @@ Thin CLI layer (`core.py`) over a service layer (`service.py`); one concern per 
 - `formats.py` — json/rss/atom/csv/jsonfeed/html/markdown/yaml/opml rendering.
 - `server.py` — `/feed` (API tokens or signed links), `/health`, `/metrics`.
 - `watching.py`, `dedup.py`, `delivery.py` — watch polls, SQLite outbox with claim
-  tokens and item history, delivery channels.
+  tokens and item history, delivery channels (webhook, SMTP, Telegram, Slack,
+  Discord, Matrix, Mastodon).
 - `explain.py`, `diagnostics.py`, `evaluation.py` — explanations, strategy
   diagnostics, corpus scoring.
-- `mcp_server.py` — MCP tools; `settings.py` — layered settings.
+- `model.py` — `Feed` / `Item` TypedDicts, the contract between strategies and outputs.
+- `mcp_server.py` — MCP tools; `settings.py` — layered settings; `settings_doc.py` —
+  per-setting docs that generate the settings reference.
 
-Strategy order in `FeedService.get_feed()`: plugin → bridge → cached or fresh spec
-(re-analysed once if empty) → dynamic extraction → native feed → JSON-LD/microdata →
-undated (opt-in) → browser rendering (opt-in). Links are then sanitised and item
+Strategy order in `FeedService.get_feed()`: native feed (RSS/Atom/JSON Feed
+response, no explicit spec) → plugin → bridge → cached or fresh spec (re-analysed
+once if empty) → dynamic extraction → JSON-LD/microdata → undated (opt-in) →
+browser rendering (opt-in). Links are then sanitised and item
 identities assigned.
 
 ### Testing Strategy
-- pytest, no live network in unit tests; coverage gate at 85%.
+- pytest, no live network in unit tests; coverage gate at 85%. A `locked` CI job runs
+  the suite on `requirements-lock.txt`.
+- Generated documentation (language matrix, settings reference) and CLI option pages are
+  checked against the code by tests.
 - Labelled extraction corpus (`tests/corpus`, 200+ cases) scored at a fixed time;
   any regression fails CI. A scheduled job checks live pages.
 - `filterwarnings = error::DeprecationWarning:newsworker` keeps deprecations visible.

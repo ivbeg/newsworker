@@ -17,6 +17,7 @@ concern each.
 | `extractor.py` | Dynamic date-driven extraction (date clusters → item blocks) |
 | `dates.py` / `relative.py` | qddate matches → plausible UTC instants; relative dates in 8 languages |
 | `structured.py` | JSON-LD and microdata article lists |
+| `native.py` | RSS, Atom and JSON Feed responses normalised to the item contract |
 | `undated.py` | Opt-in undated listing fallback |
 | `spec/model.py` | The YAML spec (`FeedSpec`, `FieldRule`, `ItemsRule`) and its validation |
 | `spec/selectors.py` | Building CSS/XPath selectors from elements and evaluating them |
@@ -27,17 +28,21 @@ concern each.
 | `formats.py` | Renders the feed dict to json/rss/atom/csv/jsonfeed/html/markdown/yaml/opml |
 | `server.py` | Stdlib HTTP server: `/feed` (tokens or signed links), health, metrics |
 | `watching.py` | One `watch` poll: drain due deliveries, fetch, enqueue and deliver |
-| `dedup.py` / `delivery.py` | SQLite outbox with claim tokens; stdout, webhook, SMTP, Telegram channels |
+| `dedup.py` / `delivery.py` | SQLite outbox with claim tokens and item history; stdout, webhook, SMTP, Telegram, Slack, Discord, Matrix and Mastodon channels |
 | `explain.py` / `diagnostics.py` / `evaluation.py` | Explaining results, strategy diagnostics, corpus scoring |
 | `jsrender.py` | Optional Playwright rendering |
+| `async_fetch.py` | Optional aiohttp transport for `batch --async`, under the same fetch policy and cache |
 | `model.py` | `Feed` / `Item` typed shapes shared by every strategy and output |
-| `settings.py` | Layered settings: defaults < YAML < environment < CLI |
+| `settings.py` / `settings_doc.py` | Layered settings: defaults < YAML < environment < CLI; one-line docs that generate the settings reference |
+| `language.py` | Evidence-based language support matrix (`newsworker languages`) |
+| `mcp_server.py` | Model Context Protocol tools |
 | `plugins.py` / `bridges.py` | Third-party extractors and host/path YAML overrides |
 
-Strategy order in `FeedService.get_feed()`: plugin → bridge → cached or freshly
-analysed spec (re-analysed once if it matches nothing) → dynamic extraction →
-JSON-LD/microdata when no items were found → undated fallback (opt-in) →
-browser rendering (opt-in). Links are then sanitised and item identities
+Strategy order in `FeedService.get_feed()`: native feed (when the response is
+RSS/Atom/JSON Feed and no explicit spec is given) → plugin → bridge → cached or
+freshly analysed spec (re-analysed once if it matches nothing) → dynamic
+extraction → JSON-LD/microdata when no items were found → undated fallback
+(opt-in) → browser rendering (opt-in). Links are then sanitised and item identities
 assigned from links before formatting.
 
 The internal feed dict is the API contract between extraction and output. Its

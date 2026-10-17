@@ -7,43 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **`newsworker languages`** prints the language support matrix (`--format
-  text|json|markdown`). The table in the language-support guide is generated
-  from it and a test keeps the two in sync; it now states that Italian page
-  text is not detected (the language comes from page metadata).
-- **`watch --once`** polls every source once and exits, for cron.
-- **Home page form** — `newsworker serve` answers browsers at `/` with a
-  form: paste a news page URL, preview the items found and copy the feed link
-  for a reader. No script; protected servers show it only to token holders
-  or, with just a signing key, to the local operator.
-- **Mastodon delivery** — `--channel mastodon` posts each item as a status
-  (`mastodon_instance`, `mastodon_token`, `mastodon_visibility`, default
-  `unlisted`). The outbox key is sent as `Idempotency-Key`, mentions in titles
-  are defused, and titles are shortened to the 500-character limit.
-
-### Changed
-- **Code style** — the code uses Python 3.10 syntax (`X | None`, builtin
-  generics); Ruff now also enforces pyupgrade, simplification, bandit security
-  and complexity (≤ 15, existing hot spots marked) rules, over `benchmarks/`
-  too. Non-security hashes (cache keys, item ids) are declared
-  `usedforsecurity=False`, which also keeps them working on FIPS builds.
-- **Locked dependencies** — `requirements-lock.txt` pins the full runtime and
-  test dependency set for every supported Python (generated with `uv pip
-  compile --universal`). A new `locked` CI job tests it on Python 3.10 and 3.14
-  and checks it still satisfies `pyproject.toml`.
-- **Typed feed contract** — `newsworker.model.Feed` and `Item` (`TypedDict`)
-  declare every key strategies produce; `FeedService.get_feed`, plugins,
-  native feeds and `format_feed` are annotated with them. mypy now checks the
-  whole package (41 modules, was 22).
-
-## [1.4.0] - 2026-10-16
+## [1.4.0] - 2026-10-17
 
 Reliability, accuracy and reach: correct dates and time zones, self-healing
 specs, native RSS/Atom/JSON Feed input, JSON-LD and relative dates in eight
-languages, polite per-host fetching, signed feed links, `explain`, item
-history, Slack/Discord/Matrix delivery, an MCP server, and an extraction
-corpus that gates every change. Requires Python 3.10+ and qddate 1.0.16.
+languages, polite per-host fetching with connection-time address checks, signed
+feed links and a browser form on the feed server, `explain`, watch over many
+sources with item history, Slack/Discord/Matrix/Mastodon delivery, an MCP
+server, and an extraction corpus that gates every change. Requires Python 3.10+
+and qddate 1.0.16. See [Upgrading to 1.4](https://ivbeg.github.io/newsworker/guides/migration-1-4)
+for behaviour changes.
 
 ### Added
 - **Item history and update notifications** — `watch` records every item with
@@ -56,7 +29,8 @@ corpus that gates every change. Requires Python 3.10+ and qddate 1.0.16.
   CHANGELOG, and publishes a multi-arch image to `ghcr.io/ivbeg/newsworker`.
   PyPI upload via trusted publishing is opt-in (`PYPI_TRUSTED_PUBLISHING`).
   The image now runs any subcommand (`ENTRYPOINT newsworker`, default `serve`),
-  includes Prometheus metrics, has a health check, and uses Python 3.13.
+  includes the `metrics` extra (enable `/metrics` with
+  `NEWSWORKER_METRICS_ENABLED=true`), has a health check, and uses Python 3.13.
 - **MCP server** — `newsworker mcp` (extra `mcp`) serves `extract_news`,
   `find_feeds` and `explain_page` as read-only Model Context Protocol tools
   over stdio, using the CLI's fetch policy, caches and settings.
@@ -111,6 +85,24 @@ corpus that gates every change. Requires Python 3.10+ and qddate 1.0.16.
   "2 giorni fa", "há 3 dias" and today/yesterday words in en, ru, uk, de, fr,
   es, it and pt (previously English only).
 - `FeedService(clock=...)` resolves relative dates against an injected time.
+- **`newsworker languages`** prints the language support matrix (`--format
+  text|json|markdown`). The table in the language-support guide is generated
+  from it and a test keeps the two in sync; it now states that Italian page
+  text is not detected (the language comes from page metadata).
+- **`watch --once`** polls every source once and exits, for cron.
+- **Home page form** — `newsworker serve` answers browsers at `/` with a
+  form: paste a news page URL, preview the items found and copy the feed link
+  for a reader. No script; protected servers show it only to token holders
+  or, with just a signing key, to the local operator.
+- **Mastodon delivery** — `--channel mastodon` posts each item as a status
+  (`mastodon_instance`, `mastodon_token`, `mastodon_visibility`, default
+  `unlisted`). The outbox key is sent as `Idempotency-Key`, mentions in titles
+  are defused, and titles are shortened to the 500-character limit.
+- **Settings reference** — every setting with its default and `NEWSWORKER_*`
+  environment variable, generated from the code
+  (`docs/docs/guides/settings-reference.md`), and an upgrade guide for 1.3
+  users. Tests keep the settings reference, the language table and the
+  command pages in step with the code.
 
 ### Changed
 - Requires **qddate 1.0.16** (pyparsing snake_case API, signed timezone
@@ -142,7 +134,19 @@ corpus that gates every change. Requires Python 3.10+ and qddate 1.0.16.
   Everything previously importable from `newsworker.spec` still is.
 - The per-poll `watch` logic moved from the CLI module to
   `newsworker.watching.run_watch_iteration`.
-- mypy now checks 22 modules (was 8), including the spec package and watch.
+- **Code style** — the code uses Python 3.10 syntax (`X | None`, builtin
+  generics); Ruff now also enforces pyupgrade, simplification, bandit security
+  and complexity (≤ 15, existing hot spots marked) rules, over `benchmarks/`
+  too. Non-security hashes (cache keys, item ids) are declared
+  `usedforsecurity=False`, which also keeps them working on FIPS builds.
+- **Locked dependencies** — `requirements-lock.txt` pins the full runtime and
+  test dependency set for every supported Python (generated with `uv pip
+  compile --universal`). A new `locked` CI job tests it on Python 3.10 and 3.14
+  and checks it still satisfies `pyproject.toml`.
+- **Typed feed contract** — `newsworker.model.Feed` and `Item` (`TypedDict`)
+  declare every key strategies produce; `FeedService.get_feed`, plugins,
+  native feeds and `format_feed` are annotated with them. mypy now checks the
+  whole package (41 modules, was 22).
 
 ### Fixed
 - **Two-digit years** — `25/7/22` and `16.10.26` resolve to 2022 and 2026 instead
@@ -209,6 +213,9 @@ corpus that gates every change. Requires Python 3.10+ and qddate 1.0.16.
   and `ETag` validators are read whatever their header case. Manifests report
   the transport actually used, per-source timings and cache state; a source that cannot be written is recorded as a failure
   instead of aborting the batch; duplicate URLs are processed once.
+- **Upgrades from 1.3 do not re-deliver watched items** — item ids are now
+  derived from links, and the old text-hash id (kept as `content_hash`) is
+  still recognised in the 1.3 `seen` table and the outbox.
 
 ### Security
 - **robots.txt** is fetched through the shared fetch policy everywhere: the

@@ -2,7 +2,6 @@
 
 ## Purpose
 Guarantees every output format keeps: timezone-aware instants, full-content parity, truthful enclosures and safe previews.
-
 ## Requirements
 ### Requirement: Timezone-aware Publication Instants
 The internal feed contract SHALL represent publication instants as timezone-aware UTC
@@ -50,4 +49,13 @@ output context.
 #### Scenario: Title contains Markdown control characters
 - **WHEN** an extracted title contains link or emphasis delimiters
 - **THEN** Markdown output SHALL preserve the title text without creating unintended markup or links
+
+### Requirement: Typed Feed Contract
+The feed and item shapes SHALL be declared as typed dictionaries, and a test
+SHALL fail when an extraction strategy emits a key the declaration does not
+contain.
+
+#### Scenario: Strategy adds an undeclared key
+- **WHEN** a strategy adds a new item key without declaring it
+- **THEN** the contract test SHALL fail
 

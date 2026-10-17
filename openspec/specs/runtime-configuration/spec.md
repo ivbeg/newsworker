@@ -2,7 +2,6 @@
 
 ## Purpose
 Layered configuration with deterministic precedence, environment variables, early validation and secret redaction.
-
 ## Requirements
 ### Requirement: Deterministic Configuration Precedence
 The system SHALL resolve settings in the order explicit CLI option, environment value,
@@ -43,4 +42,13 @@ diagnostics.
 #### Scenario: Resolved configuration contains credentials
 - **WHEN** proxy credentials, authorization headers, API tokens, or cookie paths are displayed
 - **THEN** secret values SHALL be redacted while non-secret configuration remains inspectable
+
+### Requirement: Generated Settings Reference
+Every setting SHALL have a one-line description in code, and the settings
+reference page SHALL be generated from it with each default and environment
+variable; a test SHALL fail when a setting is undocumented or the page is stale.
+
+#### Scenario: New setting without a description
+- **WHEN** a setting is added to the settings class without a description
+- **THEN** the test suite SHALL fail
 

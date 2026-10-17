@@ -35,7 +35,8 @@ scores as a review aid, not a correctness probability.
 ## Deliver new items through watch, not cron-plus-extract
 
 `watch` tracks seen items, retries failed deliveries, and supports stdout,
-webhook, SMTP, and Telegram channels. See [delivery](/guides/delivery).
+webhook, SMTP, Telegram, Slack, Discord, Matrix and Mastodon channels. Run
+`watch --once` from cron when a long-running process is not an option. See [delivery](/guides/delivery).
 
 ## Measure before raising concurrency
 

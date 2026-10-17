@@ -29,7 +29,7 @@ newsworker serve [OPTIONS]
 | `GET /health` | Liveness alias. |
 | `GET /health/live` | Liveness. |
 | `GET /health/ready` | Readiness. |
-| `GET /metrics` | Prometheus metrics when `newsworker[metrics]` is installed; otherwise `404`. |
+| `GET /metrics` | Prometheus metrics when the `metrics` extra is installed and `metrics_enabled: true`; otherwise `404`. Requires a token when `api_tokens` are set. |
 | `GET /` | In a browser: a form to paste a news page URL, preview its items and copy the feed link. Other clients get short usage help. |
 
 `format` is one of `atom` (default), `rss`, `json`, `jsonfeed`, `csv`, `html`,

@@ -22,7 +22,8 @@ Some features require optional dependencies, installed as extras.
 | `fulltext` | Follow item links and extract article bodies (`--full-text`, trafilatura) |
 | `async` | High-throughput `batch --async` (aiohttp) |
 | `browser` | Playwright Chromium rendering fallback (`--render`) |
-| `metrics` | Prometheus `/metrics` on the feed server |
+| `metrics` | Prometheus `/metrics` on the feed server (also set `metrics_enabled: true`) |
+| `mcp` | `newsworker mcp`, the Model Context Protocol server for AI assistants |
 | `dev` | pytest, ruff, mypy, pre-commit, build, twine |
 
 ```bash
@@ -30,6 +31,7 @@ pip install "newsworker[fulltext]"
 pip install "newsworker[async]"
 pip install "newsworker[browser]"
 pip install "newsworker[metrics]"
+pip install "newsworker[mcp]"
 pip install "newsworker[dev]"
 
 # Combine extras in one install

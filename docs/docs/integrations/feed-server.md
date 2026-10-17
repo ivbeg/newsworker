@@ -9,7 +9,9 @@ description: "Local HTTP server endpoints, caching, and access controls"
 are plain GET requests, so RSS readers can poll them directly.
 
 See [`serve`](/commands/serve) for flags and routes. Conditional GET (`ETag` /
-`304`) is supported. Optional Prometheus metrics require `newsworker[metrics]`.
+`304`) is supported. Prometheus metrics at `/metrics` need the `metrics` extra
+and `metrics_enabled: true` (`NEWSWORKER_METRICS_ENABLED=true`); they are off by
+default. When API tokens are set, `/metrics` requires one too.
 
 Access controls include static bearer tokens, API keys, per-client rate limits,
 a global feed-build semaphore, request IDs, and explicit CORS origins. HTML
