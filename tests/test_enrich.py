@@ -1,11 +1,19 @@
 """Tests for per-item author/category enrichment and formatter propagation."""
 
 import json
+import sys
+import types
 from xml.etree import ElementTree as ET
 
-from newsworker.enrich import enrich_feed, enrich_item, extract_author, extract_categories
+from newsworker.enrich import (
+    enrich_feed,
+    enrich_item,
+    extract_author,
+    extract_categories,
+    extract_enclosure_metadata,
+    extract_fulltext,
+)
 from newsworker.formats import format_feed
-
 
 AUTHOR_HTML = """
 <div class="post">
@@ -106,11 +114,72 @@ def test_jsonfeed_emits_authors_and_tags():
 def test_enclosure_length_uses_known_value():
     feed = _feed_with_enriched_item()
     feed["items"][0]["extra"]["enclosure_length"] = 12345
+    feed["items"][0]["extra"]["enclosure_type"] = "image/jpeg"
     text = format_feed(feed, fmt="rss")
     assert 'length="12345"' in text
+
+
+def test_enclosure_metadata_uses_only_complete_explicit_source_values():
+    html = b"<article><img src='/image.jpg' type='image/jpeg' data-size='321'></article>"
+    assert extract_enclosure_metadata(html) == ("image/jpeg", 321)
+    item = {"raw_html": html, "extra": {"images": ["https://example.com/image.jpg"]}}
+    enrich_item(item)
+    assert item["extra"]["enclosure_type"] == "image/jpeg"
+    assert item["extra"]["enclosure_length"] == 321
+    assert extract_enclosure_metadata(b"<img src='/unknown.jpg'>") == (None, None)
+    assert extract_enclosure_metadata(b"<img type='image/jpeg' length='unknown'>") == (
+        None,
+        None,
+    )
 
 
 def test_enrich_feed_returns_feed():
     feed = {"items": [{"raw_html": AUTHOR_HTML}]}
     assert enrich_feed(feed) is feed
     assert feed["items"][0]["author"] == "Jane Doe"
+
+
+def test_enrichment_alternate_markup_and_missing_values():
+    assert extract_author(None) is None
+    assert extract_categories(None) == []
+    assert extract_enclosure_metadata(None) == (None, None)
+    assert extract_author("<div class='author'>Class Writer</div>") == "Class Writer"
+    assert extract_categories("<div class='categories'>World, Economy</div>") == ["World, Economy"]
+    item = {"raw_html": "<div></div>", "extra": None}
+    enrich_item(item)
+    assert item["extra"] == {}
+
+
+def test_fulltext_optional_backends_and_failures(monkeypatch):
+    assert extract_fulltext(None) is None
+    monkeypatch.setitem(
+        sys.modules,
+        "trafilatura",
+        types.SimpleNamespace(extract=lambda payload, url=None: "trafilatura text"),
+    )
+    assert extract_fulltext(b"<p>body</p>", url="https://example.com") == "trafilatura text"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "trafilatura",
+        types.SimpleNamespace(
+            extract=lambda payload, url=None: (_ for _ in ()).throw(RuntimeError("bad"))
+        ),
+    )
+
+    class Document:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def summary(self):
+            return "readability html"
+
+    monkeypatch.setitem(sys.modules, "readability", types.SimpleNamespace(Document=Document))
+    assert extract_fulltext("<p>body</p>") == "readability html"
+
+    class BrokenDocument(Document):
+        def summary(self):
+            raise RuntimeError("bad")
+
+    monkeypatch.setitem(sys.modules, "readability", types.SimpleNamespace(Document=BrokenDocument))
+    assert extract_fulltext("<p>body</p>") is None

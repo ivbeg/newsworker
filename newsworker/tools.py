@@ -3,14 +3,18 @@
 """
 Supportive functions to help news extraction algorithms
 """
-from bs4 import UnicodeDammit
+
+import datetime
 import re
 import threading
-import time, datetime
-from urllib.parse import urlparse, urljoin, parse_qs
+import time
+from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.robotparser import RobotFileParser
-from .consts import CLEANABLE_QUERY_KEYS
+from zoneinfo import ZoneInfo
 
+from bs4 import UnicodeDammit
+
+from .consts import CLEANABLE_QUERY_KEYS
 
 #: URL schemes considered safe to fetch server-side.
 ALLOWED_URL_SCHEMES = ("http", "https")
@@ -46,12 +50,8 @@ _FUZZY_UNIT_SECONDS = {
 }
 
 _FUZZY_UNIT_ALT = "|".join(sorted(_FUZZY_UNIT_SECONDS, key=len, reverse=True))
-_FUZZY_NUMERIC_RE = re.compile(
-    r"\b(\d+)\s+(%s)s?\s+ago\b" % _FUZZY_UNIT_ALT, re.IGNORECASE
-)
-_FUZZY_ARTICLE_RE = re.compile(
-    r"\b(?:a|an)\s+(%s)\s+ago\b" % _FUZZY_UNIT_ALT, re.IGNORECASE
-)
+_FUZZY_NUMERIC_RE = re.compile(r"\b(\d+)\s+(%s)s?\s+ago\b" % _FUZZY_UNIT_ALT, re.IGNORECASE)
+_FUZZY_ARTICLE_RE = re.compile(r"\b(?:a|an)\s+(%s)\s+ago\b" % _FUZZY_UNIT_ALT, re.IGNORECASE)
 _FUZZY_KEYWORDS = ("ago", "yesterday", "today", "just now", "moments ago", "a moment ago")
 
 
@@ -63,7 +63,22 @@ def looks_like_fuzzy_date(text):
     return any(kw in low for kw in _FUZZY_KEYWORDS)
 
 
-def parse_fuzzy_date(text, now=None):
+def normalize_datetime(value, default_timezone="UTC"):
+    """Return a publication time as an aware UTC datetime.
+
+    Naive values are interpreted in ``default_timezone``.  This helper is the
+    canonical extraction/output boundary for publication instants.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, datetime.datetime):
+        raise TypeError("publication time must be a datetime")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo(default_timezone))
+    return value.astimezone(datetime.timezone.utc)
+
+
+def parse_fuzzy_date(text, now=None, default_timezone="UTC"):
     """Resolves a relative date expression to a ``datetime``, or ``None``.
 
     Handles "just now"/"now", "today", "yesterday", "N <unit> ago" and
@@ -71,7 +86,8 @@ def parse_fuzzy_date(text, now=None):
     """
     if not text:
         return None
-    now = now or datetime.datetime.now()
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
     s = text.strip().lower()
     if s in ("just now", "now", "moments ago", "a moment ago"):
         return now
@@ -97,11 +113,12 @@ _DATETIME_ATTR_RE = re.compile(
 )
 
 
-def parse_datetime_attr(value):
-    """Parses an HTML ``datetime`` attribute to a naive ``datetime``, or ``None``.
+def parse_datetime_attr(value, default_timezone="UTC"):
+    """Parses an HTML ``datetime`` attribute to an aware UTC datetime, or ``None``.
 
     Handles ISO-8601 date and date-time strings as emitted by WordPress and
-    other CMSes (including timezone offsets, which are stripped).
+    other CMSes. Explicit offsets are preserved as instants and naive values use
+    ``default_timezone``.
     """
     if not value:
         return None
@@ -110,9 +127,7 @@ def parse_datetime_attr(value):
         return None
     try:
         dt = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if dt.tzinfo is not None:
-            dt = dt.replace(tzinfo=None)
-        return dt
+        return normalize_datetime(dt, default_timezone)
     except ValueError:
         pass
     m = _DATETIME_ATTR_RE.match(value)
@@ -125,7 +140,7 @@ def parse_datetime_attr(value):
         if m.group("second") is not None:
             parts["second"] = int(m.group("second"))
     try:
-        return datetime.datetime(**parts)
+        return normalize_datetime(datetime.datetime(**parts), default_timezone)
     except ValueError:
         return None
 
@@ -368,6 +383,28 @@ def resolve_feed_language(
     return "en"
 
 
+def resolve_feed_language_with_diagnostics(**kwargs):
+    """Resolve language and return stable override/fallback reason codes."""
+    override = normalize_language_tag(kwargs.get("override"))
+    language = resolve_feed_language(**kwargs)
+    if override:
+        return language, {"reason": "explicit_override", "ambiguous": False}
+    document = kwargs.get("document")
+    metadata = detect_page_language_metadata(document)
+    header = normalize_language_tag(kwargs.get("content_language"))
+    text = detect_text_language_from_samples(kwargs.get("text_samples"))
+    candidates = {candidate for candidate in (metadata, header, text) if candidate}
+    if not candidates:
+        return language, {"reason": "default_fallback", "ambiguous": True}
+    if len(candidates) > 1:
+        return language, {
+            "reason": "ambiguous_evidence",
+            "ambiguous": True,
+            "candidates": sorted(candidates),
+        }
+    return language, {"reason": "automatic_evidence", "ambiguous": False}
+
+
 def _robots_parser_for(root):
     """Returns a cached :class:`RobotFileParser` for ``root`` (or ``None``).
 
@@ -441,9 +478,7 @@ def validate_url(url, allowed_hosts=None):
     """
     parsed = urlparse(url or "")
     if parsed.scheme.lower() not in ALLOWED_URL_SCHEMES:
-        raise ValueError(
-            "Unsupported URL scheme %r (only http/https are allowed)" % parsed.scheme
-        )
+        raise ValueError("Unsupported URL scheme %r (only http/https are allowed)" % parsed.scheme)
     if not parsed.hostname:
         raise ValueError("URL has no host: %r" % url)
     if allowed_hosts:

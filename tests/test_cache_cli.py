@@ -8,7 +8,6 @@ from newsworker.cache import ContentCache
 from newsworker.core import app
 from newsworker.settings import Settings
 
-
 runner = CliRunner()
 
 

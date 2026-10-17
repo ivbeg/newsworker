@@ -26,7 +26,8 @@ import os
 import tempfile
 import threading
 import time
-from typing import Dict
+import uuid
+from typing import Any, Dict, List
 
 from .spec import FeedSpec
 
@@ -114,6 +115,12 @@ def _evict(directory, pattern, max_entries=0, max_bytes=0):
         _, size, path = entries[i]
         try:
             os.remove(path)
+            if path.endswith(".bin"):
+                meta_path = path[:-4] + ".meta"
+                try:
+                    os.remove(meta_path)
+                except OSError:
+                    pass
             count -= 1
             total -= size
         except OSError:
@@ -123,7 +130,7 @@ def _evict(directory, pattern, max_entries=0, max_bytes=0):
 
 def _list_entries(directory, pattern):
     """Returns cached entries as ``[{path, bytes, mtime}]`` sorted oldest-first."""
-    result = []
+    result: List[Dict[str, Any]] = []
     try:
         paths = glob.glob(os.path.join(directory, pattern))
     except OSError:
@@ -163,6 +170,9 @@ def _clear_dir(directory, pattern):
 
 class _CacheStatsMixin:
     """Shared list/stats/clear operations for the file caches."""
+
+    dir: str
+    pattern: str
 
     def list_entries(self):
         """Returns cached entries as ``[{path, bytes, mtime}]`` (oldest first)."""
@@ -261,11 +271,36 @@ class ContentCache(_CacheStatsMixin):
         except OSError:
             return None
 
+    def get_generation(self, url, fresh_only=False):
+        """Return a consistent ``(body, metadata)`` cache generation."""
+        path = self._path(url)
+        if fresh_only and not _is_fresh(path, self.ttl):
+            return None, {}
+        if not os.path.exists(path):
+            return None, {}
+        with _lock_for(path):
+            try:
+                with open(path, "rb") as handle:
+                    body = handle.read()
+                with open(self._meta_path(url), "r", encoding="utf-8") as handle:
+                    meta = json.load(handle) or {}
+            except OSError:
+                return None, {}
+            digest = hashlib.sha256(body).hexdigest()
+            if meta and meta.get("body_sha256") not in (None, digest):
+                return None, {}
+            return body, {k: v for k, v in meta.items() if k not in {"body_sha256", "generation"}}
+
     def get_meta(self, url):
         """Returns stored upstream validators ``{etag, last_modified}`` or ``{}``."""
         try:
             with open(self._meta_path(url), "r", encoding="utf-8") as handle:
-                return json.load(handle) or {}
+                meta = json.load(handle) or {}
+                return {
+                    key: value
+                    for key, value in meta.items()
+                    if key not in {"body_sha256", "generation"}
+                }
         except (OSError, ValueError):
             return {}
 
@@ -285,15 +320,24 @@ class ContentCache(_CacheStatsMixin):
         os.makedirs(self.dir, exist_ok=True)
         path = self._path(url)
         with _lock_for(path):
+            clean = {k: v for k, v in (meta or {}).items() if v}
+            clean.update(
+                {
+                    "generation": uuid.uuid4().hex,
+                    "body_sha256": hashlib.sha256(data).hexdigest(),
+                }
+            )
             _atomic_write(path, data)
-            if meta:
-                clean = {k: v for k, v in meta.items() if v}
-                if clean:
-                    _atomic_write(
-                        self._meta_path(url),
-                        json.dumps(clean).encode("utf-8"),
-                    )
+            _atomic_write(
+                self._meta_path(url),
+                json.dumps(clean).encode("utf-8"),
+            )
         _evict(self.dir, "*.bin", self.max_entries, self.max_bytes)
+
+    def clear(self):
+        removed = _clear_dir(self.dir, "*.bin")
+        _clear_dir(self.dir, "*.meta")
+        return removed
 
     def path_for(self, url):
         """Returns the on-disk path used for ``url`` (may not exist yet)."""

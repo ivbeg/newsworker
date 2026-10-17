@@ -4,8 +4,9 @@
 Tag mapping routines. Initially it was created for other purposes. It's intended to create web page map of tags, annotating
 """
 
-from lxml import etree
 import hashlib
+
+from lxml import etree
 
 from .consts import (
     TAG_TYPE_BOLD,
@@ -38,10 +39,10 @@ class TagPath:
         p_1 = left.getparent()
         p_2 = right.getparent()
         if change > 0:
-            for i in range(0, change):
+            for _i in range(0, change):
                 p_1 = p_1.getparent()
         elif change < 0:
-            for i in range(0, change):
+            for _i in range(0, -change):
                 p_2 = p_2.getparent()
         while p_1 is not None and p_2 is not None:
             if p_1 == p_2:
@@ -56,18 +57,18 @@ class TagPath:
     def getSharedPath(left, right):
         """Returns node root for two other nodes"""
         node = TagPath.getSharedNode(left, right)
-        if node:
+        if node is not None:
             return TagPath(node)
         return None
 
     def __parseNode(self, node, limit, inprogress=False):
         """Parses node to the tag path"""
         # Handle case where node might not have a tag attribute
-        node_tag = getattr(node, 'tag', None)
+        node_tag = getattr(node, "tag", None)
         if node_tag is None:
             # If tag is missing, use a default value
             node_tag = "unknown"
-        
+
         parent = node.getparent()
         if parent is not None and parent.tag != "<DOCUMENT_ROOT>" and node != limit:
             try:
@@ -90,12 +91,15 @@ class TagPath:
         self.hash = md.hexdigest()
 
     def __cmp__(self, tagpath):
-        if (
-            list(self.values()) == list(tagpath.values())
-            and self.limit == tagpath.limit
-        ):
-            return True
-        return False
+        return bool(list(self.values()) == list(tagpath.values()) and self.limit == tagpath.limit)
+
+    def __eq__(self, tagpath):
+        if not isinstance(tagpath, TagPath):
+            return NotImplemented
+        return list(self.values()) == list(tagpath.values()) and self.limit == tagpath.limit
+
+    def __hash__(self):
+        return hash((tuple(self.values()), id(self.limit)))
 
     def values(self):
         """Returns num of tag shifts, tag deepness"""
@@ -128,9 +132,7 @@ class TagPath:
 class TagEntry:
     """Tag record used to map tags to entities"""
 
-    def __init__(
-        self, aid, node, tag, position, path, parent_id, attrs=None, htmlattrs=None
-    ):
+    def __init__(self, aid, node, tag, position, path, parent_id, attrs=None, htmlattrs=None):
         if not attrs:
             attrs = []
         self.__id = aid
@@ -181,9 +183,7 @@ class TagBlock:
 
     def as_html(self):
         if self.shift is None:
-            return etree.tostring(
-                self.__root_node.getchildren()[self.position], encoding="utf8"
-            )
+            return etree.tostring(self.__root_node.getchildren()[self.position], encoding="utf8")
         else:
             s = None
             ch = self.__root_node.getchildren()
@@ -207,9 +207,7 @@ class TagBlock:
             #            logging.info(u'Position %d shift %d' %(self.position, self.shift))
             #            logging.info(u'Ch nodes: %s' %(unicode(self.__root_node.getchildren())))
             #            print len(self.__root_node.getchildren()[1].getchildren())
-            for node in self.__root_node.getchildren()[
-                self.position : self.position + self.shift
-            ]:
+            for node in self.__root_node.getchildren()[self.position : self.position + self.shift]:
                 #            print node
                 if node is not None:
                     annotations.extend(self.identify_entities(node))
@@ -254,10 +252,10 @@ class TagBlock:
             except (AttributeError, ValueError):
                 # Fallback if index() fails for any reason
                 position = 0
-        
+
         # Handle case where tag might not exist
-        ch_tag = getattr(ch, 'tag', None)
-        
+        ch_tag = getattr(ch, "tag", None)
+
         annotations.append(
             TagEntry(
                 aid,
@@ -274,18 +272,14 @@ class TagBlock:
         #    logging.info('Node childs: %s' %(ch_childs))
         for child in ch_childs:
             if child is not None:
-                annotations.extend(self.identify_entities(child, id))
+                annotations.extend(self.identify_entities(child, aid))
             #                print 'Anns', annotations
         return annotations
 
     def print_block(self):
         """Prints this tag block"""
         if self.shift is None:
-            print(
-                etree.tostring(
-                    self.__root_node.getchildren()[self.position], encoding="utf8"
-                )
-            )
+            print(etree.tostring(self.__root_node.getchildren()[self.position], encoding="utf8"))
         else:
             ch = self.__root_node.getchildren()
             for i in range(0, self.shift):

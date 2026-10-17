@@ -112,3 +112,6 @@ venv.bak/
 # IDE / editor
 .idea/
 .vscode/
+
+# macOS
+.DS_Store

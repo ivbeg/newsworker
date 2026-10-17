@@ -6,11 +6,10 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 
+from newsworker import server as server_mod
 from newsworker.cache import ContentCache
 from newsworker.service import FeedService
 from newsworker.settings import Settings
-from newsworker import server as server_mod
-
 
 # ---------------------------------------------------------------------------
 # Cache write safety + metadata

@@ -65,9 +65,7 @@ class _FakeResponse:
 def _extractor_with_fake_get(chunks, headers=None):
     # These tests exercise the size-cap logic, not robots.txt; disable the
     # robots check so no real network read of /robots.txt is attempted.
-    ext = FeedExtractor(
-        filtered_text_length=150, max_bytes=100, respect_robots=False
-    )
+    ext = FeedExtractor(filtered_text_length=150, max_bytes=100, respect_robots=False)
     ext.http_session.get = lambda *a, **k: _FakeResponse(chunks, headers)
     return ext
 

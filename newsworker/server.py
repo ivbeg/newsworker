@@ -1,27 +1,21 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-Local HTTP server that turns page URLs into RSS/Atom/JSON/CSV feeds.
+"""Dependency-free threaded feed server with optional access controls."""
 
-Built entirely on the Python standard library (``http.server``) so it adds no
-dependencies. Generated feed URLs are plain GET requests, so they can be pasted
-directly into any RSS reader::
-
-    GET /feed?url=<page>&format=atom
-
-Parsing specs are built dynamically and cached on first request, and page
-content is cached for the period configured in the settings (see
-:mod:`newsworker.settings`). Add ``&refresh=1`` to bypass the caches for a
-single request.
-"""
+from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import logging
+import os
+import threading
 import time
+import uuid
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from . import __version__
 from .formats import SUPPORTED_FORMATS, format_feed
 from .service import FeedService
 from .settings import Settings
@@ -29,27 +23,19 @@ from .tools import validate_url
 
 log = logging.getLogger(__name__)
 
-try:  # Optional dependency: metrics are disabled gracefully when absent.
-    from prometheus_client import (
-        CONTENT_TYPE_LATEST,
-        Counter,
-        Histogram,
-        generate_latest,
-    )
+try:
+    from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
     _PROM_AVAILABLE = True
-    FEED_REQUESTS = Counter(
-        "newsworker_feed_requests_total", "Total /feed requests", ["status"]
-    )
-    FEED_LATENCY = Histogram(
-        "newsworker_feed_seconds", "Time spent building a feed"
-    )
-except Exception:  # pragma: no cover - exercised only when dep is installed
+    FEED_REQUESTS = Counter("newsworker_feed_requests_total", "Total /feed requests", ["status"])
+    FEED_LATENCY = Histogram("newsworker_feed_seconds", "Time spent building a feed")
+    RATE_LIMITED = Counter("newsworker_rate_limited_total", "Rate-limited requests")
+    ACTIVE_BUILDS = Gauge("newsworker_active_feed_builds", "Concurrent feed builds")
+except Exception:
     _PROM_AVAILABLE = False
 
-DEFAULT_FORMAT = "atom"
 
-#: Mapping of feed format to HTTP Content-Type header value.
+DEFAULT_FORMAT = "atom"
 CONTENT_TYPES = {
     "rss": "application/rss+xml; charset=utf-8",
     "atom": "application/atom+xml; charset=utf-8",
@@ -60,35 +46,79 @@ CONTENT_TYPES = {
     "markdown": "text/markdown; charset=utf-8",
     "yaml": "application/yaml; charset=utf-8",
 }
-
 INDEX_TEXT = """newsworker local feed server
 
-Usage:
-  GET /feed?url=<page-url>&format=<fmt>   Build a feed from a page
-      formats: atom|rss|json|csv|jsonfeed|html|markdown|yaml
-  GET /health                             Health check
+GET /feed?url=<page-url>&format=<fmt>
+GET /health/live
+GET /health/ready
+"""
 
-Notes:
-  - format defaults to '%s'
-  - add &refresh=1 to bypass the content/spec caches for one request
 
-Example:
-  /feed?url=https://example.com/news&format=atom
-""" % DEFAULT_FORMAT
+class TokenBucketLimiter:
+    """Thread-safe per-client token buckets with a bounded idle map."""
+
+    def __init__(self, rate_per_minute=0, burst=20, clock=time.monotonic):
+        self.rate = max(0.0, float(rate_per_minute) / 60.0)
+        self.burst = max(1.0, float(burst))
+        self.clock = clock
+        self._lock = threading.Lock()
+        self._buckets = {}
+
+    def allow(self, client):
+        if self.rate <= 0:
+            return True, 0
+        now = self.clock()
+        with self._lock:
+            tokens, updated = self._buckets.get(client, (self.burst, now))
+            tokens = min(self.burst, tokens + (now - updated) * self.rate)
+            if tokens < 1:
+                retry = max(1, int((1 - tokens) / self.rate))
+                self._buckets[client] = (tokens, now)
+                return False, retry
+            self._buckets[client] = (tokens - 1, now)
+            if len(self._buckets) > 10000:
+                cutoff = now - 3600
+                self._buckets = {
+                    key: value for key, value in self._buckets.items() if value[1] >= cutoff
+                }
+        return True, 0
 
 
 class FeedRequestHandler(BaseHTTPRequestHandler):
-    """Handles GET requests for feeds, health checks and the index page."""
+    server_version = "newsworker-feed/1.4"
 
-    server_version = "newsworker-feed/1.0"
-
-    # ``service`` is attached to the server instance in :func:`run_server`.
     @property
     def service(self):
         return self.server.feed_service  # type: ignore[attr-defined]
 
-    def log_message(self, format, *args):  # noqa: A002 - stdlib signature
-        log.info("%s - %s", self.address_string(), format % args)
+    @property
+    def settings(self):
+        return self.service.settings
+
+    def log_message(self, format, *args):  # noqa: A002
+        log.info(
+            "%s request_id=%s %s",
+            self.address_string(),
+            getattr(self, "request_id", "-"),
+            format % args,
+        )
+
+    def _request_headers(self, content_type):
+        headers = {
+            "X-Request-ID": self.request_id,
+            "X-Content-Type-Options": "nosniff",
+        }
+        if content_type.startswith("text/html"):
+            headers["Content-Security-Policy"] = (
+                "default-src 'none'; style-src 'unsafe-inline'; img-src https: http: data:; "
+                "base-uri 'none'; form-action 'none'"
+            )
+        origin = self.headers.get("Origin")
+        allowed = getattr(self.settings, "cors_allowed_origins", []) or []
+        if origin and origin in allowed:
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Vary"] = "Origin"
+        return headers
 
     def _send_text(
         self, status, text, content_type="text/plain; charset=utf-8", extra_headers=None
@@ -97,15 +127,87 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        for key, value in (extra_headers or {}).items():
-            self.send_header(key, value)
+        headers = self._request_headers(content_type)
+        headers.update(extra_headers or {})
+        for key, value in headers.items():
+            self.send_header(key, str(value))
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _problem(self, status, title, detail):
+        payload = {
+            "type": "about:blank",
+            "title": title,
+            "status": status,
+            "detail": detail,
+            "request_id": self.request_id,
+        }
+        self._send_text(
+            status,
+            json.dumps(payload),
+            "application/problem+json; charset=utf-8",
+        )
+
     def _send_not_modified(self, etag):
         self.send_response(304)
         self.send_header("ETag", etag)
+        for key, value in self._request_headers("text/plain").items():
+            self.send_header(key, value)
+        self.end_headers()
+
+    def _tokens(self):
+        return getattr(self.settings, "api_tokens", []) or []
+
+    def _authorized(self):
+        tokens = self._tokens()
+        if not tokens:
+            return True
+        supplied = self.headers.get("X-API-Key", "")
+        authorization = self.headers.get("Authorization", "")
+        if authorization.lower().startswith("bearer "):
+            supplied = authorization[7:].strip()
+        return any(hmac.compare_digest(str(supplied), str(token)) for token in tokens)
+
+    def _client_identity(self):
+        if getattr(self.settings, "trust_proxy_client_ip", False):
+            forwarded = self.headers.get("X-Forwarded-For", "")
+            if forwarded:
+                return forwarded.split(",", 1)[0].strip()
+        return self.client_address[0]
+
+    def _prepare(self, *, protected=False):
+        self.request_id = self.headers.get("X-Request-ID", "").strip()[:128] or uuid.uuid4().hex
+        if protected and not self._authorized():
+            self._problem(401, "Unauthorized", "A valid API token is required")
+            return False
+        limiter = getattr(self.server, "rate_limiter", None)
+        if limiter is None:
+            limiter = TokenBucketLimiter(
+                getattr(self.settings, "rate_limit_per_minute", 0),
+                getattr(self.settings, "rate_limit_burst", 20),
+            )
+            self.server.rate_limiter = limiter  # type: ignore[attr-defined]
+        allowed, retry_after = limiter.allow(self._client_identity())
+        if not allowed:
+            if _PROM_AVAILABLE:
+                RATE_LIMITED.inc()
+            self._problem(429, "Too Many Requests", f"Retry after {retry_after} seconds")
+            return False
+        return True
+
+    def do_OPTIONS(self):
+        self.request_id = uuid.uuid4().hex
+        origin = self.headers.get("Origin")
+        allowed = getattr(self.settings, "cors_allowed_origins", []) or []
+        if origin not in allowed:
+            self._problem(403, "Forbidden", "Origin is not allowed")
+            return
+        self.send_response(204)
+        for key, value in self._request_headers("text/plain").items():
+            self.send_header(key, value)
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, X-API-Key, Content-Type")
         self.end_headers()
 
     def do_HEAD(self):
@@ -114,105 +216,148 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
-        if path == "/health":
-            self._send_text(200, "ok")
+        protected = path in {"/feed", "/metrics"}
+        if not self._prepare(protected=protected):
             return
-        if path == "/":
+        if path in {"/health", "/health/live"}:
+            self._send_text(
+                200,
+                json.dumps({"status": "live", "version": __version__}),
+                "application/json; charset=utf-8",
+            )
+        elif path == "/health/ready":
+            self._handle_readiness()
+        elif path == "/":
             self._send_text(200, INDEX_TEXT)
-            return
-        if path == "/metrics":
+        elif path == "/metrics":
             self._handle_metrics()
-            return
-        if path == "/feed":
+        elif path == "/feed":
             self._handle_feed(parse_qs(parsed.query))
-            return
-        self._send_text(404, "Not found: %s\n" % parsed.path)
+        else:
+            self._problem(404, "Not Found", f"Unknown path {parsed.path}")
+
+    def _handle_readiness(self):
+        try:
+            cache_dir = self.settings.resolved_cache_dir()
+            os.makedirs(cache_dir, exist_ok=True)
+            if not os.access(cache_dir, os.R_OK | os.W_OK):
+                raise OSError("cache directory is not readable and writable")
+            semaphore = getattr(self.server, "build_semaphore", None)
+            status = {
+                "status": "ready",
+                "version": __version__,
+                "cache": {
+                    "directory": cache_dir,
+                    "content": self.service.content_cache.stats()
+                    if hasattr(self.service, "content_cache")
+                    else None,
+                    "specs": self.service.spec_cache.stats()
+                    if hasattr(self.service, "spec_cache")
+                    else None,
+                },
+                "workers": {
+                    "limit": getattr(self.settings, "max_concurrent_builds", 8),
+                    "available": getattr(semaphore, "_value", None),
+                },
+            }
+            self._send_text(200, json.dumps(status), "application/json; charset=utf-8")
+        except Exception:
+            self._problem(503, "Not Ready", "Runtime resources are unavailable")
 
     def _handle_metrics(self):
-        if not _PROM_AVAILABLE:
-            self._send_text(404, "metrics not enabled (prometheus_client missing)\n")
+        if not _PROM_AVAILABLE or not getattr(self.settings, "metrics_enabled", True):
+            self._problem(404, "Not Found", "Metrics are not enabled")
             return
-        self._send_text(
-            200, generate_latest().decode("utf-8"), content_type=CONTENT_TYPE_LATEST
-        )
+        self._send_text(200, generate_latest().decode("utf-8"), CONTENT_TYPE_LATEST)
 
     def _handle_feed(self, params):
         urls = params.get("url") or []
         url = urls[0].strip() if urls else ""
         if not url:
-            self._send_text(400, "Missing required 'url' query parameter\n")
+            self._problem(400, "Bad Request", "Missing required 'url' query parameter")
             return
-
-        # Baseline SSRF guard: reject non-http(s) URLs and, when configured,
-        # hosts outside the allow-list.
         try:
-            validate_url(url, allowed_hosts=self.service.settings.allowed_hosts)
-        except ValueError as e:
-            self._send_text(400, "Rejected url: %s\n" % e)
+            validate_url(url, allowed_hosts=getattr(self.settings, "allowed_hosts", []))
+        except ValueError as exc:
+            self._problem(400, "Rejected URL", str(exc))
             return
-
         fmt = (params.get("format", [DEFAULT_FORMAT])[0] or DEFAULT_FORMAT).lower()
         if fmt not in SUPPORTED_FORMATS:
-            self._send_text(
-                400,
-                "Unsupported format '%s'. Supported formats: %s\n"
-                % (fmt, ", ".join(SUPPORTED_FORMATS)),
+            self._problem(
+                400, "Unsupported Format", f"Supported formats: {', '.join(SUPPORTED_FORMATS)}"
             )
             return
-
-        refresh_values = params.get("refresh", ["0"])
-        force_refresh = refresh_values[0].lower() in ("1", "true", "yes")
-
-        start = time.time()
-        try:
-            feed = self.service.get_feed(url, force_refresh=force_refresh)
-            rendered = format_feed(feed, fmt=fmt, public_url=url)
-        except Exception as e:  # noqa: BLE001 - surface any extraction failure
-            log.error("Failed to build feed for %s: %s", url, e)
-            self._record_metric("502", start)
-            self._send_text(502, "Failed to build feed from %s: %s\n" % (url, e))
+        force_refresh = params.get("refresh", ["0"])[0].lower() in {"1", "true", "yes"}
+        semaphore = getattr(self.server, "build_semaphore", None)
+        if semaphore is None:
+            semaphore = threading.BoundedSemaphore(
+                getattr(self.settings, "max_concurrent_builds", 8)
+            )
+            self.server.build_semaphore = semaphore  # type: ignore[attr-defined]
+        if not semaphore.acquire(blocking=False):
+            self._record_metric("503", time.time())
+            self._problem(503, "Service Unavailable", "Feed workers are saturated")
             return
-
-        # Strong validator over the rendered body enables conditional GETs.
+        start = time.time()
+        if _PROM_AVAILABLE:
+            ACTIVE_BUILDS.inc()
+        try:
+            if hasattr(self.service, "get_feed_with_diagnostics"):
+                feed, diagnostics = self.service.get_feed_with_diagnostics(
+                    url, force_refresh=force_refresh
+                )
+            else:
+                feed = self.service.get_feed(url, force_refresh=force_refresh)
+                diagnostics = None
+            rendered = format_feed(feed, fmt=fmt, public_url=url)
+        except Exception as exc:
+            log.exception("Feed build failed request_id=%s url=%s", self.request_id, url)
+            self._record_metric("502", start)
+            self._problem(502, "Upstream Feed Failure", type(exc).__name__)
+            return
+        finally:
+            semaphore.release()
+            if _PROM_AVAILABLE:
+                ACTIVE_BUILDS.dec()
         etag = '"%s"' % hashlib.sha1(rendered.encode("utf-8")).hexdigest()
         if_none_match = self.headers.get("If-None-Match", "")
         if etag in [tag.strip() for tag in if_none_match.split(",") if tag.strip()]:
             self._record_metric("304", start)
             self._send_not_modified(etag)
             return
-
         extra = {
             "ETag": etag,
             "Last-Modified": formatdate(usegmt=True),
-            "Cache-Control": "max-age=%d" % max(0, self.service.settings.content_ttl),
+            "Cache-Control": "max-age=%d" % max(0, getattr(self.settings, "content_ttl", 0)),
         }
+        if params.get("diagnostics", ["0"])[0].lower() in {"1", "true", "yes"}:
+            if diagnostics is not None:
+                extra["X-Newsworker-Confidence"] = f"{diagnostics.confidence:.3f}"
+            if diagnostics is not None and diagnostics.warnings:
+                extra["X-Newsworker-Warnings"] = str(len(diagnostics.warnings))
         self._record_metric("200", start)
-        self._send_text(
-            200,
-            rendered,
-            content_type=CONTENT_TYPES.get(fmt, "text/plain; charset=utf-8"),
-            extra_headers=extra,
-        )
+        self._send_text(200, rendered, CONTENT_TYPES.get(fmt, "text/plain; charset=utf-8"), extra)
 
     @staticmethod
     def _record_metric(status, start):
         if _PROM_AVAILABLE:
             FEED_REQUESTS.labels(status=status).inc()
-            FEED_LATENCY.observe(time.time() - start)
+            FEED_LATENCY.observe(max(0, time.time() - start))
 
 
 def run_server(settings=None):
-    """Starts the local feed server and blocks until interrupted."""
     settings = settings or Settings()
-    server = ThreadingHTTPServer(
-        (settings.host, settings.port), FeedRequestHandler
-    )
+    settings.validate()
+    if settings.host not in {"127.0.0.1", "localhost", "::1"} and not settings.api_tokens:
+        log.warning("Server is binding a routable host without API-token authentication")
+    server = ThreadingHTTPServer((settings.host, settings.port), FeedRequestHandler)
     server.feed_service = FeedService(settings=settings)  # type: ignore[attr-defined]
-
+    server.rate_limiter = TokenBucketLimiter(
+        settings.rate_limit_per_minute, settings.rate_limit_burst
+    )  # type: ignore[attr-defined]
+    server.build_semaphore = threading.BoundedSemaphore(settings.max_concurrent_builds)  # type: ignore[attr-defined]
     base = "http://%s:%d" % (settings.host, settings.port)
     print("newsworker feed server listening on %s" % base)
-    print("Example: %s/feed?url=https://example.com/news&format=atom" % base)
-    print("Press Ctrl-C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

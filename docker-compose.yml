@@ -3,7 +3,12 @@ services:
     build: .
     image: newsworker:latest
     ports:
-      - "8787:8787"
+      # Loopback-only by default. Configure API tokens before publishing broadly.
+      - "127.0.0.1:8787:8787"
+    environment:
+      NEWSWORKER_API_TOKENS: ${NEWSWORKER_API_TOKENS:-[]}
+      NEWSWORKER_ALLOWED_HOSTS: ${NEWSWORKER_ALLOWED_HOSTS:-[]}
+      NEWSWORKER_BLOCK_PRIVATE_HOSTS: "true"
     volumes:
       # Persist config and caches across container restarts.
       - newsworker-home:/home/newsworker/.newsworker

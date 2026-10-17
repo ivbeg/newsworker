@@ -1,0 +1,22 @@
+[
+  {
+    "name": "semantic news cards",
+    "label": true,
+    "html": "<html><body><main><article class='news-card'><h2><a href='/n/1'>Important policy headline one</a></h2><p>Summary for the first report</p></article><article class='news-card'><h2><a href='/n/2'>Important policy headline two</a></h2><p>Summary for the second report</p></article><article class='news-card'><h2><a href='/n/3'>Important policy headline three</a></h2><p>Summary for the third report</p></article></main></body></html>"
+  },
+  {
+    "name": "repeated story sections",
+    "label": true,
+    "html": "<html><body><section class='story'><h3><a href='/s/1'>Regional reporting headline one</a></h3><p>Detailed regional summary one</p></section><section class='story'><h3><a href='/s/2'>Regional reporting headline two</a></h3><p>Detailed regional summary two</p></section><section class='story'><h3><a href='/s/3'>Regional reporting headline three</a></h3><p>Detailed regional summary three</p></section></body></html>"
+  },
+  {
+    "name": "navigation links",
+    "label": false,
+    "html": "<html><body><nav><h2><a href='/a'>Navigation option alpha</a></h2><h2><a href='/b'>Navigation option beta</a></h2><h2><a href='/c'>Navigation option gamma</a></h2></nav></body></html>"
+  },
+  {
+    "name": "product cards",
+    "label": false,
+    "html": "<html><body><main><article class='product'><h2><a href='/p/1'>Buy product number one</a></h2><button>Add to cart</button></article><article class='product'><h2><a href='/p/2'>Buy product number two</a></h2><button>Add to cart</button></article><article class='product'><h2><a href='/p/3'>Buy product number three</a></h2><button>Add to cart</button></article></main></body></html>"
+  }
+]

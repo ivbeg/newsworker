@@ -43,6 +43,8 @@ from xml.sax.saxutils import escape, quoteattr
 
 import yaml
 
+from .tools import normalize_datetime
+
 #: Supported output format identifiers for extracted feeds.
 SUPPORTED_FORMATS = ("json", "rss", "atom", "csv", "jsonfeed", "html", "markdown", "yaml")
 
@@ -66,13 +68,9 @@ def _ensure_tz(value):
     if value is None:
         return None
     if isinstance(value, datetime.datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=datetime.timezone.utc)
-        return value
+        return normalize_datetime(value)
     if isinstance(value, datetime.date):
-        return datetime.datetime(
-            value.year, value.month, value.day, tzinfo=datetime.timezone.utc
-        )
+        return datetime.datetime(value.year, value.month, value.day, tzinfo=datetime.timezone.utc)
     return None
 
 
@@ -95,6 +93,12 @@ def _enclosure_length(item):
         return int(length) if length is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _enclosure_type(item):
+    extra = item.get("extra") or {}
+    value = extra.get("enclosure_type") or extra.get("media_type")
+    return str(value) if value else None
 
 
 def to_json(feed):
@@ -124,7 +128,8 @@ def _build_feedgen(feed, public_url=None):
         entry.id(item.get("unique_id") or item_link or item.get("title") or "")
         entry.title(item.get("title") or item.get("description") or "(no title)")
         if item.get("content"):
-            entry.content(item["content"])
+            kind = item.get("content_kind", "text")
+            entry.content(item["content"], type="html" if kind == "html" else "text")
         if item.get("description"):
             entry.description(item["description"])
         if item_link:
@@ -140,7 +145,9 @@ def _build_feedgen(feed, public_url=None):
         image = _first_image(item)
         if image:
             length = _enclosure_length(item)
-            entry.enclosure(image, str(length) if length is not None else "0", "image/jpeg")
+            media_type = _enclosure_type(item)
+            if length is not None and media_type:
+                entry.enclosure(image, str(length), media_type)
     return fg
 
 
@@ -164,6 +171,8 @@ def to_csv(feed):
         "link",
         "pubdate",
         "description",
+        "content",
+        "content_kind",
         "image",
         "author",
         "categories",
@@ -179,6 +188,8 @@ def to_csv(feed):
                 "link": item.get("link") or "",
                 "pubdate": pubdate.isoformat() if pubdate is not None else "",
                 "description": item.get("description") or "",
+                "content": item.get("content") or "",
+                "content_kind": item.get("content_kind") or "",
                 "image": _first_image(item) or "",
                 "author": item.get("author") or "",
                 "categories": ", ".join(item.get("categories") or []),
@@ -210,7 +221,12 @@ def to_jsonfeed(feed, public_url=None):
         }
         if item.get("link"):
             entry["url"] = item["link"]
-        if item.get("description"):
+        content = item.get("content")
+        if content is not None:
+            entry["content_html" if item.get("content_kind") == "html" else "content_text"] = (
+                content
+            )
+        elif item.get("description"):
             entry["content_text"] = item["description"]
         pubdate = _ensure_tz(item.get("pubdate"))
         if pubdate is not None:
@@ -241,7 +257,7 @@ def to_html(feed):
     title = escape(feed.get("title") or "News feed")
     parts = [
         "<!DOCTYPE html>",
-        '<html lang="%s">' % escape(feed.get("language") or "en"),
+        "<html lang=%s>" % quoteattr(str(feed.get("language") or "en")),
         "<head>",
         '<meta charset="utf-8">',
         "<title>%s</title>" % title,
@@ -262,15 +278,17 @@ def to_html(feed):
         date = escape(_format_item_date(item))
         parts.append('<article class="card">')
         if link:
-            parts.append(
-                '<h2><a href="%s">%s</a></h2>' % (escape(link), item_title)
-            )
+            parts.append("<h2><a href=%s>%s</a></h2>" % (quoteattr(str(link)), item_title))
         else:
             parts.append("<h2>%s</h2>" % item_title)
         if date:
             parts.append('<div class="date">%s</div>' % date)
         if item.get("description"):
             parts.append("<p>%s</p>" % escape(item["description"]))
+        if item.get("content"):
+            # Preview output never trusts extracted markup; even content marked
+            # HTML is represented as data unless a sanitizer is introduced.
+            parts.append('<div class="content">%s</div>' % escape(str(item["content"])))
         parts.append("</article>")
     parts.append("</body>")
     parts.append("</html>")
@@ -279,15 +297,26 @@ def to_html(feed):
 
 def to_markdown(feed):
     """Serializes ``feed`` items to a Markdown bulleted list."""
-    lines = ["# %s" % (feed.get("title") or "News feed"), ""]
+    lines = ["# %s" % _escape_markdown(feed.get("title") or "News feed"), ""]
     for item in feed.get("items", []):
         title = item.get("title") or item.get("description") or "(no title)"
         link = item.get("link")
         date = _format_item_date(item)
-        heading = "[%s](%s)" % (title, link) if link else title
+        safe_title = _escape_markdown(str(title))
+        safe_link = (
+            str(link).replace("\\", "%5C").replace(")", "%29").replace("(", "%28") if link else None
+        )
+        heading = "[%s](%s)" % (safe_title, safe_link) if safe_link else safe_title
         prefix = "- **%s** — " % date if date else "- "
         lines.append("%s%s" % (prefix, heading))
     return "\n".join(lines) + "\n"
+
+
+def _escape_markdown(value):
+    text = str(value)
+    for char in "\\`*_{}[]<>#+-.!|":
+        text = text.replace(char, "\\" + char)
+    return text.replace("\r", " ").replace("\n", " ")
 
 
 def to_yaml(feed):
@@ -303,9 +332,11 @@ def read_opml(source):
     """
     import os
 
-    if isinstance(source, str) and (
-        "\n" in source or source.lstrip().startswith("<")
-    ) and not os.path.exists(source):
+    if (
+        isinstance(source, str)
+        and ("\n" in source or source.lstrip().startswith("<"))
+        and not os.path.exists(source)
+    ):
         root = ET.fromstring(source)
     else:
         root = ET.parse(source).getroot()
@@ -352,8 +383,7 @@ def format_feed(feed, fmt="json", public_url=None):
     if fmt == "yaml":
         return to_yaml(feed)
     raise ValueError(
-        "Unsupported format '%s'. Supported formats: %s"
-        % (fmt, ", ".join(SUPPORTED_FORMATS))
+        "Unsupported format '%s'. Supported formats: %s" % (fmt, ", ".join(SUPPORTED_FORMATS))
     )
 
 
@@ -487,10 +517,11 @@ def format_scan(results, fmt="json", public_url=None):
         return scan_to_opml(results)
     if fmt in ("rss", "atom"):
         feed = _scan_to_feed(results)
-        return to_rss(feed, public_url=public_url) if fmt == "rss" else to_atom(
-            feed, public_url=public_url
+        return (
+            to_rss(feed, public_url=public_url)
+            if fmt == "rss"
+            else to_atom(feed, public_url=public_url)
         )
     raise ValueError(
-        "Unsupported format '%s'. Supported formats: %s"
-        % (fmt, ", ".join(SCAN_FORMATS))
+        "Unsupported format '%s'. Supported formats: %s" % (fmt, ", ".join(SCAN_FORMATS))
     )

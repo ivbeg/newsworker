@@ -2,28 +2,29 @@
 # -*- coding: utf8 -*-
 import datetime
 import json
+import logging
 import os
 import sys
-import logging
 import time
+from pprint import pprint
 from typing import List, Optional
 
-from pprint import pprint
 import typer
+
 from newsworker import __version__
 from newsworker.cache import ContentCache, SpecCache
-from newsworker.finder import FeedsFinder
 from newsworker.extractor import FeedExtractor
-from newsworker.spec import FeedSpec, SpecAnalyzer
-from newsworker.service import FeedService
-from newsworker.settings import Settings
-from newsworker.server import run_server
+from newsworker.finder import FeedsFinder
 from newsworker.formats import (
     SCAN_FORMATS,
     SUPPORTED_FORMATS,
     format_feed,
     format_scan,
 )
+from newsworker.server import run_server
+from newsworker.service import FeedService
+from newsworker.settings import Settings
+from newsworker.spec import FeedSpec, SpecAnalyzer
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11"
 DEFAULT_FILTERED_TEXT_URL = 150
@@ -64,9 +65,7 @@ def _parse_headers(values):
     headers = {}
     for raw in values or []:
         if ":" not in raw:
-            raise typer.BadParameter(
-                "Header %r must be in 'Key: Value' form" % raw
-            )
+            raise typer.BadParameter("Header %r must be in 'Key: Value' form" % raw)
         key, _, value = raw.partition(":")
         headers[key.strip()] = value.strip()
     return headers
@@ -97,8 +96,10 @@ def _configure_fetch_settings(
     language=None,
 ):
     """Applies CLI fetch flags to ``settings`` (shared by ``extract`` and ``analyze``)."""
-    settings.user_agent = user_agent or USER_AGENT
-    settings.filtered_text_length = DEFAULT_FILTERED_TEXT_URL
+    # Compatibility helper for library callers. CLI commands use the immutable
+    # layered resolver below so omitted options never overwrite file/env values.
+    if user_agent is not None:
+        settings.user_agent = user_agent
     if insecure:
         settings.verify_tls = False
     if ignore_robots:
@@ -116,9 +117,43 @@ def _configure_fetch_settings(
     return settings
 
 
+def _resolve_fetch_settings(
+    config,
+    *,
+    user_agent=None,
+    insecure=False,
+    ignore_robots=False,
+    timeout=None,
+    proxy=None,
+    header=None,
+    cookies=None,
+    language=None,
+    extra=None,
+):
+    base = Settings.resolve(config)
+    cli = dict(extra or {})
+    if user_agent is not None:
+        cli["user_agent"] = user_agent
+    if insecure:
+        cli["verify_tls"] = False
+    if ignore_robots:
+        cli["respect_robots"] = False
+    if timeout is not None:
+        cli["request_timeout"] = timeout
+    if proxy is not None:
+        cli["proxy"] = proxy
+    if header:
+        cli["extra_headers"] = {**base.extra_headers, **_parse_headers(header)}
+    if cookies is not None:
+        cli["cookies_file"] = cookies
+    if language is not None:
+        cli["default_language"] = language
+    return Settings.resolve(config, cli=cli)
+
+
 def _extractor_from_settings(settings):
     """Builds a :class:`FeedExtractor` from resolved :class:`Settings`."""
-    return FeedExtractor(
+    extractor = FeedExtractor(
         filtered_text_length=settings.filtered_text_length,
         max_bytes=settings.max_content_bytes,
         verify_tls=settings.verify_tls,
@@ -129,6 +164,13 @@ def _extractor_from_settings(settings):
         cookies_file=settings.cookies_file,
         default_language=settings.default_language,
     )
+    extractor.default_timezone = settings.default_timezone
+    extractor.redirect_limit = settings.redirect_limit
+    extractor.allowed_hosts = tuple(settings.allowed_hosts)
+    extractor.block_private_hosts = settings.block_private_hosts
+    extractor.allow_private_hosts = settings.allow_private_hosts
+    extractor.trusted_proxy = settings.trusted_proxy
+    return extractor
 
 
 def _apply_item_filters(feed, since=None, until=None, limit=None):
@@ -170,11 +212,26 @@ def main(
 
 cache_app = typer.Typer(help="Inspect and manage the spec and content caches.")
 app.add_typer(cache_app, name="cache")
+spec_app = typer.Typer(help="Validate and inspect parsing specifications.")
+app.add_typer(spec_app, name="spec")
+
+
+@spec_app.command("validate")
+def spec_validate(path: str = typer.Argument(..., help="YAML parsing spec path.")):
+    """Validate a parsing spec without fetching its source URL."""
+    from newsworker.spec import FeedSpec
+
+    try:
+        FeedSpec.load(path).validate()
+    except Exception as exc:
+        typer.echo(f"invalid: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"valid: {path}")
 
 
 def _resolve_caches(config, specs, content):
     """Returns a ``{name: cache}`` mapping honoring the ``--specs``/``--content`` scope."""
-    settings = Settings.load(config)
+    settings = Settings.resolve(config)
     cache_dir = settings.resolved_cache_dir()
     both = not specs and not content
     caches = {}
@@ -204,8 +261,7 @@ def cache_stats(
     for name, cache in _resolve_caches(config, specs, content).items():
         stats = cache.stats()
         typer.echo(
-            "%s: %d entries, %d bytes (%s)"
-            % (name, stats["count"], stats["bytes"], cache.dir)
+            "%s: %d entries, %d bytes (%s)" % (name, stats["count"], stats["bytes"], cache.dir)
         )
 
 
@@ -237,7 +293,13 @@ def cache_clear(
 
 @app.command()
 def analyze(
-    url: str = typer.Argument(..., help="URL to analyze and build a parsing spec for"),
+    url: Optional[str] = typer.Argument(None, help="URL to analyze and build a parsing spec for"),
+    source_file: Optional[str] = typer.Option(
+        None, "--file", help="Analyze a local HTML file (use '-' for stdin)."
+    ),
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url", help="Base URL used to resolve links in local HTML."
+    ),
     output: Optional[str] = typer.Option(
         None,
         "--output",
@@ -308,9 +370,8 @@ def analyze(
     if json_logs:
         enableJsonLogs()
     try:
-        settings = Settings.load(config)
-        _configure_fetch_settings(
-            settings,
+        settings = _resolve_fetch_settings(
+            config,
             user_agent=user_agent,
             insecure=insecure,
             ignore_robots=ignore_robots,
@@ -320,8 +381,25 @@ def analyze(
             cookies=cookies,
             language=language,
         )
+        from newsworker.sources import DocumentSource
+
+        if bool(url) == bool(source_file):
+            raise typer.BadParameter("supply exactly one URL or --file source")
+        source = (
+            DocumentSource.stdin(base_url=base_url or "", stream=sys.stdin.buffer)
+            if source_file == "-"
+            else DocumentSource.file(source_file, base_url=base_url or "")
+            if source_file
+            else DocumentSource.url(url or "")
+        )
         analyzer = SpecAnalyzer(extractor=_extractor_from_settings(settings))
-        spec = analyzer.analyze(url, user_agent=settings.user_agent, require_items=True)
+        spec = analyzer.analyze(
+            source.base_url,
+            data=source.data,
+            user_agent=settings.user_agent,
+            require_items=True,
+        )
+        spec.input_kind = source.kind
         yaml_text = spec.to_yaml()
         if output:
             spec.save(output)
@@ -329,16 +407,23 @@ def analyze(
         else:
             print(yaml_text)
     except Exception as e:
-        logging.error(f"Failed to analyze {url}: {e}")
+        logging.error(f"Failed to analyze {url or source_file}: {e}")
         if verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
 
 @app.command()
 def extract(
-    url: str = typer.Argument(..., help="URL to extract feed from"),
+    url: Optional[str] = typer.Argument(None, help="URL to extract feed from"),
+    source_file: Optional[str] = typer.Option(
+        None, "--file", help="Extract from a local HTML file (use '-' for stdin)."
+    ),
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url", help="Base URL used to resolve links in local HTML."
+    ),
     spec: Optional[str] = typer.Option(
         None,
         "--spec",
@@ -415,6 +500,18 @@ def extract(
         help="Follow each item link and extract the full article body (needs the "
         "'fulltext' extra: trafilatura or readability-lxml).",
     ),
+    explain: bool = typer.Option(
+        False, "--explain", help="Print extraction diagnostics to stderr."
+    ),
+    explain_json: bool = typer.Option(
+        False, "--explain-json", help="Print machine-readable diagnostics to stderr."
+    ),
+    render: bool = typer.Option(
+        False, "--render", help="Render the page with the optional browser extra."
+    ),
+    undated: bool = typer.Option(
+        False, "--undated", help="Enable conservative undated-listing fallback."
+    ),
     json_logs: bool = typer.Option(
         False,
         "--json-logs",
@@ -471,9 +568,8 @@ def extract(
         )
         sys.exit(2)
     try:
-        settings = Settings.load(config)
-        _configure_fetch_settings(
-            settings,
+        settings = _resolve_fetch_settings(
+            config,
             user_agent=user_agent,
             insecure=insecure,
             ignore_robots=ignore_robots,
@@ -482,19 +578,41 @@ def extract(
             header=header,
             cookies=cookies,
             language=language,
+            extra={
+                "full_text": True if full_text else None,
+                "render": True if render else None,
+                "undated_fallback": True if undated else None,
+            },
         )
-        if full_text:
-            settings.full_text = True
+        from newsworker.diagnostics import diagnostics_text
+        from newsworker.sources import DocumentSource
+
+        if bool(url) == bool(source_file):
+            raise typer.BadParameter("supply exactly one URL or --file source")
+        source = (
+            DocumentSource.stdin(base_url=base_url or "", stream=sys.stdin.buffer)
+            if source_file == "-"
+            else DocumentSource.file(source_file, base_url=base_url or "")
+            if source_file
+            else DocumentSource.url(url or "")
+        )
         service = FeedService(settings=settings, use_cache=not no_cache)
         explicit_spec = FeedSpec.load(spec) if spec else None
+        context = service.new_context(source=source.kind, base_url=source.base_url)
         feed = service.get_feed(
-            url,
+            source.base_url,
             force_refresh=refresh,
             explicit_spec=explicit_spec,
             max_pages=max_pages,
+            data=source.data,
+            context=context,
         )
         _apply_item_filters(feed, since=since, until=until, limit=limit)
-        rendered = format_feed(feed, fmt=fmt, public_url=url)
+        rendered = format_feed(feed, fmt=fmt, public_url=source.base_url)
+        if explain_json:
+            typer.echo(json.dumps(context.diagnostics.to_dict(), indent=2), err=True)
+        elif explain:
+            typer.echo(diagnostics_text(context.diagnostics), err=True)
         if output:
             with open(output, "w", encoding="utf-8") as handle:
                 handle.write(rendered)
@@ -502,9 +620,10 @@ def extract(
         else:
             print(rendered)
     except Exception as e:
-        logging.error(f"Failed to extract feed from {url}: {e}")
+        logging.error(f"Failed to extract feed from {url or source_file}: {e}")
         if verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
@@ -555,16 +674,15 @@ def serve(
     if verbose:
         enableVerbose()
     try:
-        settings = Settings.load(config)
-        settings.user_agent = USER_AGENT
-        if host is not None:
-            settings.host = host
-        if port is not None:
-            settings.port = port
-        if cache_dir is not None:
-            settings.cache_dir = cache_dir
-        if content_ttl is not None:
-            settings.content_ttl = content_ttl
+        settings = Settings.resolve(
+            config,
+            cli={
+                "host": host,
+                "port": port,
+                "cache_dir": cache_dir,
+                "content_ttl": content_ttl,
+            },
+        )
         run_server(settings)
     except Exception as e:
         logging.error(f"Failed to start feed server: {e}")
@@ -595,6 +713,15 @@ def scan(
         "--sitemap",
         help="Also discover feed URLs from the site's sitemap.xml.",
     ),
+    no_verify: bool = typer.Option(
+        False,
+        "--no-verify",
+        help="Return candidates without fetching them for verification.",
+    ),
+    max_workers: int = typer.Option(
+        8, "--max-workers", help="Maximum concurrent candidate verifications."
+    ),
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -608,12 +735,16 @@ def scan(
     fmt = format.lower()
     if fmt not in SCAN_FORMATS:
         logging.error(
-            "Unsupported format '%s'. Supported formats: %s"
-            % (format, ", ".join(SCAN_FORMATS))
+            "Unsupported format '%s'. Supported formats: %s" % (format, ", ".join(SCAN_FORMATS))
         )
         sys.exit(2)
     try:
-        r = FeedsFinder().find_feeds(url, noverify=False, include_sitemap=sitemap)
+        r = FeedsFinder(Settings.resolve(config)).find_feeds(
+            url,
+            noverify=no_verify,
+            include_sitemap=sitemap,
+            max_workers=max_workers,
+        )
         rendered = format_scan(r, fmt=fmt, public_url=url)
         if output:
             with open(output, "w", encoding="utf-8") as handle:
@@ -625,6 +756,7 @@ def scan(
         logging.error(f"Failed to scan {url}: {e}")
         if verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
@@ -655,6 +787,15 @@ def batch(
         help="Use the optional aiohttp transport for concurrent page fetches.",
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Bypass caches."),
+    manifest: Optional[str] = typer.Option(
+        None, "--manifest", help="Write a JSON or CSV per-source manifest."
+    ),
+    manifest_format: str = typer.Option(
+        "json", "--manifest-format", help="Manifest format: json or csv."
+    ),
+    failure_policy: str = typer.Option(
+        "strict", "--failure-policy", help="strict or partial-success."
+    ),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -687,20 +828,39 @@ def batch(
         logging.error("No URLs to process.")
         sys.exit(2)
 
-    settings = Settings.load(config)
-    settings.user_agent = USER_AGENT
-    settings.filtered_text_length = DEFAULT_FILTERED_TEXT_URL
-    settings.use_async = async_transport
+    if max_workers <= 0:
+        raise typer.BadParameter("max-workers must be positive", param_hint="--max-workers")
+    if manifest_format not in {"json", "csv"}:
+        raise typer.BadParameter("manifest-format must be json or csv")
+    if failure_policy not in {"strict", "partial-success"}:
+        raise typer.BadParameter("failure-policy must be strict or partial-success")
+    settings = Settings.resolve(
+        config,
+        cli={"use_async": True if async_transport else None},
+    )
     service = FeedService(settings=settings, use_cache=not no_cache)
 
     os.makedirs(output_dir, exist_ok=True)
     ext = {"markdown": "md", "jsonfeed": "json"}.get(fmt, fmt)
     results = service.get_feeds(urls, max_workers=max_workers)
     written = 0
+    from newsworker.batch import BatchResult, write_manifest
+
+    records = []
     for url in urls:
         feed = results.get(url)
         if not feed or "error" in feed:
             logging.warning("Skipping %s: %s", url, (feed or {}).get("error", "no result"))
+            records.append(
+                BatchResult(
+                    source=url,
+                    status="failure",
+                    elapsed_ms=float((feed or {}).get("elapsed_ms") or 0.0),
+                    transport="async" if async_transport else "thread",
+                    error_type=(feed or {}).get("error_type", "BatchError"),
+                    error=(feed or {}).get("error", "no result"),
+                )
+            )
             continue
         rendered = format_feed(feed, fmt=fmt, public_url=url)
         name = hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
@@ -708,41 +868,214 @@ def batch(
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(rendered)
         written += 1
+        provenance = feed.get("provenance") or {}
+        warnings = list(provenance.get("warnings") or [])
+        records.append(
+            BatchResult(
+                source=url,
+                status="partial" if warnings else "success",
+                output_path=os.path.abspath(path),
+                elapsed_ms=float(provenance.get("elapsed_ms") or 0.0),
+                transport="async" if async_transport else "thread",
+                cache_state=provenance.get("cache_state"),
+                item_count=len(feed.get("items", [])),
+                strategy=provenance.get("strategy"),
+                confidence=provenance.get("confidence"),
+                warnings=warnings,
+            )
+        )
+    if manifest:
+        write_manifest(records, manifest, manifest_format)
     typer.echo("Wrote %d feed file(s) to %s" % (written, output_dir))
+    failures = sum(record.status == "failure" for record in records)
+    if failures and (failure_policy == "strict" or written == 0):
+        raise typer.Exit(code=2 if written else 3)
 
 
-def _run_watch_iteration(service, url, fmt, dedup, webhook, max_pages):
+class WatchIterationResult(list):
+    """List-compatible watch result carrying operational delivery counters."""
+
+    def __init__(self, items=(), **status):
+        super().__init__(items)
+        self.status = status
+
+    @property
+    def successful(self):
+        return not self.status.get("failed") and not self.status.get("pending")
+
+
+def _run_watch_iteration(
+    service,
+    url,
+    fmt,
+    dedup,
+    webhook,
+    max_pages,
+    *,
+    channels=None,
+):
     """One watch tick: extract, filter to new items, emit and/or deliver.
 
     Returns the list of new items (useful for tests).
     """
-    from newsworker.delivery import deliver_webhook
+    from newsworker.delivery import (
+        DeliveryPayload,
+        StdoutChannel,
+        WebhookChannel,
+    )
+    from newsworker.fetch import policy_from_settings
 
-    feed = service.get_feed(url, max_pages=max_pages)
+    runtime_settings = getattr(service, "settings", Settings())
+
+    try:
+        feed = service.get_feed(url, max_pages=max_pages, revalidate=True)
+    except TypeError as exc:
+        if "revalidate" not in str(exc):
+            raise
+        feed = service.get_feed(url, max_pages=max_pages)
     items = feed.get("items", [])
-    new_items = dedup.filter_new(url, items) if dedup is not None else items
-    if not new_items:
-        return []
-    emitted = dict(feed)
-    emitted["items"] = new_items
-    if webhook:
-        deliver_webhook(webhook, new_items, feed=feed)
-    else:
-        print(format_feed(emitted, fmt=fmt, public_url=url))
-    return new_items
+    if channels is None:
+        channels = [
+            WebhookChannel(
+                webhook,
+                timeout=getattr(runtime_settings, "request_timeout", 30),
+                policy=policy_from_settings(runtime_settings, operation="delivery"),
+            )
+            if webhook
+            else StdoutChannel()
+        ]
+    channels = list(channels)
+    if not channels:
+        raise ValueError("at least one delivery channel is required")
+    for channel in channels:
+        channel.validate_config()
+
+    def destination_for(channel):
+        return getattr(channel, "destination_identity", channel.name)
+
+    def unique_items(delivered):
+        result = []
+        identities = set()
+        for item in delivered:
+            identity = str(
+                item.get("unique_id") or item.get("link") or item.get("title") or id(item)
+            )
+            if identity not in identities:
+                identities.add(identity)
+                result.append(item)
+        return result
+
+    if dedup is None:
+        delivered = []
+        failed = 0
+        for channel in channels:
+            destination = destination_for(channel)
+            for item in items:
+                from newsworker.dedup import DedupStore
+
+                key = DedupStore.idempotency_key(
+                    url,
+                    DedupStore._uid(item),
+                    channel.name,
+                    destination,
+                )
+                result = channel.send(DeliveryPayload(item, feed, key))
+                if result.successful:
+                    delivered.append(item)
+                else:
+                    failed += 1
+        return WatchIterationResult(
+            unique_items(delivered),
+            discovered=len(items),
+            delivered=len(delivered),
+            failed=failed,
+            pending=failed,
+        )
+
+    dedup.release_expired_claims()
+
+    def deliver_due(channel, records):
+        delivered_items = []
+        failed = 0
+        retried = 0
+        max_attempts = getattr(runtime_settings, "delivery_retries", 3)
+        backoff = getattr(runtime_settings, "delivery_backoff", 1.0)
+        for record in records:
+            result = channel.send(DeliveryPayload(record.payload, feed, record.idempotency_key))
+            if result.successful:
+                dedup.acknowledge(record.idempotency_key)
+                delivered_items.append(record.payload)
+            else:
+                terminal = result.terminal or record.attempts >= max_attempts
+                dedup.fail(
+                    record.idempotency_key,
+                    result.detail or result.status,
+                    backoff=backoff,
+                    terminal=terminal,
+                )
+                failed += 1
+                if not terminal:
+                    retried += 1
+        return delivered_items, failed, retried
+
+    # Each destination has an independent durable lifecycle. Drain its due work
+    # from prior runs before adding this poll's newly discovered items.
+    delivered = []
+    failed = 0
+    retried = 0
+    inserted_uids = set()
+    pending = 0
+    terminal = 0
+    for channel in channels:
+        destination = destination_for(channel)
+        prior = dedup.claim_due(feed=url, channel=channel.name, destination=destination)
+        prior_delivered, prior_failed, prior_retried = deliver_due(channel, prior)
+        inserted = dedup.enqueue(url, items, channel=channel.name, destination=destination)
+        inserted_uids.update(record.uid for record in inserted)
+        current = dedup.claim_due(feed=url, channel=channel.name, destination=destination)
+        current_delivered, current_failed, current_retried = deliver_due(channel, current)
+        counts = dedup.counts(feed=url, channel=channel.name, destination=destination)
+        delivered.extend(prior_delivered + current_delivered)
+        failed += prior_failed + current_failed
+        retried += prior_retried + current_retried
+        pending += counts.get("pending", 0) + counts.get("retry", 0) + counts.get("claimed", 0)
+        terminal += counts.get("terminal", 0)
+    status = {
+        "discovered": len(inserted_uids),
+        "delivered": len(delivered),
+        "retried": retried,
+        "failed": failed,
+        "pending": pending,
+        "terminal": terminal,
+    }
+    logging.info("watch_delivery %s", json.dumps(status, sort_keys=True))
+    return WatchIterationResult(unique_items(delivered), **status)
 
 
 @app.command()
 def watch(
     url: str = typer.Argument(..., help="Page URL to watch."),
-    interval: int = typer.Option(
-        300, "--interval", "-i", help="Seconds between polls."
+    interval: Optional[float] = typer.Option(
+        None, "--interval", "-i", help="Seconds between polls. Overrides settings."
     ),
     webhook: Optional[str] = typer.Option(
         None, "--webhook", help="POST new items as JSON to this URL."
     ),
+    channel: Optional[List[str]] = typer.Option(
+        None,
+        "--channel",
+        help="Delivery channel; repeat for multiple destinations (stdout/webhook/smtp/telegram).",
+    ),
+    smtp_recipient: Optional[str] = typer.Option(
+        None, "--smtp-recipient", help="Recipient used by the smtp channel."
+    ),
+    telegram_chat_id: Optional[str] = typer.Option(
+        None, "--telegram-chat-id", help="Chat used by the telegram channel."
+    ),
     format: str = typer.Option("json", "--format", "-f", help="Output format."),
-    max_pages: int = typer.Option(1, "--max-pages", help="Pages to follow per poll."),
+    max_pages: Optional[int] = typer.Option(
+        None, "--max-pages", help="Pages to follow per poll. Overrides settings."
+    ),
     max_iterations: int = typer.Option(
         0,
         "--max-iterations",
@@ -763,9 +1096,33 @@ def watch(
         logging.error("Unsupported format '%s'." % format)
         sys.exit(2)
 
-    settings = Settings.load(config)
-    settings.user_agent = USER_AGENT
-    settings.filtered_text_length = DEFAULT_FILTERED_TEXT_URL
+    if interval is not None and interval <= 0:
+        raise typer.BadParameter("interval must be positive", param_hint="--interval")
+    if max_pages is not None and max_pages <= 0:
+        raise typer.BadParameter("max-pages must be positive", param_hint="--max-pages")
+    if max_iterations < 0:
+        raise typer.BadParameter(
+            "max-iterations must not be negative", param_hint="--max-iterations"
+        )
+    settings = Settings.resolve(
+        config,
+        cli={"watch_interval": interval, "watch_max_pages": max_pages},
+    )
+    interval = settings.watch_interval
+    max_pages = settings.watch_max_pages
+    from newsworker.delivery import registry_from_settings
+
+    registry = registry_from_settings(
+        settings,
+        webhook_url=webhook or "",
+        smtp_recipient=smtp_recipient or "",
+        telegram_chat_id=telegram_chat_id or "",
+    )
+    channel_names = list(dict.fromkeys(channel or (["webhook"] if webhook else ["stdout"])))
+    try:
+        selected_channels = [registry.get(name) for name in channel_names]
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--channel") from exc
     service = FeedService(settings=settings)
     dedup = DedupStore(os.path.join(settings.resolved_cache_dir(), "seen.sqlite3"))
 
@@ -781,7 +1138,23 @@ def watch(
     try:
         while not stop["flag"]:
             try:
-                _run_watch_iteration(service, url, fmt, dedup, webhook, max_pages)
+                result = _run_watch_iteration(
+                    service,
+                    url,
+                    fmt,
+                    dedup,
+                    webhook,
+                    max_pages,
+                    channels=selected_channels,
+                )
+                if max_iterations == 1 and not result.successful:
+                    undelivered = result.status.get("pending", 0) + result.status.get("terminal", 0)
+                    message = "Watch completed with %d pending delivery item(s)" % undelivered
+                    logging.error(message)
+                    typer.echo(message, err=True)
+                    raise typer.Exit(code=1)
+            except typer.Exit:
+                raise
             except Exception as e:  # noqa: BLE001
                 logging.error("Watch iteration failed for %s: %s", url, e)
             iterations += 1
@@ -793,6 +1166,7 @@ def watch(
                 time.sleep(min(1, interval - slept))
                 slept += 1
     finally:
+        dedup.prune(settings.delivered_retention_days)
         dedup.close()
 
 
@@ -819,6 +1193,7 @@ def parsedate(
         logging.error(f"Failed to parse date '{datestr}': {e}")
         if verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
@@ -826,6 +1201,7 @@ def parsedate(
 def cli():
     """Main CLI entry point"""
     app()
+
 
 # if __name__ == '__main__':
 #    cli()

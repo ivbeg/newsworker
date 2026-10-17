@@ -5,9 +5,9 @@ import os
 from typer.testing import CliRunner
 
 from newsworker.core import app
+from newsworker.fetch import FetchResult
 from newsworker.finder import FeedsFinder
 from newsworker.formats import read_opml
-
 
 runner = CliRunner()
 
@@ -31,20 +31,19 @@ OPML = """<?xml version="1.0"?>
 """
 
 
-class _Resp:
-    def __init__(self, content):
+class _Transport:
+    def __init__(self, content=None, error=None):
         self.content = content
+        self.error = error
 
-    def raise_for_status(self):
-        return None
+    def fetch(self, request, policy):
+        if self.error:
+            raise self.error
+        return FetchResult(request.url, request.url, 200, {}, self.content)
 
 
-def test_discover_sitemap_feeds(monkeypatch):
-    finder = FeedsFinder()
-    monkeypatch.setattr(
-        "newsworker.finder.requests.get",
-        lambda url, timeout=30: _Resp(SITEMAP.encode("utf-8")),
-    )
+def test_discover_sitemap_feeds():
+    finder = FeedsFinder(transport=_Transport(SITEMAP.encode("utf-8")))
     feeds = finder.discover_sitemap_feeds("https://example.com/")
     urls = {f["url"] for f in feeds}
     assert "https://example.com/feed.xml" in urls
@@ -52,14 +51,9 @@ def test_discover_sitemap_feeds(monkeypatch):
     assert "https://example.com/about" not in urls
 
 
-def test_discover_sitemap_missing_is_empty(monkeypatch):
-    import requests
-
-    def _boom(url, timeout=30):
-        raise requests.exceptions.ConnectionError("nope")
-
-    monkeypatch.setattr("newsworker.finder.requests.get", _boom)
-    assert FeedsFinder().discover_sitemap_feeds("https://example.com/") == []
+def test_discover_sitemap_missing_is_empty():
+    finder = FeedsFinder(transport=_Transport(error=RuntimeError("nope")))
+    assert finder.discover_sitemap_feeds("https://example.com/") == []
 
 
 def test_read_opml_from_string():
@@ -79,9 +73,7 @@ def test_read_opml_from_file(tmp_path):
 
 def test_batch_command_writes_one_file_per_url(tmp_path, monkeypatch):
     urls_file = tmp_path / "urls.txt"
-    urls_file.write_text(
-        "https://a.example/x\n# comment\nhttps://b.example/y\n", encoding="utf-8"
-    )
+    urls_file.write_text("https://a.example/x\n# comment\nhttps://b.example/y\n", encoding="utf-8")
     out_dir = tmp_path / "out"
 
     def fake_get_feeds(self, urls, max_workers=4, force_refresh=False):
