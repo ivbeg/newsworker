@@ -263,6 +263,89 @@ def layout_flat(lang, items, style):
     return f'<div id="content"><p class="tags"><a href="/tags/a">Tag A</a> <a href="/tags/b">Tag B</a></p>{rows}</div>'
 
 
+CORPUS_NOW = dt.datetime(2025, 10, 16, 12, 0, tzinfo=dt.timezone.utc)
+
+RELATIVE = {
+    "en": ("{n} hours ago", "yesterday", "{n} days ago"),
+    "ru": ("{n} часа назад", "вчера", "{n} дня назад"),
+    "uk": ("{n} години тому", "вчора", "{n} дні тому"),
+    "de": ("vor {n} Stunden", "gestern", "vor {n} Tagen"),
+    "fr": ("il y a {n} heures", "hier", "il y a {n} jours"),
+    "es": ("hace {n} horas", "ayer", "hace {n} días"),
+    "it": ("{n} ore fa", "ieri", "{n} giorni fa"),
+    "pt": ("há {n} horas", "ontem", "há {n} dias"),
+}
+
+
+def relative_items(lang, seed):
+    """Items dated relative to CORPUS_NOW: hours ago, yesterday, then 2-4 days ago."""
+    items = items_for(lang, seed)
+    hours, yesterday, days = RELATIVE[lang]
+    offsets = [dt.timedelta(hours=3), dt.timedelta(days=1)] + [
+        dt.timedelta(days=n) for n in (2, 3, 4, 4)
+    ]
+    labels = [hours.format(n=3), yesterday] + [days.format(n=n) for n in (2, 3, 4, 4)]
+    for item, offset, label in zip(items, offsets, labels, strict=True):
+        item["date"] = (CORPUS_NOW - offset).date()
+        item["label"] = label
+    return items
+
+
+def layout_relative(lang, items, style):
+    rows = "".join(
+        f"""<li class="post"><a href="{it["path"]}">{esc(it["title"])}</a>
+<span class="ago">{esc(it["label"])}</span></li>"""
+        for it in items
+    )
+    return f'<ul class="latest">{rows}</ul>'
+
+
+def layout_json_ld(lang, items, style):
+    """Cards show no dates; the dates are only in a JSON-LD ItemList."""
+    cards = "".join(
+        f"""<div class="card"><h3><a href="{it["path"]}">{esc(it["title"])}</a></h3>
+<p>{esc(it["title"])}: summary.</p></div>"""
+        for it in items
+    )
+    graph = {
+        "@context": "https://schema.org",
+        "@graph": [
+            {"@type": "CollectionPage", "url": f"{BASE}/{lang}/news/", "name": "News"},
+            {
+                "@type": "ItemList",
+                "itemListElement": [
+                    {
+                        "@type": "ListItem",
+                        "position": i + 1,
+                        "item": {
+                            "@type": "NewsArticle",
+                            "headline": it["title"],
+                            "url": it["link"],
+                            "datePublished": f"{it['date'].isoformat()}T09:00:00+03:00",
+                            "author": {"@type": "Person", "name": "Press Office"},
+                        },
+                    }
+                    for i, it in enumerate(items)
+                ],
+            },
+        ],
+    }
+    script = json.dumps(graph, ensure_ascii=False)
+    return f'<div class="cards">{cards}</div><script type="application/ld+json">{script}</script>'
+
+
+def layout_microdata(lang, items, style):
+    """Dates only as itemprop=datePublished meta content."""
+    rows = "".join(
+        f"""<article itemscope itemtype="https://schema.org/NewsArticle">
+<h3 itemprop="headline"><a itemprop="url" href="{it["path"]}">{esc(it["title"])}</a></h3>
+<meta itemprop="datePublished" content="{it["date"].isoformat()}T10:30:00+02:00">
+<p itemprop="description">{esc(it["title"])}: summary.</p></article>"""
+        for it in items
+    )
+    return f'<section class="articles">{rows}</section>'
+
+
 LAYOUTS = {
     "wordpress": layout_wordpress,
     "drupal": layout_drupal,
@@ -291,43 +374,65 @@ STYLES = {
 }
 
 
+EXTRA_LAYOUTS = {
+    "relative": layout_relative,
+    "json-ld": layout_json_ld,
+    "microdata": layout_microdata,
+}
+
+
+def _variants():
+    for lang, styles in STYLES.items():
+        for style in styles:
+            for layout_name, layout in LAYOUTS.items():
+                yield lang, style, layout_name, layout
+        for layout_name, layout in EXTRA_LAYOUTS.items():
+            yield lang, "none", layout_name, layout
+
+
 def build():
     pages = ROOT / "pages"
     pages.mkdir(parents=True, exist_ok=True)
     cases = []
-    seed = 0
-    for lang, styles in STYLES.items():
-        for style in styles:
-            for layout_name, layout in LAYOUTS.items():
-                seed += 1
-                items = items_for(lang, seed)
-                name = f"{lang}-{layout_name}-{style}"
-                document = (
-                    f'<!DOCTYPE html><html lang="{lang}"><head><meta charset="utf-8">'
-                    f"<title>News — Example Agency</title></head><body>{NAV}"
-                    f"<h1>News</h1>{layout(lang, items, style)}{FOOTER}</body></html>"
-                )
-                (pages / f"{name}.html").write_text(document, encoding="utf-8")
-                cases.append(
+    for seed, (lang, style, layout_name, layout) in enumerate(_variants(), start=1):
+        if layout_name == "relative":
+            items = relative_items(lang, seed)
+        else:
+            items = items_for(lang, seed)
+        name = f"{lang}-{layout_name}" + ("" if style == "none" else f"-{style}")
+        document = (
+            f'<!DOCTYPE html><html lang="{lang}"><head><meta charset="utf-8">'
+            f"<title>News — Example Agency</title></head><body>{NAV}"
+            f"<h1>News</h1>{layout(lang, items, style)}{FOOTER}</body></html>"
+        )
+        (pages / f"{name}.html").write_text(document, encoding="utf-8")
+        cases.append(
+            {
+                "name": name,
+                "url": f"{BASE}/{lang}/news/",
+                "language": lang,
+                "layout": layout_name,
+                "date_style": style,
+                "page": f"pages/{name}.html",
+                "expected": [
                     {
-                        "name": name,
-                        "url": f"{BASE}/{lang}/news/",
-                        "language": lang,
-                        "layout": layout_name,
-                        "date_style": style,
-                        "page": f"pages/{name}.html",
-                        "expected": [
-                            {
-                                "title": it["title"],
-                                "link": it["link"],
-                                "date": it["date"].isoformat(),
-                            }
-                            for it in items
-                        ],
+                        "title": it["title"],
+                        "link": it["link"],
+                        "date": it["date"].isoformat(),
+                        "date_text": it.get("label")
+                        or (None if style == "none" else date_text(lang, it["date"], style)),
                     }
-                )
+                    for it in items
+                ],
+            }
+        )
     (ROOT / "cases.json").write_text(
-        json.dumps({"version": 1, "cases": cases}, ensure_ascii=False, indent=1) + "\n",
+        json.dumps(
+            {"version": 1, "now": CORPUS_NOW.isoformat(), "cases": cases},
+            ensure_ascii=False,
+            indent=1,
+        )
+        + "\n",
         encoding="utf-8",
     )
     print(f"Wrote {len(cases)} cases to {ROOT}")

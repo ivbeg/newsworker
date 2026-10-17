@@ -31,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (heading, date line, teaser, "read more") are now analysed as heading-led
   groups (`items.group: siblings` in specs). Seen on postgresql.org.
 
+- **Structured data** — JSON-LD (`ItemList`, `@graph`, `NewsArticle`,
+  `BlogPosting`, ...) and microdata article lists are read. They supply the
+  items when a page shows no dates, and sharpen same-day dates with the exact
+  time and add authors otherwise. Disable with `structured_data: false`.
+- **Relative dates in 8 languages** — "3 hours ago", "вчера в 14:30",
+  "2 дні тому", "vor 3 Tagen", "il y a 2 jours", "hace un día",
+  "2 giorni fa", "há 3 dias" and today/yesterday words in en, ru, uk, de, fr,
+  es, it and pt (previously English only).
+- `FeedService(clock=...)` resolves relative dates against an injected time.
+
 ### Fixed (accuracy)
 - **Article links** — the headline link is chosen instead of the first link in
   an item, which was often a category or tag link (#19).

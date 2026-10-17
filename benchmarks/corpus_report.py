@@ -10,6 +10,7 @@ The CI ``corpus`` job appends this report to the GitHub step summary.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import logging
 import sys
@@ -27,11 +28,16 @@ CORPUS = Path(__file__).resolve().parents[1] / "tests" / "corpus"
 
 
 def run_corpus(corpus: Path = CORPUS) -> CorpusScore:
-    cases = json.loads((corpus / "cases.json").read_text(encoding="utf-8"))["cases"]
+    data = json.loads((corpus / "cases.json").read_text(encoding="utf-8"))
+    cases = data["cases"]
+    # Relative dates ("2 days ago") are labelled against a fixed moment.
+    now = dt.datetime.fromisoformat(data.get("now", "2025-10-16T12:00:00+00:00"))
     scores = []
     with tempfile.TemporaryDirectory() as cache_dir:
         settings = Settings(cache_dir=cache_dir, respect_robots=False)
-        service = FeedService(settings=settings, use_cache=False, plugins=[], bridges=[])
+        service = FeedService(
+            settings=settings, use_cache=False, plugins=[], bridges=[], clock=lambda: now
+        )
         for case in cases:
             data = (corpus / case["page"]).read_bytes()
             try:

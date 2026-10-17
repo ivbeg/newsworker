@@ -23,6 +23,7 @@ from .tools import (
     assign_item_identities,
     decode_html,
     find_next_link,
+    resolve_feed_language,
     sanitize_feed_links,
 )
 
@@ -40,8 +41,12 @@ class FeedService:
         bridges: Optional[list] = None,
         *,
         extensions_loaded: bool = False,
+        clock=None,
     ):
+        """``clock`` (a callable returning an aware datetime) resolves relative
+        dates such as "2 hours ago"; it defaults to the current time."""
         self.settings = settings or Settings()
+        self.clock = clock
         self.settings.validate()
         self.use_cache = use_cache
         self.plugins = list(plugins or []) if extensions_loaded else load_plugins(extra=plugins)
@@ -84,12 +89,15 @@ class FeedService:
 
     def new_context(self, *, source: str = "network", base_url: Optional[str] = None):
         diagnostics = ExtractionDiagnostics(source=source, requested_url=base_url)
-        return ExtractionContext(
+        context = ExtractionContext(
             source=source,
             base_url=base_url,
             default_timezone=self.settings.default_timezone,
             diagnostics=diagnostics,
         )
+        if self.clock is not None:
+            context.clock = self.clock
+        return context
 
     def _fetch(
         self,
@@ -236,6 +244,8 @@ class FeedService:
                     context=context,
                     revalidate=revalidate,
                 )
+            if getattr(self.settings, "structured_data", True):
+                feed = self._apply_structured_data(feed, data, extraction_url, context)
             if not feed.get("items") and self.settings.undated_fallback:
                 feed = self._extract_undated(data, extraction_url, context)
             if (
@@ -360,6 +370,59 @@ class FeedService:
             )
             diagnostics.chosen_strategy = strategy
         return feed
+
+    def _apply_structured_data(self, feed, data, url, context):
+        """Use JSON-LD/microdata items when heuristics found none; else sharpen dates."""
+        from lxml import etree
+        from lxml.html import fromstring
+
+        from .structured import extract_structured_items, merge_structured_dates
+
+        try:
+            document = fromstring(decode_html(data), parser=etree.HTMLParser())
+        except (ValueError, etree.ParserError, etree.XMLSyntaxError):
+            return feed
+        structured = extract_structured_items(
+            document, url, default_timezone=self.settings.default_timezone
+        )
+        if not structured:
+            return feed
+        diagnostics = context.diagnostics
+        if feed.get("items"):
+            changed = merge_structured_dates(feed["items"], structured)
+            if diagnostics and changed:
+                diagnostics.metadata["structured_dates"] = changed
+            return feed
+        dated = [item for item in structured if item.get("pubdate") is not None]
+        if len(dated) < 2:
+            return feed
+        if diagnostics:
+            diagnostics.add_attempt("structured", "success", item_count=len(dated))
+            diagnostics.chosen_strategy = "structured"
+        title_nodes = document.xpath("//head/title")
+        title = "".join(title_nodes[0].itertext()).strip() if title_nodes else feed.get("title")
+        return {
+            **feed,
+            "title": title or feed.get("title") or url,
+            "description": feed.get("description") or title or url,
+            "language": self.settings.default_language
+            or resolve_feed_language(
+                document=document,
+                content_language=context.content_language,
+                text_samples=[item["title"] for item in dated],
+            ),
+            "items": [
+                {
+                    **item,
+                    "unique_id": item["link"],
+                    "extra": {
+                        "links": [item["link"]],
+                        "images": [item["image"]] if item.get("image") else [],
+                    },
+                }
+                for item in dated
+            ],
+        }
 
     def _extract_undated(self, data: bytes, url: str, context: ExtractionContext) -> dict:
         from .undated import extract_undated_listing
@@ -493,6 +556,7 @@ class FeedService:
             plugins=self.plugins,
             bridges=self.bridges,
             extensions_loaded=True,
+            clock=self.clock,
         )
 
     def get_feeds(
