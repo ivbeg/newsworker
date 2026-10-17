@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and complexity (≤ 15, existing hot spots marked) rules, over `benchmarks/`
   too. Non-security hashes (cache keys, item ids) are declared
   `usedforsecurity=False`, which also keeps them working on FIPS builds.
+- **Locked dependencies** — `requirements-lock.txt` pins the full runtime and
+  test dependency set for every supported Python (generated with `uv pip
+  compile --universal`). A new `locked` CI job tests it on Python 3.10 and 3.14
+  and checks it still satisfies `pyproject.toml`.
 - **Typed feed contract** — `newsworker.model.Feed` and `Item` (`TypedDict`)
   declare every key strategies produce; `FeedService.get_feed`, plugins,
   native feeds and `format_feed` are annotated with them. mypy now checks the

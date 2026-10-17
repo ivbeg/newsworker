@@ -26,6 +26,31 @@ jobs:
       - name: Tests and coverage gate
         run: pytest -q --cov=newsworker --cov-branch --cov-report=term-missing --cov-fail-under=85
 
+  locked:
+    # The pinned dependency set from requirements-lock.txt, oldest and newest Python.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements-lock.txt
+      - run: pip install --no-deps -e .
+      - name: Lock file matches pyproject.toml
+        if: matrix.python-version == '3.14'
+        run: |
+          pip install uv==0.10.8
+          uv pip compile pyproject.toml --extra test --python-version 3.10 --universal \
+            --no-header --quiet -o /tmp/lock.txt -c requirements-lock.txt
+          diff <(grep -v '^#' requirements-lock.txt | grep -v '^ *#') <(grep -v '^ *#' /tmp/lock.txt)
+      - run: pytest -q
+
   quality:
     runs-on: ubuntu-latest
     steps:
