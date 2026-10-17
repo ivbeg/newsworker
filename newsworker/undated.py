@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 from lxml import etree
 from lxml.html import fromstring
 
-from .tools import clean_url, decode_html, get_abs_url
+from .tools import clean_url, decode_html, get_abs_url, resolve_feed_language
 
 _BLOCKED_TAGS = {"nav", "form", "select", "footer", "header", "aside"}
 _BLOCKED_HINTS = {"nav", "menu", "product", "cart", "price", "login", "social", "pagination"}
@@ -37,6 +37,8 @@ def extract_undated_listing(
     *,
     min_items: int = 3,
     min_confidence: float = 0.75,
+    language: Any = None,
+    content_language: Any = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     document = fromstring(decode_html(data), parser=etree.HTMLParser(remove_blank_text=True))
     groups: Dict[Any, List[Any]] = defaultdict(list)
@@ -129,7 +131,12 @@ def extract_undated_listing(
     title = "".join(title_nodes[0].itertext()).strip() if title_nodes else f"News from {base_url}"
     feed = {
         "title": title,
-        "language": "en",
+        "language": resolve_feed_language(
+            override=language,
+            document=document,
+            content_language=content_language,
+            text_samples=[item.get("title") for item in best_items if item.get("title")],
+        ),
         "link": base_url,
         "description": title,
         "items": best_items,

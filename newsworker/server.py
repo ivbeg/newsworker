@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import ipaddress
 import json
@@ -14,10 +13,10 @@ import time
 import uuid
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from . import __version__
-from .formats import SUPPORTED_FORMATS, format_feed
+from .formats import SUPPORTED_FORMATS, content_fingerprint, format_feed, newest_pubdate
 from .service import FeedService
 from .settings import Settings
 from .tools import validate_url
@@ -83,6 +82,22 @@ class TokenBucketLimiter:
                     key: value for key, value in self._buckets.items() if value[1] >= cutoff
                 }
         return True, 0
+
+
+def _etag_matches(header, etag):
+    """RFC 9110 weak comparison of an ``If-None-Match`` header against ``etag``."""
+    if not header:
+        return False
+    if header.strip() == "*":
+        return True
+    bare = etag[2:] if etag.startswith("W/") else etag
+    for candidate in header.split(","):
+        candidate = candidate.strip()
+        if candidate.startswith("W/"):
+            candidate = candidate[2:]
+        if candidate == bare:
+            return True
+    return False
 
 
 class FeedRequestHandler(BaseHTTPRequestHandler):
@@ -169,6 +184,16 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         if authorization.lower().startswith("bearer "):
             supplied = authorization[7:].strip()
         return any(hmac.compare_digest(str(supplied), str(token)) for token in tokens)
+
+    def _public_feed_url(self, url, fmt):
+        """The URL a reader uses to fetch this feed; never carries credentials."""
+        base = (getattr(self.settings, "public_base_url", "") or "").rstrip("/")
+        if not base:
+            host = getattr(self.settings, "host", "127.0.0.1")
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            base = f"http://{host}:{getattr(self.settings, 'port', 8787)}"
+        return f"{base}/feed?{urlencode({'url': url, 'format': fmt})}"
 
     def _may_force_refresh(self):
         """``?refresh=1`` is honoured for loopback clients or token-authenticated calls."""
@@ -324,7 +349,10 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             else:
                 feed = self.service.get_feed(url, force_refresh=force_refresh)
                 diagnostics = None
-            rendered = format_feed(feed, fmt=fmt, public_url=url)
+            public_url = self._public_feed_url(url, fmt)
+            rendered = format_feed(feed, fmt=fmt, public_url=public_url)
+            fingerprint = content_fingerprint(feed, fmt=fmt, public_url=public_url)
+            newest = newest_pubdate(feed)
         except Exception as exc:
             log.exception("Feed build failed request_id=%s url=%s", self.request_id, url)
             self._record_metric("502", start)
@@ -334,17 +362,23 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             semaphore.release()
             if _PROM_AVAILABLE:
                 ACTIVE_BUILDS.dec()
-        etag = '"%s"' % hashlib.sha1(rendered.encode("utf-8")).hexdigest()
-        if_none_match = self.headers.get("If-None-Match", "")
-        if etag in [tag.strip() for tag in if_none_match.split(",") if tag.strip()]:
+        # Weak validator: equal for every rendering of the same items, even when a
+        # format embeds incidental bytes. Readers use it with If-None-Match.
+        etag = 'W/"%s"' % fingerprint[:40]
+        if _etag_matches(self.headers.get("If-None-Match", ""), etag):
             self._record_metric("304", start)
             self._send_not_modified(etag)
             return
         extra = {
             "ETag": etag,
-            "Last-Modified": formatdate(usegmt=True),
-            "Cache-Control": "max-age=%d" % max(0, getattr(self.settings, "content_ttl", 0)),
+            "Cache-Control": "%s, max-age=%d"
+            % (
+                "private" if self._tokens() else "public",
+                max(0, getattr(self.settings, "content_ttl", 0)),
+            ),
         }
+        if newest is not None:
+            extra["Last-Modified"] = formatdate(newest.timestamp(), usegmt=True)
         if refresh_ignored:
             extra["Warning"] = '299 newsworker "refresh ignored for unauthenticated remote clients"'
         if params.get("diagnostics", ["0"])[0].lower() in {"1", "true", "yes"}:

@@ -38,6 +38,7 @@ newsworker extract URL [OPTIONS]
 | `--no-cache` | | `false` | Bypass the spec and content caches for this run. |
 | `--refresh` | | `false` | Force re-fetching the page, ignoring cached content. |
 | `--config` | `-c` | *(default)* | Path to a settings YAML file. |
+| `--fail-on-empty` | | `false` | Exit with status `3` when no items are extracted. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 
 Examples:

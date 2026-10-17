@@ -247,7 +247,9 @@ def relative_selector(item_root, target, prefer_keywords=None):
 
 
 def _is_xpath(selector):
-    return selector.startswith(".") or selector.startswith("/")
+    """Tell XPath from CSS: ``./a``, ``//a``, ``(..)`` are XPath; ``.news-card`` is CSS."""
+    selector = selector.strip()
+    return selector == "." or selector.startswith(("/", "(", "./", ".."))
 
 
 def select_nodes(scope, selector):
@@ -444,6 +446,11 @@ def validate_spec_dict(data):
     if not isinstance(selector, str) or not selector.strip():
         raise SpecValidationError("items.selector", "must be a non-empty string")
     _validate_selector("items.selector", selector)
+    container = items.get("container")
+    if container is not None:
+        if not isinstance(container, str) or not container.strip():
+            raise SpecValidationError("items.container", "must be a non-empty string")
+        _validate_selector("items.container", container)
     try:
         stride = int(items.get("stride", 1))
     except (TypeError, ValueError) as exc:
@@ -471,6 +478,11 @@ def validate_spec_dict(data):
         for boolean_name in ("absolute", "required"):
             if boolean_name in rule and not isinstance(rule[boolean_name], bool):
                 raise SpecValidationError(path + "." + boolean_name, "must be boolean")
+        patterns = rule.get("patterns")
+        if patterns is not None and not (
+            isinstance(patterns, list) and all(isinstance(item, str) for item in patterns)
+        ):
+            raise SpecValidationError(path + ".patterns", "must be a list of pattern keys")
     return True
 
 
@@ -968,7 +980,12 @@ def _extract_value(scope, rule):
     return None
 
 
+#: Shorthand field sources accepted by the schema and their attribute names.
+SOURCE_ALIASES = {"href": "attr:href", "src": "attr:src", "datetime": "attr:datetime"}
+
+
 def _read_source(node, source):
+    source = SOURCE_ALIASES.get(source, source)
     if source == "text":
         return node.text
     if source == "tail":
@@ -1078,7 +1095,10 @@ class SpecExtractor:
             item = self._extract_item(url, scope, spec, date_rule, patterns)
             if item is not None:
                 feed["items"].append(item)
-        if not getattr(self.ext, "default_language", None):
+        override = getattr(self.ext, "default_language", None)
+        if override:
+            feed["language"] = resolve_feed_language(override=override)
+        else:
             samples = [item.get("title") for item in feed["items"] if item.get("title")]
             feed["language"] = resolve_feed_language(
                 document=document,

@@ -9,6 +9,7 @@ import os
 import sqlite3
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -25,6 +26,8 @@ class OutboxRecord:
     attempts: int
     next_attempt: float
     last_error: Optional[str]
+    claim_token: Optional[str] = None
+    feed_meta: Optional[Dict[str, Any]] = None
 
 
 class DedupStore:
@@ -55,6 +58,11 @@ class DedupStore:
             "UNIQUE(feed, uid, channel, destination))"
         )
         self._conn.execute("CREATE INDEX IF NOT EXISTS outbox_due ON outbox(status, next_attempt)")
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(outbox)")}
+        if "claim_token" not in columns:
+            self._conn.execute("ALTER TABLE outbox ADD COLUMN claim_token TEXT")
+        if "feed_meta" not in columns:
+            self._conn.execute("ALTER TABLE outbox ADD COLUMN feed_meta TEXT")
         self._migrate_seen()
         self._conn.commit()
 
@@ -87,9 +95,12 @@ class DedupStore:
         *,
         channel: str,
         destination: str,
+        feed_meta: Optional[Dict[str, Any]] = None,
     ) -> List[OutboxRecord]:
+        """Queue items not seen before; ``feed_meta`` lets retries run without a new poll."""
         now = self.clock()
         inserted = []
+        meta_json = json.dumps(feed_meta or {}, ensure_ascii=False, default=_json_default)
         with self._lock, self._conn:
             for item in items:
                 uid = self._uid(item)
@@ -105,8 +116,8 @@ class DedupStore:
                 cursor = self._conn.execute(
                     "INSERT OR IGNORE INTO outbox "
                     "(idempotency_key, feed, uid, channel, destination, payload, status, "
-                    "attempts, next_attempt, created_at, updated_at, delivered_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "attempts, next_attempt, created_at, updated_at, delivered_at, feed_meta) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         key,
                         feed,
@@ -120,6 +131,7 @@ class DedupStore:
                         now,
                         now,
                         delivered_at,
+                        meta_json,
                     ),
                 )
                 if cursor.rowcount and not legacy_seen:
@@ -163,11 +175,12 @@ class DedupStore:
             ).fetchall()
             claimed = []
             for row in rows:
+                token = uuid.uuid4().hex
                 updated = self._conn.execute(
                     "UPDATE outbox SET status='claimed', attempts=attempts+1, "
-                    "next_attempt=?, updated_at=? WHERE idempotency_key=? "
+                    "next_attempt=?, updated_at=?, claim_token=? WHERE idempotency_key=? "
                     "AND status IN ('pending','retry')",
-                    (now + lease_seconds, now, row["idempotency_key"]),
+                    (now + lease_seconds, now, token, row["idempotency_key"]),
                 )
                 if updated.rowcount:
                     claimed_row = dict(row)
@@ -176,19 +189,36 @@ class DedupStore:
                             "status": "claimed",
                             "attempts": row["attempts"] + 1,
                             "next_attempt": now + lease_seconds,
+                            "claim_token": token,
                         }
                     )
                     claimed.append(_record(claimed_row))
             return claimed
 
-    def acknowledge(self, key: str) -> None:
+    def renew(self, key: str, token: str, lease_seconds: float = 60) -> bool:
+        """Extend an active claim; returns False when the claim was lost."""
         now = self.clock()
         with self._lock, self._conn:
-            self._conn.execute(
-                "UPDATE outbox SET status='delivered', delivered_at=?, updated_at=?, "
-                "last_error=NULL WHERE idempotency_key=?",
-                (now, now, key),
+            cursor = self._conn.execute(
+                "UPDATE outbox SET next_attempt=?, updated_at=? "
+                "WHERE idempotency_key=? AND status='claimed' AND claim_token=?",
+                (now + lease_seconds, now, key, token),
             )
+            return bool(cursor.rowcount)
+
+    def acknowledge(self, key: str, token: Optional[str] = None) -> bool:
+        """Mark delivered. With ``token``, only the current claim holder may do so."""
+        now = self.clock()
+        sql = (
+            "UPDATE outbox SET status='delivered', delivered_at=?, updated_at=?, "
+            "last_error=NULL, claim_token=NULL WHERE idempotency_key=?"
+        )
+        params: List[Any] = [now, now, key]
+        if token is not None:
+            sql += " AND claim_token=? AND status='claimed'"
+            params.append(token)
+        with self._lock, self._conn:
+            return bool(self._conn.execute(sql, params).rowcount)
 
     def fail(
         self,
@@ -197,29 +227,39 @@ class DedupStore:
         *,
         backoff: float = 1.0,
         terminal: bool = False,
-    ) -> None:
+        token: Optional[str] = None,
+    ) -> bool:
+        """Record a failed attempt.
+
+        With ``token``, a worker whose lease expired (and whose record another
+        worker may already have delivered) cannot overwrite the newer state.
+        """
         now = self.clock()
         record = self.get(key)
         attempts = record.attempts if record else 1
         next_attempt = now + max(0.0, backoff) * (2 ** max(0, attempts - 1))
+        sql = (
+            "UPDATE outbox SET status=?, next_attempt=?, last_error=?, updated_at=?, "
+            "claim_token=NULL WHERE idempotency_key=?"
+        )
+        params: List[Any] = [
+            "terminal" if terminal else "retry",
+            next_attempt,
+            str(error)[:1000],
+            now,
+            key,
+        ]
+        if token is not None:
+            sql += " AND claim_token=? AND status='claimed'"
+            params.append(token)
         with self._lock, self._conn:
-            self._conn.execute(
-                "UPDATE outbox SET status=?, next_attempt=?, last_error=?, updated_at=? "
-                "WHERE idempotency_key=?",
-                (
-                    "terminal" if terminal else "retry",
-                    next_attempt,
-                    str(error)[:1000],
-                    now,
-                    key,
-                ),
-            )
+            return bool(self._conn.execute(sql, params).rowcount)
 
     def release_expired_claims(self) -> int:
         now = self.clock()
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "UPDATE outbox SET status='retry', updated_at=? "
+                "UPDATE outbox SET status='retry', updated_at=?, claim_token=NULL "
                 "WHERE status='claimed' AND next_attempt <= ?",
                 (now, now),
             )
@@ -297,7 +337,16 @@ def _record(row) -> OutboxRecord:
         attempts=row["attempts"],
         next_attempt=row["next_attempt"],
         last_error=row["last_error"],
+        claim_token=_column(row, "claim_token"),
+        feed_meta=json.loads(_column(row, "feed_meta") or "{}"),
     )
+
+
+def _column(row, name):
+    try:
+        return row[name]
+    except (IndexError, KeyError):
+        return None
 
 
 def _json_default(value):

@@ -127,21 +127,22 @@ def test_async_unavailable_raises():
 
 def test_get_feeds_async_falls_back_without_aiohttp(monkeypatch):
     monkeypatch.setattr("newsworker.async_fetch.aiohttp_available", lambda: False)
-    calls = {"sync": 0}
-    original = FeedService.get_feeds
 
-    def wrapper(self, urls, max_workers=4, force_refresh=False, use_async=None):
-        if use_async is False:
-            calls["sync"] += 1
-            return {u: {"title": u, "items": []} for u in urls}
-        return original(self, urls, max_workers, force_refresh, use_async)
+    class Worker:
+        def new_context(self, **kwargs):
+            from newsworker.runtime import ExtractionContext
 
-    monkeypatch.setattr(FeedService, "get_feeds", wrapper)
+            return ExtractionContext()
+
+        def get_feed(self, url, force_refresh=False, context=None):
+            return {"title": url, "items": []}
+
+    monkeypatch.setattr(FeedService, "_worker_service", lambda self: Worker())
     svc = FeedService(use_cache=False, plugins=[], bridges=[])
-    svc.settings.use_async = True
-    results = svc.get_feeds(["https://example.com/news"], use_async=True)
-    assert calls["sync"] == 1
+    runtime = {}
+    results = svc.get_feeds(["https://example.com/news"], use_async=True, runtime=runtime)
     assert "https://example.com/news" in results
+    assert runtime["https://example.com/news"]["transport"] == "thread"
 
 
 def test_plugin_loading_failure_instantiation_and_selection_errors(monkeypatch):

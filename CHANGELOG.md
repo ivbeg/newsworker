@@ -19,6 +19,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failure while extracting with cached date patterns no longer leaves the
   narrowed qddate session active for later requests.
 
+### Fixed (reliability)
+- **Stale inferred specs** — when a cached, automatically inferred spec matches
+  no items (the site changed its layout), the page is re-analysed once and the
+  new spec replaces the old one; otherwise dynamic extraction runs. Explicit
+  specs and bridges are never replaced silently.
+- **Stable item identity** — `unique_id` is derived from the item's own link,
+  so editing a teaser no longer makes `watch` or feed readers see a "new" item.
+  The previous text hash is kept as `content_hash`.
+- **Stable output and HTTP validators** — per-request timing and cache state are
+  no longer embedded in `provenance`; RSS/Atom build dates come from the newest
+  item. The server sends a weak `ETag` over the feed content and
+  `Last-Modified` from the newest item, so unchanged feeds return `304`.
+- **Self links** — RSS/Atom `rel="self"` and JSON Feed `feed_url` point at the
+  server's `/feed` URL (configure `public_base_url` behind a proxy) instead of
+  the source page.
+- **Specs** — `source: href|src|datetime` aliases work at extraction time, a
+  class-only CSS selector such as `.news-card` is no longer mistaken for XPath,
+  and `items.container` and `patterns` are validated. An explicit
+  `--language` / `default_language` now wins over a spec's language; the undated
+  fallback detects the language instead of assuming English.
+- **URLs** — tracking-parameter cleanup keeps encoded delimiters, repeated keys,
+  blank values and fragments (`?id=a%26b&tag=1&tag=2#x` round-trips), and also
+  removes `fbclid`, `gclid`, `yclid`, `utm_term`, `utm_id` and Mailchimp ids.
+- **Caches** — corrupt content metadata or a malformed cached spec is treated as
+  a miss and refetched instead of failing the request; a `304` response stores
+  the new validators. Local files and stdin no longer read or overwrite the
+  spec cached for the live site; local input is capped at `max_content_bytes`.
+- **Pagination** — follow-up pages reuse the first page's spec instead of
+  caching one spec per `?page=N`, overlapping pages are de-duplicated, and an
+  aborted pagination is reported in diagnostics.
+- **Full text** — failures are reported in warnings, and readability output is
+  labelled `content_kind: html` instead of `text`.
+- **Watch** — due deliveries are drained before the page is fetched, so a source
+  outage no longer blocks earlier items; `--format rss|atom|…` is honoured on
+  stdout; finite runs exit non-zero on fetch failures or pending/terminal
+  deliveries; outbox claims carry an owner token so a worker whose lease expired
+  cannot overwrite a newer delivery; delivered history is pruned every poll.
+- **Webhook helper** — `deliver_webhook()` gives every item its own idempotency
+  key and retries only the items that failed.
+- **Scan / extract exit codes** — `scan` of an unreachable page exits `1`
+  instead of printing an empty result; both commands accept `--fail-on-empty`
+  (exit `3`).
+- **Bridges** — user bridges override bundled ones, and `match.hosts` lists
+  apply to every listed host.
+- **Batch** — manifests report the transport actually used, per-source timings
+  and cache state; a source that cannot be written is recorded as a failure
+  instead of aborting the batch; duplicate URLs are processed once.
+
 ### Security
 - **Connection-time address check** — the address a socket actually connects
   to is validated against the private-network policy, closing the DNS

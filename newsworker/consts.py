@@ -105,11 +105,20 @@ TAG_TYPE_IMG = "tag:type:img"
 
 TAG_TYPE_DATE = "tag:type:date"
 
+#: Session and analytics query parameters removed from item links (compared
+#: case-insensitively).
 CLEANABLE_QUERY_KEYS = [
-    "PHPSESSID",
+    "phpsessid",
     "utm_source",
     "utm_campaign",
     "utm_medium",
     "utm_content",
+    "utm_term",
+    "utm_id",
     "utm_hp_ref",
+    "fbclid",
+    "gclid",
+    "yclid",
+    "mc_cid",
+    "mc_eid",
 ]

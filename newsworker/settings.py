@@ -80,6 +80,9 @@ class Settings:
     cors_allowed_origins: List[str] = field(default_factory=list)
     trust_proxy_client_ip: bool = False
     metrics_enabled: bool = False
+    # Externally visible base URL of the feed server (for rel="self" links),
+    # e.g. "https://feeds.example.org". Defaults to http://host:port.
+    public_base_url: str = ""
 
     # Watch/outbox and delivery.
     watch_interval: float = 300.0

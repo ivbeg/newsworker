@@ -22,6 +22,7 @@ default) disables that bound, preserving the previous unbounded behaviour.
 import glob
 import hashlib
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -29,7 +30,11 @@ import time
 import uuid
 from typing import Any, Dict, List
 
+import yaml
+
 from .spec import FeedSpec
+
+log = logging.getLogger(__name__)
 
 
 def key_for(url):
@@ -209,8 +214,19 @@ class SpecCache(_CacheStatsMixin):
             return None
         try:
             return FeedSpec.load(path)
-        except (OSError, ValueError):
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            log.warning("Ignoring unreadable cached spec %s: %s", path, exc)
             return None
+
+    def discard(self, url):
+        """Removes the cached spec for ``url``; returns whether one existed."""
+        path = self._path(url)
+        with _lock_for(path):
+            try:
+                os.remove(path)
+                return True
+            except FileNotFoundError:
+                return False
 
     def set(self, url, spec):
         """Persists ``spec`` for ``url`` and evicts old entries if over budget."""
@@ -286,6 +302,12 @@ class ContentCache(_CacheStatsMixin):
                     meta = json.load(handle) or {}
             except OSError:
                 return None, {}
+            except ValueError as exc:
+                # Truncated or corrupt metadata: treat as a miss and refetch.
+                log.warning("Ignoring corrupt cache metadata for %s: %s", url, exc)
+                return None, {}
+            if not isinstance(meta, dict):
+                return None, {}
             digest = hashlib.sha256(body).hexdigest()
             if meta and meta.get("body_sha256") not in (None, digest):
                 return None, {}
@@ -303,6 +325,20 @@ class ContentCache(_CacheStatsMixin):
                 }
         except (OSError, ValueError):
             return {}
+
+    def update_meta(self, url, meta):
+        """Merge fresh upstream validators into an entry after a ``304``."""
+        path = self._path(url)
+        with _lock_for(path):
+            try:
+                with open(self._meta_path(url), "r", encoding="utf-8") as handle:
+                    stored = json.load(handle) or {}
+            except (OSError, ValueError):
+                return
+            if not isinstance(stored, dict):
+                return
+            stored.update({key: value for key, value in (meta or {}).items() if value})
+            _atomic_write(self._meta_path(url), json.dumps(stored).encode("utf-8"))
 
     def touch(self, url):
         """Refreshes the freshness clock of an existing entry (mtime = now)."""
