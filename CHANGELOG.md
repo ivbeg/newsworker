@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Requires `requests` 2.32.2 or newer.
 
+### Fixed
+- **Atom full content** — Atom output kept the item description as `<content>`
+  even when the item had full content (for example `extract --full-text -f atom`
+  or a native feed with `content:encoded`). Atom now emits the full content as
+  `<content type="html|text">` and the description as `<summary>`. Items
+  without full content are unchanged. RSS `<description>` is unchanged.
+- **RSS author** — RSS output dropped item authors, because RSS `<author>`
+  needs an email address. RSS now writes the author name as `<dc:creator>`.
+  Atom keeps `<author><name>`.
+
 ## [1.4.0] - 2026-10-17
 
 Reliability, accuracy and reach: correct dates and time zones, self-healing

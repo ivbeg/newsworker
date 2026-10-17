@@ -1,3 +1,4 @@
+import datetime
 import json
 from xml.etree import ElementTree as ET
 
@@ -6,6 +7,7 @@ import pytest
 from newsworker.formats import (
     SCAN_FORMATS,
     SUPPORTED_FORMATS,
+    content_fingerprint,
     format_feed,
     format_scan,
 )
@@ -142,3 +144,81 @@ def test_scan_rejects_unknown_format(sample_scan_results):
 def test_format_constant_sets():
     assert "json" in SUPPORTED_FORMATS
     assert "opml" in SCAN_FORMATS
+
+
+ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
+DC_CREATOR = "{http://purl.org/dc/elements/1.1/}creator"
+CONTENT_ENCODED = "{http://purl.org/rss/1.0/modules/content/}encoded"
+
+
+def _full_content_feed(content_kind="html", author="Jane Doe"):
+    item = {
+        "title": "First post",
+        "description": "Short teaser",
+        "content": "<p>Full <b>article</b> body.</p>",
+        "content_kind": content_kind,
+        "pubdate": datetime.datetime(2026, 10, 5, 10, 0, tzinfo=datetime.timezone.utc),
+        "unique_id": "id-1",
+        "link": "https://example.com/first",
+        "extra": {"links": [], "images": []},
+    }
+    if author:
+        item["author"] = author
+    return {
+        "title": "Sample",
+        "language": "en",
+        "link": "https://example.com/",
+        "description": "Sample feed",
+        "items": [item],
+    }
+
+
+@pytest.mark.parametrize("kind", ["html", "text"])
+def test_atom_keeps_full_content_and_uses_description_as_summary(kind):
+    root = ET.fromstring(format_feed(_full_content_feed(kind), fmt="atom"))
+    entry = root.find("a:entry", ATOM_NS)
+    content = entry.find("a:content", ATOM_NS)
+    assert content.text == "<p>Full <b>article</b> body.</p>"
+    assert content.get("type") == kind
+    assert entry.findtext("a:summary", namespaces=ATOM_NS) == "Short teaser"
+
+
+def test_atom_without_content_keeps_description_as_content():
+    feed = _full_content_feed()
+    del feed["items"][0]["content"]
+    entry = ET.fromstring(format_feed(feed, fmt="atom")).find("a:entry", ATOM_NS)
+    assert entry.findtext("a:content", namespaces=ATOM_NS) == "Short teaser"
+    assert entry.find("a:summary", ATOM_NS) is None
+
+
+def test_rss_keeps_description_alongside_full_content():
+    item = ET.fromstring(format_feed(_full_content_feed(), fmt="rss")).find("./channel/item")
+    assert item.findtext("description") == "Short teaser"
+    assert item.findtext(CONTENT_ENCODED) == "<p>Full <b>article</b> body.</p>"
+
+
+def test_rss_emits_author_name_as_dc_creator():
+    item = ET.fromstring(format_feed(_full_content_feed(), fmt="rss")).find("./channel/item")
+    assert item.findtext(DC_CREATOR) == "Jane Doe"
+    # RSS <author> must be an email address; a bare name stays out of it.
+    assert item.find("author") is None
+
+
+def test_atom_does_not_duplicate_author_as_dc_creator():
+    text = format_feed(_full_content_feed(), fmt="atom")
+    entry = ET.fromstring(text).find("a:entry", ATOM_NS)
+    assert entry.findtext("a:author/a:name", namespaces=ATOM_NS) == "Jane Doe"
+    assert entry.find(DC_CREATOR) is None
+    assert "purl.org/dc" not in text
+
+
+def test_rss_without_authors_has_no_dc_namespace(sample_feed):
+    assert "purl.org/dc" not in format_feed(sample_feed, fmt="rss")
+
+
+def test_content_fingerprint_is_independent_of_renderer_fixes():
+    # Weak ETags come from this hash; renderer fixes must not change it.
+    feed = _full_content_feed()
+    assert content_fingerprint(feed, fmt="atom") == (
+        "b4aabe7317d0a7811f76b814db021345ec9538d1d251e952d7667b686fcbaca0"
+    )
