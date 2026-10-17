@@ -57,7 +57,7 @@ pyparsing==3.3.3
     # via
     #   newsworker (pyproject.toml)
     #   qddate
-pytest==8.4.2
+pytest==9.0.3
     # via
     #   newsworker (pyproject.toml)
     #   pytest-cov
