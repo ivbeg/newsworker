@@ -5,31 +5,43 @@ description: "Module map and data flow from fetch through extraction to output"
 
 # Architecture
 
-newsworker is a thin CLI layer (`core.py`) over a service layer (`service.py`)
-that orchestrates:
+newsworker is a thin CLI layer (`core.py`) over a service layer (`service.py`).
+The service picks an extraction strategy per page; the modules below own one
+concern each.
 
 | Module | Role |
 |--------|------|
-| `cache.py` | SHA-1-keyed file caches for specs and page content |
-| `extractor.py` | Dynamic date-driven feed extraction |
-| `spec.py` | YAML spec serialization, `SpecAnalyzer`, `SpecExtractor` |
-| `finder.py` | Discovers existing feeds via autodiscovery/icons/heuristics |
-| `formats.py` | Renders the internal feed dict to json/rss/atom/csv/opml/… |
-| `server.py` | Stdlib HTTP server exposing `/feed`, `/health`, `/` |
-| `settings.py` | YAML-backed `Settings` dataclass |
-| `fetch.py` / `runtime.py` | Shared network policy and request context |
-| `delivery.py` | Watch outbox and delivery channels |
-| `jsrender.py` | Optional Playwright rendering |
+| `service.py` | `FeedService`: caching, strategy order, pagination, enrichment, batch |
+| `fetch.py` | Outbound policy: address checks at connect time, redirects, credentials, size limits, per-host pacing (`HostScheduler`) |
+| `runtime.py` | Request-scoped `ExtractionContext` and single-flight coalescing |
+| `extractor.py` | Dynamic date-driven extraction (date clusters → item blocks) |
+| `dates.py` / `relative.py` | qddate matches → plausible UTC instants; relative dates in 8 languages |
+| `structured.py` | JSON-LD and microdata article lists |
 | `undated.py` | Opt-in undated listing fallback |
-| `plugins.py` / bridges | Third-party extractors and host/path YAML overrides |
+| `spec/model.py` | The YAML spec (`FeedSpec`, `FieldRule`, `ItemsRule`) and its validation |
+| `spec/selectors.py` | Building CSS/XPath selectors from elements and evaluating them |
+| `spec/analyze.py` | `SpecAnalyzer`: page → spec, using the dynamic heuristics once |
+| `spec/execute.py` | `SpecExtractor`: spec → items with deterministic selectors |
+| `cache.py` | SHA-1-keyed file caches for specs and page content |
+| `finder.py` | Discovers existing feeds via autodiscovery, icons and sitemaps |
+| `formats.py` | Renders the feed dict to json/rss/atom/csv/jsonfeed/html/markdown/yaml/opml |
+| `server.py` | Stdlib HTTP server: `/feed` (tokens or signed links), health, metrics |
+| `watching.py` | One `watch` poll: drain due deliveries, fetch, enqueue and deliver |
+| `dedup.py` / `delivery.py` | SQLite outbox with claim tokens; stdout, webhook, SMTP, Telegram channels |
+| `explain.py` / `diagnostics.py` / `evaluation.py` | Explaining results, strategy diagnostics, corpus scoring |
+| `jsrender.py` | Optional Playwright rendering |
+| `settings.py` | Layered settings: defaults < YAML < environment < CLI |
+| `plugins.py` / `bridges.py` | Third-party extractors and host/path YAML overrides |
 
-Typical data flow: `get_feed(url)` → ContentCache → fetch → SpecCache →
-SpecAnalyzer → SpecExtractor (fallback to dynamic FeedExtractor) →
-`format_feed()`.
+Strategy order in `FeedService.get_feed()`: plugin → bridge → cached or freshly
+analysed spec (re-analysed once if it matches nothing) → dynamic extraction →
+JSON-LD/microdata when no items were found → undated fallback (opt-in) →
+browser rendering (opt-in). Links are then sanitised and item identities
+assigned from links before formatting.
 
 The internal feed dict is the API contract between extraction and output:
 `{title, language, link, description, items: [{title, description, pubdate,
-unique_id, link, extra: {links, images}}]}`.
+unique_id, content_hash, link, extra: {links, images}}], provenance}`.
 
 See [how it works](/getting-started/how-it-works) and
 [parsing specs](/guides/parsing-specs).
