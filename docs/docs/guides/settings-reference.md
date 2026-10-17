@@ -31,6 +31,7 @@ redacted wherever configuration is printed.
 | `request_timeout`<br/>`NEWSWORKER_REQUEST_TIMEOUT` | `30` | Timeout of one HTTP request, in seconds. |
 | `max_content_bytes`<br/>`NEWSWORKER_MAX_CONTENT_BYTES` | `10485760` | Largest response body accepted, in bytes. |
 | `verify_tls`<br/>`NEWSWORKER_VERIFY_TLS` | `true` | Verify TLS certificates. |
+| `legacy_tls_ciphers`<br/>`NEWSWORKER_LEGACY_TLS_CIPHERS` | `false` | Also offer TLS 1.2 ciphers without forward secrecy (static RSA key exchange) for servers that accept nothing else; certificates are still verified. |
 | `respect_robots`<br/>`NEWSWORKER_RESPECT_ROBOTS` | `true` | Honour robots.txt, including `Crawl-delay` and `Request-rate`. |
 | `proxy`<br/>`NEWSWORKER_PROXY` | — | Proxy URL for outgoing requests (empty = direct). Secret: redacted in output. |
 | `trust_env_proxy`<br/>`NEWSWORKER_TRUST_ENV_PROXY` | `false` | Honour `HTTP(S)_PROXY`, `NO_PROXY` and `.netrc` from the environment. |

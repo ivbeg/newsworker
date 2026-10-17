@@ -34,6 +34,7 @@ content_cache_max_entries: 0     # max cached pages on disk (0 = unbounded)
 content_cache_max_bytes: 0       # max total cached-page size on disk (0 = unbounded)
 spec_cache_max_entries: 0        # max cached specs on disk (0 = unbounded)
 verify_tls: true                 # verify TLS certificates on outgoing requests
+legacy_tls_ciphers: false        # also offer TLS 1.2 ciphers without forward secrecy
 respect_robots: true             # honor robots.txt (incl. Crawl-delay) before fetching
 per_host_concurrency: 2          # requests in flight per site, across all workers (0 = unlimited)
 per_host_delay: 0                # minimum seconds between requests to one site

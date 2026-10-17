@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlsplit
 
 from .fetch import (
     HOSTS,
+    LEGACY_TLS_CIPHERS,
     REDIRECT_STATUSES,
     FetchError,
     FetchResult,
@@ -25,6 +26,7 @@ from .fetch import (
     retry_after_seconds,
     strip_cross_origin_headers,
     validate_destination,
+    with_tls_hint,
 )
 
 
@@ -37,12 +39,15 @@ def aiohttp_available() -> bool:
         return False
 
 
-def _ssl_context(verify_tls: bool):
-    if verify_tls:
+def _ssl_context(verify_tls: bool, legacy_ciphers: bool = False):
+    if verify_tls and not legacy_ciphers:
         return None
     context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
+    if legacy_ciphers:
+        context.set_ciphers(LEGACY_TLS_CIPHERS)
+    if not verify_tls:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
     return context
 
 
@@ -224,7 +229,7 @@ async def _send(session, current_url, policy, host, headers=None):
     except asyncio.TimeoutError as exc:
         raise FetchTimeout(f"Request timed out after {policy.timeout}s") from exc
     except aiohttp.ClientError as exc:
-        raise FetchError(str(exc)) from exc
+        raise FetchError(with_tls_hint(str(exc), policy)) from exc
 
 
 async def fetch_urls_async(
@@ -259,7 +264,8 @@ async def fetch_urls_async(
             extra_headers=dict(extra_headers or {}),
         )
     connector = aiohttp.TCPConnector(
-        ssl=_ssl_context(policy.verify_tls), resolver=_guarded_resolver(policy)
+        ssl=_ssl_context(policy.verify_tls, policy.legacy_tls_ciphers),
+        resolver=_guarded_resolver(policy),
     )
     semaphore = asyncio.Semaphore(max(1, max_concurrency))
     limits = _HostLimits(policy)

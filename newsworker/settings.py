@@ -67,6 +67,8 @@ class Settings:
     filtered_text_length: int = 150
     max_content_bytes: int = 10 * 1024 * 1024
     verify_tls: bool = True
+    # Offer TLS 1.2 suites without forward secrecy for servers that need them.
+    legacy_tls_ciphers: bool = False
     respect_robots: bool = True
     request_timeout: int = 30
     proxy: str = ""

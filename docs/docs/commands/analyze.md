@@ -25,6 +25,7 @@ newsworker analyze URL [OPTIONS]
 | `--header` | | — | Extra HTTP header `Key: Value` (repeatable). |
 | `--cookies` | | — | Path to a Netscape/Mozilla cookie jar file. |
 | `--insecure` | | `false` | Disable TLS certificate verification. |
+| `--legacy-tls-ciphers` | | `false` | Also offer TLS 1.2 ciphers without forward secrecy, for servers that accept nothing else. |
 | `--ignore-robots` | | `false` | Fetch even when `robots.txt` disallows it. |
 | `--json-logs` | | `false` | Emit logs as structured JSON. |
 | `--config` | `-c` | *(default)* | Path to a settings YAML file. |

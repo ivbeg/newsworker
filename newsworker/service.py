@@ -86,6 +86,7 @@ class FeedService:
         self.extractor.block_private_hosts = self.settings.block_private_hosts
         self.extractor.allow_private_hosts = self.settings.allow_private_hosts
         self.extractor.trusted_proxy = self.settings.trusted_proxy
+        self.extractor.legacy_tls_ciphers = self.settings.legacy_tls_ciphers
         self._content_flights = SingleFlight()
         self._spec_flights = SingleFlight()
         self._renderer: Any = None
