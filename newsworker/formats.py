@@ -167,8 +167,14 @@ def _build_feedgen(feed, public_url=None):
         # unchanged feed on every request.
         fg.lastBuildDate(newest)
         fg.updated(newest)
+    items = feed.get("items", [])
+    if any(item.get("author") for item in items):
+        # feedgen writes RSS <author> only with an email; dc:creator carries
+        # a bare name. Atom keeps <author><name>, so the extension is RSS-only
+        # and author-less feeds do not gain an unused namespace.
+        fg.load_extension("dc", atom=False, rss=True)
 
-    for item in feed.get("items", []):
+    for item in items:
         entry = fg.add_entry()
         item_link = item.get("link")
         entry.id(item.get("unique_id") or item_link or item.get("title") or "")
@@ -177,11 +183,14 @@ def _build_feedgen(feed, public_url=None):
             kind = item.get("content_kind", "text")
             entry.content(item["content"], type="html" if kind == "html" else "text")
         if item.get("description"):
-            entry.description(item["description"])
+            # With full content the description is the Atom <summary>;
+            # isSummary=False would overwrite <content> with the teaser.
+            entry.description(item["description"], isSummary=bool(item.get("content")))
         if item_link:
             entry.link(href=item_link)
         if item.get("author"):
             entry.author(name=item["author"])
+            entry.dc.dc_creator(item["author"])
         if item.get("categories"):
             entry.category([{"term": c} for c in item["categories"]])
         pubdate = _ensure_tz(item.get("pubdate"))
