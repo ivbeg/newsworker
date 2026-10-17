@@ -423,7 +423,7 @@ store under the cache dir), and emits or POSTs only new items.
 | `--urls-file` | | — | Watch every URL in a text file (one per line, `#` comments). |
 | `--from-opml` | | — | Watch every feed in an OPML file (`--opml-pages` for their `htmlUrl`). |
 | `--interval` | `-i` | `300` | Seconds between polls. |
-| `--channel` | | `stdout` | Repeatable destination: `stdout`, `webhook`, `smtp`, `telegram`, `slack`, `discord`, `matrix`. |
+| `--channel` | | `stdout` | Repeatable destination: `stdout`, `webhook`, `smtp`, `telegram`, `slack`, `discord`, `matrix`, `mastodon`. |
 | `--webhook` | | — | POST new items as JSON to this URL (with retry/backoff). |
 | `--format` | `-f` | `json` | Stdout output: JSON Lines for `json`, one document per poll for other formats. |
 | `--max-pages` | | `1` | Pages to follow per poll (pagination). |

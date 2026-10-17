@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from it and a test keeps the two in sync; it now states that Italian page
   text is not detected (the language comes from page metadata).
 - **`watch --once`** polls every source once and exits, for cron.
+- **Mastodon delivery** — `--channel mastodon` posts each item as a status
+  (`mastodon_instance`, `mastodon_token`, `mastodon_visibility`, default
+  `unlisted`). The outbox key is sent as `Idempotency-Key`, mentions in titles
+  are defused, and titles are shortened to the 500-character limit.
 
 ## [1.4.0] - 2026-10-16
 

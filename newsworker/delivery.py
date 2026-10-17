@@ -434,6 +434,64 @@ class MatrixChannel:
         )
 
 
+#: Mastodon's default post limit; every link counts as 23 characters.
+MASTODON_MAX_CHARS = 500
+MASTODON_LINK_CHARS = 23
+
+
+def _defuse_mentions(text: str) -> str:
+    """Break ``@user@instance`` so a page title cannot notify anyone."""
+    return text.replace("@", "@\u200b")
+
+
+@dataclass
+class MastodonChannel:
+    """A status on a Mastodon (or compatible) account.
+
+    The outbox idempotency key is sent as ``Idempotency-Key``, so a retried
+    post is de-duplicated by the server. Mentions in titles are defused.
+    """
+
+    instance: str
+    token: str
+    visibility: str = "unlisted"
+    policy: Optional[FetchPolicy] = None
+    name: str = "mastodon"
+    capabilities: ChannelCapabilities = field(
+        default_factory=lambda: ChannelCapabilities(
+            max_message_bytes=MASTODON_MAX_CHARS * 4, supports_idempotency=True
+        )
+    )
+
+    @property
+    def destination_identity(self) -> str:
+        # The account is the destination; its token is secret, so hash both.
+        return _opaque("mastodon", self.instance.rstrip("/").lower() + "\n" + self.token)
+
+    def validate_config(self) -> None:
+        if not self.token:
+            raise ValueError("Mastodon token is required")
+        validate_url(self.instance)
+
+    def send(self, payload: DeliveryPayload) -> DeliveryResult:
+        title, link = _item_text(payload.item)
+        room = MASTODON_MAX_CHARS - (MASTODON_LINK_CHARS + 1 if link else 0)
+        title = _defuse_mentions(title)
+        if len(title) > room:
+            title = title[: room - 1].rstrip() + "…"
+        status = "\n".join(filter(None, [title, link]))
+        return _send_json(
+            f"{self.instance.rstrip('/')}/api/v1/statuses",
+            {"status": status, "visibility": self.visibility},
+            self.policy,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Idempotency-Key": payload.idempotency_key,
+            },
+            secrets=(self.token,),
+        )
+
+
 def default_registry() -> DeliveryRegistry:
     registry = DeliveryRegistry()
     registry.register(StdoutChannel())
@@ -485,6 +543,15 @@ def registry_from_settings(
         registry.register(
             MatrixChannel(
                 settings.matrix_homeserver, settings.matrix_token, settings.matrix_room, policy
+            )
+        )
+    if getattr(settings, "mastodon_instance", ""):
+        registry.register(
+            MastodonChannel(
+                settings.mastodon_instance,
+                settings.mastodon_token,
+                getattr(settings, "mastodon_visibility", "unlisted"),
+                policy,
             )
         )
     return registry

@@ -40,7 +40,11 @@ _SECRET_FIELDS = {
     "slack_webhook_url",
     "discord_webhook_url",
     "matrix_token",
+    "mastodon_token",
 }
+
+
+MASTODON_VISIBILITIES = ("public", "unlisted", "private", "direct")
 
 
 class SettingsError(ValueError):
@@ -120,12 +124,15 @@ class Settings:
     smtp_password: str = ""
     smtp_from: str = ""
     telegram_token: str = ""
-    # Chat channels for watch (select with --channel slack|discord|matrix).
+    # Chat channels for watch (select with --channel slack|discord|matrix|mastodon).
     slack_webhook_url: str = ""
     discord_webhook_url: str = ""
     matrix_homeserver: str = ""
     matrix_token: str = ""
     matrix_room: str = ""
+    mastodon_instance: str = ""
+    mastodon_token: str = ""
+    mastodon_visibility: str = "unlisted"
 
     # Optional extraction strategies.
     render: bool = False
@@ -257,6 +264,10 @@ class Settings:
             raise SettingsError("port must be between 1 and 65535")
         if not 1 <= int(self.smtp_port) <= 65535:
             raise SettingsError("smtp_port must be between 1 and 65535")
+        if self.mastodon_visibility not in MASTODON_VISIBILITIES:
+            raise SettingsError(
+                "mastodon_visibility must be one of " + ", ".join(MASTODON_VISIBILITIES)
+            )
         if not 0.0 <= float(self.undated_min_confidence) <= 1.0:
             raise SettingsError("undated_min_confidence must be between 0 and 1")
         try:
