@@ -12,7 +12,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from .tools import clean_url, get_abs_url, is_safe_link, parse_datetime_attr
 
@@ -32,14 +33,14 @@ ARTICLE_TYPES = {
 _TYPE_TAIL = re.compile(r"[/#]")
 
 
-def _types(node: Dict[str, Any]) -> List[str]:
+def _types(node: dict[str, Any]) -> list[str]:
     raw = node.get("@type") or node.get("type") or []
     if isinstance(raw, str):
         raw = [raw]
     return [_TYPE_TAIL.split(str(value))[-1].lower() for value in raw if value]
 
 
-def _text(value: Any) -> Optional[str]:
+def _text(value: Any) -> str | None:
     if isinstance(value, list):
         value = value[0] if value else None
     if isinstance(value, dict):
@@ -50,7 +51,7 @@ def _text(value: Any) -> Optional[str]:
     return text or None
 
 
-def _url(value: Any) -> Optional[str]:
+def _url(value: Any) -> str | None:
     if isinstance(value, list):
         value = value[0] if value else None
     if isinstance(value, dict):
@@ -58,7 +59,7 @@ def _url(value: Any) -> Optional[str]:
     return str(value).strip() if value else None
 
 
-def _walk(value: Any) -> Iterable[Dict[str, Any]]:
+def _walk(value: Any) -> Iterable[dict[str, Any]]:
     """Every JSON object nested anywhere in a JSON-LD document."""
     stack = [value]
     while stack:
@@ -70,7 +71,7 @@ def _walk(value: Any) -> Iterable[Dict[str, Any]]:
             stack.extend(reversed(current))
 
 
-def _json_ld_documents(document) -> List[Any]:
+def _json_ld_documents(document) -> list[Any]:
     documents = []
     for script in document.xpath(
         "//script[translate(@type, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
@@ -87,7 +88,7 @@ def _json_ld_documents(document) -> List[Any]:
     return documents
 
 
-def _item(node: Dict[str, Any], base_url: str, default_timezone: str) -> Optional[Dict[str, Any]]:
+def _item(node: dict[str, Any], base_url: str, default_timezone: str) -> dict[str, Any] | None:
     url = _url(node.get("url")) or _url(node.get("mainEntityOfPage")) or _url(node.get("@id"))
     title = _text(node.get("headline")) or _text(node.get("name"))
     if not url or not title:
@@ -99,7 +100,7 @@ def _item(node: Dict[str, Any], base_url: str, default_timezone: str) -> Optiona
     pubdate = (
         parse_datetime_attr(published, default_timezone=default_timezone) if published else None
     )
-    item: Dict[str, Any] = {
+    item: dict[str, Any] = {
         "title": title,
         "link": link,
         "pubdate": pubdate,
@@ -119,8 +120,8 @@ def _item(node: Dict[str, Any], base_url: str, default_timezone: str) -> Optiona
     return item
 
 
-def _from_json_ld(document, base_url: str, default_timezone: str) -> List[Dict[str, Any]]:
-    items: List[Dict[str, Any]] = []
+def _from_json_ld(document, base_url: str, default_timezone: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
     for data in _json_ld_documents(document):
         for node in _walk(data):
             types = set(_types(node))
@@ -139,7 +140,7 @@ def _from_json_ld(document, base_url: str, default_timezone: str) -> List[Dict[s
     return items
 
 
-def _microdata_value(element) -> Optional[str]:
+def _microdata_value(element) -> str | None:
     for attribute in ("content", "datetime", "href", "src"):
         value = element.get(attribute)
         if value:
@@ -147,13 +148,13 @@ def _microdata_value(element) -> Optional[str]:
     return " ".join("".join(element.itertext()).split()) or None
 
 
-def _from_microdata(document, base_url: str, default_timezone: str) -> List[Dict[str, Any]]:
+def _from_microdata(document, base_url: str, default_timezone: str) -> list[dict[str, Any]]:
     items = []
     for scope in document.xpath("//*[@itemscope][@itemtype]"):
         types = {_TYPE_TAIL.split(value)[-1].lower() for value in scope.get("itemtype").split()}
         if not types & ARTICLE_TYPES:
             continue
-        props: Dict[str, str] = {}
+        props: dict[str, str] = {}
         for element in scope.xpath(".//*[@itemprop]"):
             # Skip properties that belong to a nested item (author, publisher).
             owner = element.getparent()
@@ -174,7 +175,7 @@ def _from_microdata(document, base_url: str, default_timezone: str) -> List[Dict
 
 def extract_structured_items(
     document, base_url: str, *, default_timezone: str = "UTC"
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Return de-duplicated news items described by JSON-LD or microdata.
 
     The page itself (a ``WebPage`` whose URL is ``base_url``) is not an item.
@@ -194,7 +195,7 @@ def extract_structured_items(
     return items
 
 
-def merge_structured_dates(items: List[Dict[str, Any]], structured: List[Dict[str, Any]]) -> int:
+def merge_structured_dates(items: list[dict[str, Any]], structured: list[dict[str, Any]]) -> int:
     """Fill or sharpen item dates and authors from structured data, by link.
 
     A structured date replaces a heuristic one when the heuristic item has no
@@ -210,15 +211,17 @@ def merge_structured_dates(items: List[Dict[str, Any]], structured: List[Dict[st
         updated = False
         exact = match.get("pubdate")
         current = item.get("pubdate")
-        if isinstance(exact, dt.datetime):
-            if current is None or (
+        if isinstance(exact, dt.datetime) and (
+            current is None
+            or (
                 isinstance(current, dt.datetime)
                 and current.date() == exact.date()
                 and current.time() == dt.time(0)
                 and exact.time() != dt.time(0)
-            ):
-                item["pubdate"] = exact
-                updated = True
+            )
+        ):
+            item["pubdate"] = exact
+            updated = True
         if match.get("author") and not item.get("author"):
             item["author"] = match["author"]
             updated = True

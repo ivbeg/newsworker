@@ -25,8 +25,8 @@ mypy
 ## Local checks (CI parity)
 
 ```bash
-python -m ruff format --check newsworker tests
-python -m ruff check newsworker tests
+python -m ruff format --check newsworker tests benchmarks
+python -m ruff check newsworker tests benchmarks
 python -m mypy
 python -m pytest --cov=newsworker --cov-branch --cov-report=term-missing --cov-fail-under=85
 python -m build
@@ -35,6 +35,13 @@ python -m pip install --force-reinstall dist/*.whl
 newsworker --version
 openspec validate --all --strict --no-interactive
 ```
+
+Ruff (pinned to the same version in `.[dev]`, pre-commit and CI) checks
+pyflakes, imports, bugbear, Python 3.10 syntax (`UP`), simplifications (`SIM`),
+bandit security rules (`S`) and complexity (`C901`, at most 15). The functions
+that were already more complex carry `# noqa: C901`; remove the marker when you
+simplify one, and do not add new ones. A security finding that does not apply
+gets a `noqa` with the reason next to it, as in `formats.read_opml`.
 
 Optional jobs install and test the `async`, `fulltext`, `metrics`, and
 `browser` extras; browser tests additionally install Chromium. The Docker smoke

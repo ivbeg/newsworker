@@ -80,7 +80,7 @@ def test_wordpress_time_datetime_extracts_items():
         "<p>Resumen de la tercera noticia publicada recientemente en el portal.</p>"
         "</article>"
         "</main></body></html>"
-    ).encode("utf-8")
+    ).encode()
     ext = FeedExtractor(filtered_text_length=150)
     feed, _ = ext.get_feed("https://msptucuman.gov.ar/category/noticias/", data=html)
     assert len(feed["items"]) == 3

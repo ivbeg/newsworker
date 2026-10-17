@@ -33,7 +33,8 @@ clean-test:
 	rm -fr htmlcov/
 
 lint:
-	ruff check newsworker tests
+	ruff format --check newsworker tests benchmarks
+	ruff check newsworker tests benchmarks
 
 test:
 	pytest -q

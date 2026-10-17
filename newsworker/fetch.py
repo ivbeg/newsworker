@@ -10,8 +10,9 @@ import socket
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, Iterator, Mapping, Optional, Tuple, Union
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -66,7 +67,7 @@ class FetchRequest:
     url: str
     method: str = "GET"
     headers: Mapping[str, str] = field(default_factory=dict)
-    body: Optional[bytes] = None
+    body: bytes | None = None
     operation: str = "source"
 
 
@@ -76,11 +77,11 @@ class FetchPolicy:
     max_bytes: int = 10 * 1024 * 1024
     verify_tls: bool = True
     redirect_limit: int = 5
-    allowed_hosts: Tuple[str, ...] = ()
+    allowed_hosts: tuple[str, ...] = ()
     block_private_hosts: bool = True
     allow_private_hosts: bool = False
     trusted_proxy: bool = False
-    proxy: Optional[str] = None
+    proxy: str | None = None
     user_agent: str = "newsworker"
     extra_headers: Mapping[str, str] = field(default_factory=dict)
     cookies: Any = None
@@ -102,10 +103,10 @@ class FetchResult:
     status: int
     headers: Mapping[str, str]
     body: bytes
-    redirect_chain: Tuple[str, ...] = ()
+    redirect_chain: tuple[str, ...] = ()
     not_modified: bool = False
 
-    def header(self, name: str) -> Optional[str]:
+    def header(self, name: str) -> str | None:
         """A response header by case-insensitive name (aiohttp sends ``Etag``)."""
         value = self.headers.get(name)
         if value is not None:
@@ -114,7 +115,7 @@ class FetchResult:
         return next((v for k, v in self.headers.items() if k.lower() == wanted), None)
 
     @property
-    def validators(self) -> Dict[str, str]:
+    def validators(self) -> dict[str, str]:
         return {
             key: value
             for key, value in {
@@ -125,7 +126,7 @@ class FetchResult:
         }
 
     @property
-    def content_language(self) -> Optional[str]:
+    def content_language(self) -> str | None:
         return self.header("Content-Language")
 
 
@@ -133,10 +134,10 @@ def _normalize_allowed(hosts: Iterable[str]) -> set[str]:
     return {str(host).rstrip(".").lower() for host in hosts if str(host).strip()}
 
 
-IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
-def classify_addresses(host: str) -> Tuple[IPAddress, ...]:
+def classify_addresses(host: str) -> tuple[IPAddress, ...]:
     """Resolve ``host`` and return all unique IP addresses."""
     try:
         literal = ipaddress.ip_address(host.strip("[]"))
@@ -190,10 +191,9 @@ def validate_destination(url: str, policy: FetchPolicy) -> str:
 
     if policy.block_private_hosts and not policy.trusted_proxy:
         unsafe = [address for address in classify_addresses(host) if is_unsafe_address(address)]
-        if unsafe:
-            if not (policy.allow_private_hosts and allowed and host in allowed):
-                joined = ", ".join(str(address) for address in unsafe)
-                raise AddressPolicyError(f"Host {host!r} resolves to blocked address: {joined}")
+        if unsafe and not (policy.allow_private_hosts and allowed and host in allowed):
+            joined = ", ".join(str(address) for address in unsafe)
+            raise AddressPolicyError(f"Host {host!r} resolves to blocked address: {joined}")
     return host
 
 
@@ -274,7 +274,7 @@ class HostScheduler:
             self._hosts.clear()
             self._cond.notify_all()
 
-    def note_crawl_delay(self, host: str, seconds: Optional[float]) -> None:
+    def note_crawl_delay(self, host: str, seconds: float | None) -> None:
         with self._cond:
             self._state(host).crawl_delay = min(max(0.0, float(seconds or 0)), MAX_CRAWL_DELAY)
 
@@ -329,7 +329,7 @@ class HostScheduler:
 HOSTS = HostScheduler()
 
 
-def retry_after_seconds(value: Optional[str], now: Optional[float] = None) -> Optional[float]:
+def retry_after_seconds(value: str | None, now: float | None = None) -> float | None:
     """Parse a ``Retry-After`` header (delta seconds or HTTP date)."""
     if not value:
         return None
@@ -355,7 +355,7 @@ def _paced(request: FetchRequest, host: str, policy: FetchPolicy):
 
 # The policy and proxy state of the request being sent on this thread/task. The
 # guarded connections below read it when a socket is opened.
-_ACTIVE_GUARD: contextvars.ContextVar[Optional[Tuple[FetchPolicy, bool]]] = contextvars.ContextVar(
+_ACTIVE_GUARD: contextvars.ContextVar[tuple[FetchPolicy, bool] | None] = contextvars.ContextVar(
     "newsworker_active_guard", default=None
 )
 
@@ -433,7 +433,7 @@ class GuardedHTTPAdapter(HTTPAdapter):
         }
 
 
-def new_session(retries: Optional[Retry] = None) -> requests.Session:
+def new_session(retries: Retry | None = None) -> requests.Session:
     """Build a session that checks connected addresses and ignores the environment."""
     session = requests.Session()
     session.trust_env = False
@@ -445,7 +445,7 @@ def new_session(retries: Optional[Retry] = None) -> requests.Session:
     return session
 
 
-def _origin(url: str) -> Tuple[str, str, Optional[int]]:
+def _origin(url: str) -> tuple[str, str, int | None]:
     parts = urlsplit(url)
     scheme = parts.scheme.lower()
     port = parts.port or {"http": 80, "https": 443}.get(scheme)
@@ -453,8 +453,8 @@ def _origin(url: str) -> Tuple[str, str, Optional[int]]:
 
 
 def strip_cross_origin_headers(
-    headers: Dict[str, str], policy: FetchPolicy, *, keep: Iterable[str] = ()
-) -> Dict[str, str]:
+    headers: dict[str, str], policy: FetchPolicy, *, keep: Iterable[str] = ()
+) -> dict[str, str]:
     """Drop credentials and user-supplied headers before leaving the origin."""
     configured = {key.lower() for key in policy.extra_headers}
     retained = {key.lower() for key in keep}
@@ -476,9 +476,9 @@ class RequestsTransport:
 
     def __init__(
         self,
-        session: Optional[requests.Session] = None,
+        session: requests.Session | None = None,
         *,
-        session_factory: Optional[Callable[[], requests.Session]] = None,
+        session_factory: Callable[[], requests.Session] | None = None,
     ):
         self._shared_session = session
         self._shared_lock = threading.RLock() if session is not None else None
@@ -503,7 +503,7 @@ class RequestsTransport:
                 return self._fetch(request, policy)
         return self._fetch(request, policy)
 
-    def _fetch(self, request: FetchRequest, policy: FetchPolicy) -> FetchResult:
+    def _fetch(self, request: FetchRequest, policy: FetchPolicy) -> FetchResult:  # noqa: C901
         requested_url = request.url
         current_url = requested_url
         method = request.method.upper()
@@ -612,10 +612,10 @@ class RequestsTransport:
         raise RedirectPolicyError("Redirect handling exhausted")
 
 
-def _find_cause(exc: BaseException, kind: type) -> Optional[BaseException]:
+def _find_cause(exc: BaseException, kind: type) -> BaseException | None:
     """Find a ``kind`` exception wrapped by requests/urllib3 around ``exc``."""
     seen = set()
-    current: Optional[BaseException] = exc
+    current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         if isinstance(current, kind):
             return current

@@ -5,8 +5,9 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import threading
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, Optional, TypeVar
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
@@ -21,14 +22,14 @@ class ExtractionContext:
     """
 
     source: str = "network"
-    base_url: Optional[str] = None
+    base_url: str | None = None
     default_timezone: str = "UTC"
     clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc)
-    debug: Dict[str, Any] = field(default_factory=dict)
-    response_meta: Dict[str, Any] = field(default_factory=dict)
-    content_language: Optional[str] = None
+    debug: dict[str, Any] = field(default_factory=dict)
+    response_meta: dict[str, Any] = field(default_factory=dict)
+    content_language: str | None = None
     diagnostics: Any = None
-    session: Optional[Dict[str, Any]] = None
+    session: dict[str, Any] | None = None
     logger: Any = field(default=None, repr=False)
     _date_parser: Any = field(default=None, repr=False)
 
@@ -58,7 +59,7 @@ class _Flight:
     running: bool = True
     waiters: int = 0
     value: Any = None
-    error: Optional[BaseException] = None
+    error: BaseException | None = None
 
 
 class SingleFlight:
@@ -66,7 +67,7 @@ class SingleFlight:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._flights: Dict[str, _Flight] = {}
+        self._flights: dict[str, _Flight] = {}
 
     def call(self, key: str, function: Callable[[], T]) -> T:
         leader = False

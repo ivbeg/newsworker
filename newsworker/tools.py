@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 Supportive functions to help news extraction algorithms
 """
@@ -225,7 +224,7 @@ def detect_page_language_metadata(document):
     for query in queries:
         try:
             values = document.xpath(query)
-        except Exception:
+        except Exception:  # noqa: S112 - a query the document cannot answer is skipped
             continue
         for value in values:
             lang = normalize_language_tag(value)
@@ -299,7 +298,7 @@ def _detect_latin_language(text):
     return best_lang
 
 
-def detect_text_language(text):
+def detect_text_language(text):  # noqa: C901
     """Guesses a language subtag from visible text, or ``None`` when unsure."""
     if not text:
         return None
@@ -605,7 +604,9 @@ def assign_item_identities(items, page_url=None):
             item["content_hash"] = legacy
         link = item.get("link")
         if link and link != page and counts[link] == 1:
-            item["unique_id"] = hashlib.md5(("link:" + link).encode("utf-8")).hexdigest()
+            item["unique_id"] = hashlib.md5(
+                ("link:" + link).encode("utf-8"), usedforsecurity=False
+            ).hexdigest()
     return items
 
 

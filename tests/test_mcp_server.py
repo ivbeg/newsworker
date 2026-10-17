@@ -61,10 +61,9 @@ def test_stdio_server_answers_an_mcp_client(tmp_path):
     )
 
     async def session():
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as client:
-                await client.initialize()
-                return sorted(tool.name for tool in (await client.list_tools()).tools)
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as client:
+            await client.initialize()
+            return sorted(tool.name for tool in (await client.list_tools()).tools)
 
     names = asyncio.run(asyncio.wait_for(session(), timeout=60))
     assert names == ["explain_page", "extract_news", "find_feeds"]

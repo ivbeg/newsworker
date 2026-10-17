@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unlisted`). The outbox key is sent as `Idempotency-Key`, mentions in titles
   are defused, and titles are shortened to the 500-character limit.
 
+### Changed
+- **Code style** — the code uses Python 3.10 syntax (`X | None`, builtin
+  generics); Ruff now also enforces pyupgrade, simplification, bandit security
+  and complexity (≤ 15, existing hot spots marked) rules, over `benchmarks/`
+  too. Non-security hashes (cache keys, item ids) are declared
+  `usedforsecurity=False`, which also keeps them working on FIPS builds.
+
 ## [1.4.0] - 2026-10-16
 
 Reliability, accuracy and reach: correct dates and time zones, self-healing

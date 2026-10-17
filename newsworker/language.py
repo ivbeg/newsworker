@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass(frozen=True)
@@ -41,7 +40,7 @@ _TEXT_ONLY = {
 }
 
 
-LANGUAGE_SUPPORT: Dict[str, LanguageSupport] = {
+LANGUAGE_SUPPORT: dict[str, LanguageSupport] = {
     code: LanguageSupport(
         code,
         name,
@@ -83,7 +82,7 @@ _COLUMNS = (
 
 def support_groups():
     """Languages grouped by identical support levels, best supported first."""
-    groups: Dict[tuple, list] = {}
+    groups: dict[tuple, list] = {}
     for entry in LANGUAGE_SUPPORT.values():
         levels = tuple(getattr(entry, key) for key, _ in _COLUMNS)
         groups.setdefault(levels, []).append(entry)

@@ -10,14 +10,15 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 _SPACE = re.compile(r"\s+")
 
 
-def _norm_link(link: Optional[str]) -> Optional[str]:
+def _norm_link(link: str | None) -> str | None:
     if not link:
         return None
     parts = urlsplit(link.strip())
@@ -25,11 +26,11 @@ def _norm_link(link: Optional[str]) -> Optional[str]:
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
 
 
-def _norm_text(text: Optional[str]) -> str:
+def _norm_text(text: str | None) -> str:
     return _SPACE.sub(" ", text or "").strip().casefold()
 
 
-def _date_of(value: Any) -> Optional[str]:
+def _date_of(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, dt.datetime):
@@ -50,8 +51,8 @@ class CaseScore:
     titles_correct: int = 0
     dates_correct: int = 0
     dates_expected: int = 0
-    missing: List[str] = field(default_factory=list)
-    unexpected: List[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    unexpected: list[str] = field(default_factory=list)
 
     @property
     def precision(self) -> float:
@@ -71,7 +72,7 @@ def score_case(
     items = list(items)
     expected = list(expected)
     score = CaseScore(name=name, expected=len(expected), extracted=len(items))
-    by_link: Dict[str, Mapping[str, Any]] = {}
+    by_link: dict[str, Mapping[str, Any]] = {}
     for item in items:
         link = _norm_link(item.get("link"))
         if link and link not in by_link:
@@ -104,7 +105,7 @@ def score_case(
 class CorpusScore:
     """Micro-averaged totals over many cases."""
 
-    cases: List[CaseScore]
+    cases: list[CaseScore]
 
     def _sum(self, attr: str) -> int:
         return sum(getattr(case, attr) for case in self.cases)
@@ -134,7 +135,7 @@ class CorpusScore:
         expected = self._sum("dates_expected")
         return self._sum("dates_correct") / expected if expected else 0.0
 
-    def summary(self) -> Dict[str, float]:
+    def summary(self) -> dict[str, float]:
         return {
             "cases": len(self.cases),
             "precision": round(self.precision, 4),

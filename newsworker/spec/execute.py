@@ -112,11 +112,10 @@ def extract_date_from_scope(ext, scope, date_rule, patterns):
                 return matched_text, the_date
 
     date_text = _extract_value(scope, date_rule)
-    if date_text:
-        if date_rule.source == "attr:datetime" or use_html_time:
-            the_date = parse_datetime_attr(date_text)
-            if the_date is not None:
-                return date_text, the_date
+    if date_text and (date_rule.source == "attr:datetime" or use_html_time):
+        the_date = parse_datetime_attr(date_text)
+        if the_date is not None:
+            return date_text, the_date
 
     the_date = _parse_date_text(ext, date_text, _qddate_patterns(patterns))
     return date_text, the_date
@@ -211,7 +210,7 @@ class SpecExtractor:
 
         raw_html = b"".join(etree.tostring(node, encoding="utf8") for node in scope)
 
-        md = hashlib.md5()
+        md = hashlib.md5(usedforsecurity=False)
         for part in (date_text, title, description, link):
             if part:
                 md.update(part.encode("utf8"))

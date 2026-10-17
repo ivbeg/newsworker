@@ -161,7 +161,7 @@ class TokenBucketLimiter:
 
 def feed_signature(key, url, fmt):
     """HMAC authorising ``GET /feed`` for exactly this source URL and format."""
-    message = f"{fmt}\n{url}".encode("utf-8")
+    message = f"{fmt}\n{url}".encode()
     return hmac.new(key.encode("utf-8"), message, hashlib.sha256).hexdigest()[:32]
 
 

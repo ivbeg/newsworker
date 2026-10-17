@@ -6,8 +6,9 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import feedparser
@@ -31,16 +32,16 @@ _FEED_TYPES = {
 class FeedCandidate:
     url: str
     feedtype: str = "undefined"
-    title: Optional[str] = None
-    source: List[str] = field(default_factory=list)
+    title: str | None = None
+    source: list[str] = field(default_factory=list)
     confidence: float = 0.5
     verification: str = "unverified"
-    verification_error: Optional[str] = None
-    num_entries: Optional[int] = None
-    language: Optional[str] = None
-    hubs: List[str] = field(default_factory=list)
-    self_url: Optional[str] = None
-    entries: Optional[list] = None
+    verification_error: str | None = None
+    num_entries: int | None = None
+    language: str | None = None
+    hubs: list[str] = field(default_factory=list)
+    self_url: str | None = None
+    entries: list | None = None
 
     def to_dict(self):
         data = {
@@ -111,8 +112,8 @@ class FeedsFinder:
             policy = replace(policy, max_bytes=max_bytes)
         return self.transport.fetch(FetchRequest(url), policy)
 
-    def collect_feeds(self, root, url):
-        candidates: Dict[str, FeedCandidate] = {}
+    def collect_feeds(self, root, url):  # noqa: C901
+        candidates: dict[str, FeedCandidate] = {}
         page_hubs = []
         page_self = None
         for relation in root.xpath("//link[@href]"):
@@ -191,7 +192,7 @@ class FeedsFinder:
         start = urljoin(base_url, "/sitemap.xml")
         queue = [(start, 0)]
         visited = set()
-        candidates: Dict[str, FeedCandidate] = {}
+        candidates: dict[str, FeedCandidate] = {}
         urls_seen = 0
         while queue and len(visited) < max_documents and urls_seen < max_urls:
             sitemap_url, depth = queue.pop(0)
@@ -375,8 +376,8 @@ class FeedsFinder:
         return self.find_feeds(url, noverify=False, force_htmlparse=lookin)
 
 
-def _merge_candidates(items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    merged: Dict[str, Dict[str, Any]] = {}
+def _merge_candidates(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
     for item in items:
         key = _normalized(item["url"])
         current = merged.get(key)

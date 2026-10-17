@@ -1,7 +1,6 @@
 """Deriving a :class:`FeedSpec` from a page with the dynamic date heuristics."""
 
 import datetime
-from typing import Dict
 
 from lxml import etree
 from lxml.html import fromstring
@@ -117,7 +116,7 @@ class SpecAnalyzer:
             return nodes[0].text.strip()
         return "News from " + url
 
-    def _detect_fields(self, item_root, date_node):
+    def _detect_fields(self, item_root, date_node):  # noqa: C901
         """Picks representative field nodes inside an item using tag heuristics."""
         title = None
         title_source = None
@@ -203,7 +202,7 @@ class SpecAnalyzer:
                 url, data=data, user_agent=user_agent, require_items=require_items
             )
 
-    def _analyze_active(self, url, data=None, user_agent=None, require_items=False):
+    def _analyze_active(self, url, data=None, user_agent=None, require_items=False):  # noqa: C901
         """Analyzes ``url`` (or provided ``data``) and returns a ``FeedSpec``.
 
         When ``require_items`` is true, raises :class:`SpecAnalysisError` if the
@@ -416,7 +415,7 @@ class SpecAnalyzer:
             if rule is not None:
                 return rule
 
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for root in item_roots:
             css = css_for_item_element(root, NEWS_CLASSES_KEYWORDS)
             if css:
@@ -464,7 +463,7 @@ class SpecAnalyzer:
             except (ValueError, TypeError):
                 continue
         indices.sort()
-        gaps: Dict[int, int] = {}
+        gaps: dict[int, int] = {}
         for i in range(1, len(indices)):
             diff = indices[i] - indices[i - 1]
             if diff > 0:
@@ -489,13 +488,16 @@ class SpecAnalyzer:
             date_source = "text"
             if not (date_node.text and date_node.text.strip()):
                 date_source = "tail"
-            if patterns and HTML_TIME_PATTERN in patterns:
-                if (
+            if (
+                patterns
+                and HTML_TIME_PATTERN in patterns
+                and (
                     isinstance(getattr(date_node, "tag", None), str)
                     and date_node.tag == "time"
                     and date_node.get("datetime")
-                ):
-                    date_source = "attr:datetime"
+                )
+            ):
+                date_source = "attr:datetime"
             fields["date"] = FieldRule(
                 selector=relative_selector(sample_root, date_node, DATE_CLASSES_KEYWORDS),
                 source=date_source,

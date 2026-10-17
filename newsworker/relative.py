@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from typing import Dict, List, Optional, Pattern, Tuple
+from re import Pattern
 from zoneinfo import ZoneInfo
 
 MINUTE, HOUR, DAY, WEEK = 60, 3600, 86400, 604800
 MONTH, YEAR = 30 * DAY, 365 * DAY
 
 # unit word (lower-case, accents kept) -> seconds
-_UNITS: Dict[str, Dict[str, int]] = {
+_UNITS: dict[str, dict[str, int]] = {
     "en": {
         "second": 1,
         "seconds": 1,
@@ -183,7 +183,7 @@ _UNITS: Dict[str, Dict[str, int]] = {
 }
 
 # Phrase shapes: (prefix, suffix) around "<number> <unit>".
-_AGO_SHAPES: Dict[str, List[Tuple[str, str]]] = {
+_AGO_SHAPES: dict[str, list[tuple[str, str]]] = {
     "en": [("", r"ago")],
     "ru": [("", r"назад")],
     "uk": [("", r"тому")],
@@ -195,7 +195,7 @@ _AGO_SHAPES: Dict[str, List[Tuple[str, str]]] = {
 }
 
 # day offset keywords: word -> days before today (0 = today / now)
-_DAY_WORDS: Dict[str, int] = {
+_DAY_WORDS: dict[str, int] = {
     # en
     "just now": 0,
     "now": 0,
@@ -252,7 +252,7 @@ _TIME_RE = re.compile(r"(?<!\d)([01]?\d|2[0-3])[:.h]([0-5]\d)(?!\d)")
 _EDGE_PUNCT = " \t\r\n.,;:-–—()[]«»\"'|·•"
 
 
-def _build_ago_patterns() -> List[Tuple[Pattern[str], Dict[str, int]]]:
+def _build_ago_patterns() -> list[tuple[Pattern[str], dict[str, int]]]:
     patterns = []
     for lang, shapes in _AGO_SHAPES.items():
         units = _UNITS[lang]
@@ -276,7 +276,7 @@ _KEYWORDS = tuple(_DAY_WORDS) + tuple(
 )
 
 
-def looks_relative(text: Optional[str]) -> bool:
+def looks_relative(text: str | None) -> bool:
     """Cheap pre-filter: does ``text`` contain a relative-date keyword?"""
     if not text:
         return False
@@ -285,8 +285,8 @@ def looks_relative(text: Optional[str]) -> bool:
 
 
 def parse_relative(
-    text: Optional[str], now: Optional[dt.datetime] = None, default_timezone: str = "UTC"
-) -> Optional[dt.datetime]:
+    text: str | None, now: dt.datetime | None = None, default_timezone: str = "UTC"
+) -> dt.datetime | None:
     """Resolve a relative date expression to an aware datetime, or ``None``."""
     if not text:
         return None

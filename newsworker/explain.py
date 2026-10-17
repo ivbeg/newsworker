@@ -13,7 +13,7 @@ import dataclasses
 import json
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from lxml import etree
 from lxml.html import fromstring
@@ -29,24 +29,24 @@ class ClusterReport:
     links: int
     titles: int
     news_class: bool
-    patterns: List[str]
-    samples: List[str]
+    patterns: list[str]
+    samples: list[str]
     chosen: bool = False
 
 
 @dataclass
 class Explanation:
     url: str
-    strategy: Optional[str]
+    strategy: str | None
     confidence: float
-    clusters: List[ClusterReport]
-    spec_yaml: Optional[str]
-    attempts: List[Dict[str, Any]]
-    warnings: List[str]
-    hints: List[str]
-    items: List[Dict[str, Any]] = field(default_factory=list)
+    clusters: list[ClusterReport]
+    spec_yaml: str | None
+    attempts: list[dict[str, Any]]
+    warnings: list[str]
+    hints: list[str]
+    items: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
 
@@ -55,7 +55,7 @@ def _node_text(node) -> str:
     return " ".join(text.split())[:80]
 
 
-def _clusters(service, url: str, data: bytes, context) -> List[ClusterReport]:
+def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
     from .spec import SpecAnalyzer
 
     try:
@@ -93,7 +93,7 @@ def _clusters(service, url: str, data: bytes, context) -> List[ClusterReport]:
     return reports
 
 
-def _fresh_spec(service, url: str, data: bytes, context) -> Optional[str]:
+def _fresh_spec(service, url: str, data: bytes, context) -> str | None:
     from .spec import SpecAnalyzer
 
     try:
@@ -104,7 +104,7 @@ def _fresh_spec(service, url: str, data: bytes, context) -> Optional[str]:
     return spec.to_yaml() if spec.fields else None
 
 
-def _hints(url, clusters, feed, diagnostics) -> List[str]:
+def _hints(url, clusters, feed, diagnostics) -> list[str]:
     items = feed.get("items", []) or []
     hints = []
     strategy = diagnostics.chosen_strategy if diagnostics else None
@@ -145,7 +145,7 @@ def _hints(url, clusters, feed, diagnostics) -> List[str]:
     return hints
 
 
-def explain(service, url: str, data: Optional[bytes] = None, *, source: str = "network"):
+def explain(service, url: str, data: bytes | None = None, *, source: str = "network"):
     """Run the pipeline for ``url`` (or local ``data``) and collect the evidence."""
     context = service.new_context(source=source, base_url=url)
     if data is None:

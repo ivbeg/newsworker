@@ -10,14 +10,14 @@ per-host pacing, size limits).
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Dict, Optional
+from typing import Any
 
 #: Upper bound on items returned to a model in one call.
 MAX_ITEMS = 100
 _DESCRIPTION_CHARS = 500
 
 
-def _item(item: Dict[str, Any]) -> Dict[str, Any]:
+def _item(item: dict[str, Any]) -> dict[str, Any]:
     pubdate = item.get("pubdate")
     description = item.get("description") or ""
     return {
@@ -30,7 +30,7 @@ def _item(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def extract_news(service, url: str, limit: int = 20) -> Dict[str, Any]:
+def extract_news(service, url: str, limit: int = 20) -> dict[str, Any]:
     """Latest items of a news page or feed, newest first, as plain JSON data."""
     feed, diagnostics = service.get_feed_with_diagnostics(url)
     items = list(feed.get("items", []))
@@ -50,7 +50,7 @@ def extract_news(service, url: str, limit: int = 20) -> Dict[str, Any]:
     }
 
 
-def find_feeds(settings, url: str) -> Dict[str, Any]:
+def find_feeds(settings, url: str) -> dict[str, Any]:
     """Feeds (RSS/Atom/JSON Feed) a page or site advertises, verified."""
     from .finder import FeedsFinder
 
@@ -97,13 +97,13 @@ def build_server(settings=None):
     )
 
     @server.tool(name="extract_news", annotations=read_only)
-    def extract_news_tool(url: str, limit: int = 20) -> Dict[str, Any]:
+    def extract_news_tool(url: str, limit: int = 20) -> dict[str, Any]:
         """Return the latest news items (title, link, published, description) of a
         news listing page or feed URL, newest first. ``limit`` caps the items (≤ 100)."""
         return extract_news(service, url, limit)
 
     @server.tool(name="find_feeds", annotations=read_only)
-    def find_feeds_tool(url: str) -> Dict[str, Any]:
+    def find_feeds_tool(url: str) -> dict[str, Any]:
         """Return the RSS/Atom/JSON feeds a web page advertises, with entry counts."""
         return find_feeds(settings, url)
 
@@ -116,5 +116,5 @@ def build_server(settings=None):
     return server
 
 
-def run(settings: Optional[Any] = None) -> None:
+def run(settings: Any | None = None) -> None:
     build_server(settings).run("stdio")

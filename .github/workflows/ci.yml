@@ -35,8 +35,8 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -e '.[dev]'
-      - run: ruff format --check newsworker tests
-      - run: ruff check newsworker tests
+      - run: ruff format --check newsworker tests benchmarks
+      - run: ruff check newsworker tests benchmarks
       - run: mypy
 
   optional-extras:
