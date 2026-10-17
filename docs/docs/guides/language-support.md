@@ -22,7 +22,10 @@ examples are in `tests/fixtures/languages/matrix.json`, and the extraction
 corpus (`tests/corpus`) covers listing layouts, absolute and relative dates in
 all eight supported languages. newsworker requires qddate 1.0.16 or newer.
 General-purpose missing date patterns belong upstream in qddate rather than in
-a second newsworker date engine.
+a second newsworker date engine. newsworker only reshapes short date lines that
+qddate cannot read as written: a leading dateline place or weekday is dropped
+and a day span keeps its first day, so `GENEVA, 21-22 July 2022` reads as
+21 July 2022 and `Monday, January 31, 2022` as 31 January 2022.
 
 An explicit `--language` override wins over every automatic signal. With
 diagnostics enabled, automatic selection reports `automatic_evidence`,

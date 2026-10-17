@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the previous year around New Year.
 - A failure while extracting with cached date patterns no longer leaves the
   narrowed qddate session active for later requests.
+- **Datelines, weekdays and day spans** — `GENEVA, 29 July 2022`,
+  `Bangkok, 21-22 July 2022` and `Monday, January 31, 2022` are read as dates
+  (the first day of a span is used). Such listings previously yielded no items
+  (#8, #18).
 
 ### Added
 - **Item history and update notifications** — `watch` records every item with
@@ -66,8 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rate_limited` error. urllib3 no longer sleeps for whatever `Retry-After` a
   server sends.
 - **Ukrainian** is a fully supported language (requires qddate 1.0.16).
-- **Extraction corpus and quality gate** — 182 labelled listing pages across 8
-  languages and 13 CMS layouts (`tests/corpus`), scored by the new
+- **Extraction corpus and quality gate** — 232 labelled listing pages across 8
+  languages and 16 layouts (`tests/corpus`), scored by the new
   `newsworker.evaluation` module. CI fails when precision, recall, title or date
   accuracy drops, and publishes the per-case report in the job summary.
 - **Live smoke check** — `benchmarks/live_check.py` extracts a few public news

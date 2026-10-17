@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import threading
-from typing import Any, Mapping, Optional
+from typing import Any, Iterator, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 #: Earliest publication year accepted from page text.  Older values are almost
@@ -33,6 +33,17 @@ _TEXT_OFFSET_RE = re.compile(
     r"|(?:GMT|UTC)\b)",
     re.IGNORECASE,
 )
+
+# A dateline before the date: "GENEVA, 29 July 2022", "New York – 3 May 2022",
+# "Monday, January 31, 2022" (a weekday reads the same way). Up to four words,
+# no digits, then a comma or a spaced dash.
+_DATELINE_PREFIX_RE = re.compile(r"^[^\W\d_]+(?:[ .'’-]{1,2}[^\W\d_]+){0,3}\.?\s*(?:,|\s[-–—])\s*")
+
+# An event span leading the date, "21-22 July 2022": the first day is the date.
+_DAY_RANGE_RE = re.compile(r"^(\d{1,2})\s*[-–—]\s*\d{1,2}(?=\s+[^\W\d_])")
+
+#: Longer text is prose, not a date line; it is not worth a second match.
+MAX_DATELINE_CHARS = 64
 
 _local = threading.local()
 
@@ -83,6 +94,24 @@ def offset_from_text(text: Optional[str]) -> Optional[dt.timezone]:
         return None
     sign = -1 if match.group("sign") == "-" else 1
     return dt.timezone(sign * dt.timedelta(hours=hours, minutes=minutes))
+
+
+def date_text_variants(text: Optional[str]) -> Iterator[str]:
+    """Rewrites of ``text`` that qddate may match when ``text`` itself does not.
+
+    Press releases put a place (or a weekday) before the date and event pages
+    print day spans; qddate only matches dates at the start of the text. Yields
+    the text with a leading dateline removed, then with a day span reduced to
+    its first day, each only when it differs from what came before.
+    """
+    if not text or len(text) > MAX_DATELINE_CHARS:
+        return
+    current = text
+    for pattern, replacement in ((_DATELINE_PREFIX_RE, ""), (_DAY_RANGE_RE, r"\1")):
+        rewritten = pattern.sub(replacement, current, count=1)
+        if rewritten != current and rewritten:
+            current = rewritten
+            yield current
 
 
 def expand_two_digit_year(year: int, now: dt.datetime) -> int:

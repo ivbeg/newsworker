@@ -5,6 +5,7 @@ import pytest
 
 from newsworker.dates import (
     build_match_datetime,
+    date_text_variants,
     expand_two_digit_year,
     offset_from_text,
     thread_date_parser,
@@ -65,6 +66,43 @@ def test_date_without_year_rolls_back_over_new_year():
     january = dt.datetime(2026, 1, 3, 12, 0, tzinfo=UTC)
     assert _noyear(28, 12, january) == dt.datetime(2025, 12, 28, tzinfo=UTC)
     assert _noyear(2, 1, january) == dt.datetime(2026, 1, 2, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("GENEVA, 29 July 2022", dt.datetime(2022, 7, 29, tzinfo=UTC)),
+        ("VIENNA, 9 AUGUST 2022", dt.datetime(2022, 8, 9, tzinfo=UTC)),
+        ("Bangkok, 21-22 July 2022", dt.datetime(2022, 7, 21, tzinfo=UTC)),
+        ("New York – 3 May 2022", dt.datetime(2022, 5, 3, tzinfo=UTC)),
+        ("Monday, January 31, 2022", dt.datetime(2022, 1, 31, tzinfo=UTC)),
+        ("21–22 July 2022", dt.datetime(2022, 7, 21, tzinfo=UTC)),
+    ],
+)
+def test_datelines_weekdays_and_day_spans(text, expected):
+    # Issues #8 (UNIDO datelines) and #18 (INSPIRE weekday dates).
+    assert _match(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Hello, world",
+        "Report, 2022 edition",
+        "However, the agency said on 3 May 2022 that the review would continue for weeks",
+    ],
+)
+def test_dateline_fallback_does_not_invent_dates(text):
+    assert _match(text) is None
+
+
+def test_date_text_variants():
+    assert list(date_text_variants("GENEVA, 21-22 July 2022")) == [
+        "21-22 July 2022",
+        "21 July 2022",
+    ]
+    assert list(date_text_variants("29 July 2022")) == []
+    assert list(date_text_variants("")) == []
 
 
 @pytest.mark.parametrize("text", ["01.01.1901", "16.10.2099"])

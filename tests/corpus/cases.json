@@ -9477,6 +9477,1202 @@
      "date_text": null
     }
    ]
+  },
+  {
+   "name": "en-wordpress-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "wordpress",
+   "date_style": "dateline",
+   "page": "pages/en-wordpress-dateline.html",
+   "expected": [
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/207-1",
+     "date": "2025-06-30",
+     "date_text": "New York, 30 June 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/207-2",
+     "date": "2025-06-29",
+     "date_text": "Vienna, 29 June 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/207-3",
+     "date": "2025-06-24",
+     "date_text": "Vienna, 24-25 June 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/207-4",
+     "date": "2025-06-21",
+     "date_text": "Bangkok, 21-22 June 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/207-5",
+     "date": "2025-06-22",
+     "date_text": "St. Petersburg, 22 June 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/207-6",
+     "date": "2025-06-20",
+     "date_text": "New York, 20 June 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-drupal-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "drupal",
+   "date_style": "dateline",
+   "page": "pages/en-drupal-dateline.html",
+   "expected": [
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/208-1",
+     "date": "2025-09-14",
+     "date_text": "Bangkok, 14 September 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/208-2",
+     "date": "2025-09-11",
+     "date_text": "GENEVA, 11 SEPTEMBER 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/208-3",
+     "date": "2025-09-06",
+     "date_text": "GENEVA, 6-7 SEPTEMBER 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/208-4",
+     "date": "2025-09-08",
+     "date_text": "New York, 8 September 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/208-5",
+     "date": "2025-09-06",
+     "date_text": "GENEVA, 6-7 SEPTEMBER 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/208-6",
+     "date": "2025-09-04",
+     "date_text": "Bangkok, 4 September 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-cards-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "cards",
+   "date_style": "dateline",
+   "page": "pages/en-cards-dateline.html",
+   "expected": [
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/209-1",
+     "date": "2025-10-07",
+     "date_text": "Vienna, 7 October 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/209-2",
+     "date": "2025-10-05",
+     "date_text": "St. Petersburg, 5 October 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/209-3",
+     "date": "2025-10-03",
+     "date_text": "New York, 3-4 October 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/209-4",
+     "date": "2025-09-25",
+     "date_text": "St. Petersburg, 25 September 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/209-5",
+     "date": "2025-09-25",
+     "date_text": "St. Petersburg, 25 September 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/209-6",
+     "date": "2025-09-27",
+     "date_text": "Vienna, 27-28 September 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-table-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "table",
+   "date_style": "dateline",
+   "page": "pages/en-table-dateline.html",
+   "expected": [
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/210-1",
+     "date": "2025-07-25",
+     "date_text": "New York, 25 July 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/210-2",
+     "date": "2025-07-23",
+     "date_text": "GENEVA, 23 JULY 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/210-3",
+     "date": "2025-07-23",
+     "date_text": "GENEVA, 23 JULY 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/210-4",
+     "date": "2025-07-19",
+     "date_text": "Vienna, 19 July 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/210-5",
+     "date": "2025-07-21",
+     "date_text": "Bangkok, 21-22 July 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/210-6",
+     "date": "2025-07-05",
+     "date_text": "New York, 5 July 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-list-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "list",
+   "date_style": "dateline",
+   "page": "pages/en-list-dateline.html",
+   "expected": [
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/211-1",
+     "date": "2025-08-05",
+     "date_text": "Bangkok, 5 August 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/211-2",
+     "date": "2025-08-01",
+     "date_text": "St. Petersburg, 1 August 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/211-3",
+     "date": "2025-07-28",
+     "date_text": "GENEVA, 28 JULY 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/211-4",
+     "date": "2025-07-30",
+     "date_text": "New York, 30 July 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/211-5",
+     "date": "2025-07-24",
+     "date_text": "Vienna, 24-25 July 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/211-6",
+     "date": "2025-07-26",
+     "date_text": "Bangkok, 26 July 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-date-after-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "date-after",
+   "date_style": "dateline",
+   "page": "pages/en-date-after-dateline.html",
+   "expected": [
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/212-1",
+     "date": "2025-09-27",
+     "date_text": "Vienna, 27-28 September 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/212-2",
+     "date": "2025-09-24",
+     "date_text": "Bangkok, 24-25 September 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/212-3",
+     "date": "2025-09-23",
+     "date_text": "New York, 23 September 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/212-4",
+     "date": "2025-09-18",
+     "date_text": "New York, 18-19 September 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/212-5",
+     "date": "2025-09-19",
+     "date_text": "Bangkok, 19 September 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/212-6",
+     "date": "2025-09-22",
+     "date_text": "Vienna, 22 September 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-sidebar-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "sidebar",
+   "date_style": "dateline",
+   "page": "pages/en-sidebar-dateline.html",
+   "expected": [
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/213-1",
+     "date": "2025-08-08",
+     "date_text": "Vienna, 8 August 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/213-2",
+     "date": "2025-08-06",
+     "date_text": "St. Petersburg, 6-7 August 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/213-3",
+     "date": "2025-08-02",
+     "date_text": "GENEVA, 2 AUGUST 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/213-4",
+     "date": "2025-07-27",
+     "date_text": "St. Petersburg, 27-28 July 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/213-5",
+     "date": "2025-07-31",
+     "date_text": "Bangkok, 31 July 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/213-6",
+     "date": "2025-07-24",
+     "date_text": "Vienna, 24-25 July 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-category-first-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "category-first",
+   "date_style": "dateline",
+   "page": "pages/en-category-first-dateline.html",
+   "expected": [
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/214-1",
+     "date": "2025-10-11",
+     "date_text": "GENEVA, 11 OCTOBER 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/214-2",
+     "date": "2025-10-09",
+     "date_text": "Bangkok, 9-10 October 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/214-3",
+     "date": "2025-10-07",
+     "date_text": "Vienna, 7 October 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/214-4",
+     "date": "2025-10-08",
+     "date_text": "New York, 8 October 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/214-5",
+     "date": "2025-10-03",
+     "date_text": "New York, 3-4 October 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/214-6",
+     "date": "2025-09-26",
+     "date_text": "GENEVA, 26 SEPTEMBER 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-read-more-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "read-more",
+   "date_style": "dateline",
+   "page": "pages/en-read-more-dateline.html",
+   "expected": [
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/215-1",
+     "date": "2025-07-23",
+     "date_text": "GENEVA, 23 JULY 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/215-2",
+     "date": "2025-07-19",
+     "date_text": "Vienna, 19 July 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/215-3",
+     "date": "2025-07-17",
+     "date_text": "St. Petersburg, 17 July 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/215-4",
+     "date": "2025-07-20",
+     "date_text": "New York, 20 July 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/215-5",
+     "date": "2025-07-19",
+     "date_text": "Vienna, 19 July 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/215-6",
+     "date": "2025-07-13",
+     "date_text": "GENEVA, 13 JULY 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-with-time-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "with-time",
+   "date_style": "dateline",
+   "page": "pages/en-with-time-dateline.html",
+   "expected": [
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/216-1",
+     "date": "2025-10-03",
+     "date_text": "New York, 3-4 October 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/216-2",
+     "date": "2025-09-30",
+     "date_text": "St. Petersburg, 30 September 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/216-3",
+     "date": "2025-09-27",
+     "date_text": "Vienna, 27-28 September 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/216-4",
+     "date": "2025-09-21",
+     "date_text": "GENEVA, 21-22 SEPTEMBER 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/216-5",
+     "date": "2025-09-25",
+     "date_text": "St. Petersburg, 25 September 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/216-6",
+     "date": "2025-09-13",
+     "date_text": "New York, 13 September 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-busy-sidebar-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "busy-sidebar",
+   "date_style": "dateline",
+   "page": "pages/en-busy-sidebar-dateline.html",
+   "expected": [
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/217-1",
+     "date": "2025-09-27",
+     "date_text": "Vienna, 27-28 September 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/217-2",
+     "date": "2025-09-24",
+     "date_text": "Bangkok, 24-25 September 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/217-3",
+     "date": "2025-09-19",
+     "date_text": "Bangkok, 19 September 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/217-4",
+     "date": "2025-09-21",
+     "date_text": "GENEVA, 21-22 SEPTEMBER 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/217-5",
+     "date": "2025-09-23",
+     "date_text": "New York, 23 September 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/217-6",
+     "date": "2025-09-22",
+     "date_text": "Vienna, 22 September 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-pager-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "pager",
+   "date_style": "dateline",
+   "page": "pages/en-pager-dateline.html",
+   "expected": [
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/218-1",
+     "date": "2025-06-29",
+     "date_text": "Vienna, 29 June 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/218-2",
+     "date": "2025-06-26",
+     "date_text": "Bangkok, 26 June 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/218-3",
+     "date": "2025-06-21",
+     "date_text": "Bangkok, 21-22 June 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/218-4",
+     "date": "2025-06-23",
+     "date_text": "GENEVA, 23 JUNE 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/218-5",
+     "date": "2025-06-17",
+     "date_text": "St. Petersburg, 17 June 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/218-6",
+     "date": "2025-06-14",
+     "date_text": "Vienna, 14 June 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-flat-dateline",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "flat",
+   "date_style": "dateline",
+   "page": "pages/en-flat-dateline.html",
+   "expected": [
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/219-1",
+     "date": "2025-09-03",
+     "date_text": "New York, 3-4 September 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/219-2",
+     "date": "2025-08-30",
+     "date_text": "Bangkok, 30 August 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/219-3",
+     "date": "2025-09-01",
+     "date_text": "GENEVA, 1 SEPTEMBER 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/219-4",
+     "date": "2025-08-28",
+     "date_text": "Vienna, 28 August 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/219-5",
+     "date": "2025-08-30",
+     "date_text": "Bangkok, 30 August 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/219-6",
+     "date": "2025-08-14",
+     "date_text": "New York, 14 August 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-wordpress-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "wordpress",
+   "date_style": "weekday",
+   "page": "pages/en-wordpress-weekday.html",
+   "expected": [
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/220-1",
+     "date": "2025-08-24",
+     "date_text": "Sunday, August 24, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/220-2",
+     "date": "2025-08-22",
+     "date_text": "Friday, August 22, 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/220-3",
+     "date": "2025-08-18",
+     "date_text": "Monday, August 18, 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/220-4",
+     "date": "2025-08-18",
+     "date_text": "Monday, August 18, 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/220-5",
+     "date": "2025-08-08",
+     "date_text": "Friday, August 8, 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/220-6",
+     "date": "2025-08-14",
+     "date_text": "Thursday, August 14, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-drupal-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "drupal",
+   "date_style": "weekday",
+   "page": "pages/en-drupal-weekday.html",
+   "expected": [
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/221-1",
+     "date": "2025-06-30",
+     "date_text": "Monday, June 30, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/221-2",
+     "date": "2025-06-26",
+     "date_text": "Thursday, June 26, 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/221-3",
+     "date": "2025-06-28",
+     "date_text": "Saturday, June 28, 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/221-4",
+     "date": "2025-06-27",
+     "date_text": "Friday, June 27, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/221-5",
+     "date": "2025-06-18",
+     "date_text": "Wednesday, June 18, 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/221-6",
+     "date": "2025-06-25",
+     "date_text": "Wednesday, June 25, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-cards-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "cards",
+   "date_style": "weekday",
+   "page": "pages/en-cards-weekday.html",
+   "expected": [
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/222-1",
+     "date": "2025-09-18",
+     "date_text": "Thursday, September 18, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/222-2",
+     "date": "2025-09-14",
+     "date_text": "Sunday, September 14, 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/222-3",
+     "date": "2025-09-10",
+     "date_text": "Wednesday, September 10, 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/222-4",
+     "date": "2025-09-15",
+     "date_text": "Monday, September 15, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/222-5",
+     "date": "2025-09-14",
+     "date_text": "Sunday, September 14, 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/222-6",
+     "date": "2025-09-13",
+     "date_text": "Saturday, September 13, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-table-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "table",
+   "date_style": "weekday",
+   "page": "pages/en-table-weekday.html",
+   "expected": [
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/223-1",
+     "date": "2025-07-09",
+     "date_text": "Wednesday, July 9, 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/223-2",
+     "date": "2025-07-06",
+     "date_text": "Sunday, July 6, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/223-3",
+     "date": "2025-07-07",
+     "date_text": "Monday, July 7, 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/223-4",
+     "date": "2025-07-06",
+     "date_text": "Sunday, July 6, 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/223-5",
+     "date": "2025-07-05",
+     "date_text": "Saturday, July 5, 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/223-6",
+     "date": "2025-06-24",
+     "date_text": "Tuesday, June 24, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-list-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "list",
+   "date_style": "weekday",
+   "page": "pages/en-list-weekday.html",
+   "expected": [
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/224-1",
+     "date": "2025-10-04",
+     "date_text": "Saturday, October 4, 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/224-2",
+     "date": "2025-10-02",
+     "date_text": "Thursday, October 2, 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/224-3",
+     "date": "2025-10-02",
+     "date_text": "Thursday, October 2, 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/224-4",
+     "date": "2025-09-25",
+     "date_text": "Thursday, September 25, 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/224-5",
+     "date": "2025-09-22",
+     "date_text": "Monday, September 22, 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/224-6",
+     "date": "2025-09-24",
+     "date_text": "Wednesday, September 24, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-date-after-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "date-after",
+   "date_style": "weekday",
+   "page": "pages/en-date-after-weekday.html",
+   "expected": [
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/225-1",
+     "date": "2025-06-26",
+     "date_text": "Thursday, June 26, 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/225-2",
+     "date": "2025-06-25",
+     "date_text": "Wednesday, June 25, 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/225-3",
+     "date": "2025-06-22",
+     "date_text": "Sunday, June 22, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/225-4",
+     "date": "2025-06-23",
+     "date_text": "Monday, June 23, 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/225-5",
+     "date": "2025-06-14",
+     "date_text": "Saturday, June 14, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/225-6",
+     "date": "2025-06-16",
+     "date_text": "Monday, June 16, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-sidebar-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "sidebar",
+   "date_style": "weekday",
+   "page": "pages/en-sidebar-weekday.html",
+   "expected": [
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/226-1",
+     "date": "2025-09-03",
+     "date_text": "Wednesday, September 3, 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/226-2",
+     "date": "2025-08-30",
+     "date_text": "Saturday, August 30, 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/226-3",
+     "date": "2025-08-28",
+     "date_text": "Thursday, August 28, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/226-4",
+     "date": "2025-08-31",
+     "date_text": "Sunday, August 31, 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/226-5",
+     "date": "2025-08-22",
+     "date_text": "Friday, August 22, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/226-6",
+     "date": "2025-08-29",
+     "date_text": "Friday, August 29, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-category-first-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "category-first",
+   "date_style": "weekday",
+   "page": "pages/en-category-first-weekday.html",
+   "expected": [
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/227-1",
+     "date": "2025-07-13",
+     "date_text": "Sunday, July 13, 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/227-2",
+     "date": "2025-07-09",
+     "date_text": "Wednesday, July 9, 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/227-3",
+     "date": "2025-07-11",
+     "date_text": "Friday, July 11, 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/227-4",
+     "date": "2025-07-10",
+     "date_text": "Thursday, July 10, 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/227-5",
+     "date": "2025-07-01",
+     "date_text": "Tuesday, July 1, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/227-6",
+     "date": "2025-07-03",
+     "date_text": "Thursday, July 3, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-read-more-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "read-more",
+   "date_style": "weekday",
+   "page": "pages/en-read-more-weekday.html",
+   "expected": [
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/228-1",
+     "date": "2025-07-09",
+     "date_text": "Wednesday, July 9, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/228-2",
+     "date": "2025-07-08",
+     "date_text": "Tuesday, July 8, 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/228-3",
+     "date": "2025-07-05",
+     "date_text": "Saturday, July 5, 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/228-4",
+     "date": "2025-06-30",
+     "date_text": "Monday, June 30, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/228-5",
+     "date": "2025-06-23",
+     "date_text": "Monday, June 23, 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/228-6",
+     "date": "2025-06-24",
+     "date_text": "Tuesday, June 24, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-with-time-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "with-time",
+   "date_style": "weekday",
+   "page": "pages/en-with-time-weekday.html",
+   "expected": [
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/229-1",
+     "date": "2025-07-30",
+     "date_text": "Wednesday, July 30, 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/229-2",
+     "date": "2025-07-26",
+     "date_text": "Saturday, July 26, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/229-3",
+     "date": "2025-07-24",
+     "date_text": "Thursday, July 24, 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/229-4",
+     "date": "2025-07-27",
+     "date_text": "Sunday, July 27, 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/229-5",
+     "date": "2025-07-26",
+     "date_text": "Saturday, July 26, 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/229-6",
+     "date": "2025-07-20",
+     "date_text": "Sunday, July 20, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-busy-sidebar-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "busy-sidebar",
+   "date_style": "weekday",
+   "page": "pages/en-busy-sidebar-weekday.html",
+   "expected": [
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/230-1",
+     "date": "2025-07-10",
+     "date_text": "Thursday, July 10, 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/230-2",
+     "date": "2025-07-06",
+     "date_text": "Sunday, July 6, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/230-3",
+     "date": "2025-07-02",
+     "date_text": "Wednesday, July 2, 2025"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/230-4",
+     "date": "2025-06-28",
+     "date_text": "Saturday, June 28, 2025"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/230-5",
+     "date": "2025-06-28",
+     "date_text": "Saturday, June 28, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/230-6",
+     "date": "2025-07-05",
+     "date_text": "Saturday, July 5, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-pager-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "pager",
+   "date_style": "weekday",
+   "page": "pages/en-pager-weekday.html",
+   "expected": [
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/231-1",
+     "date": "2025-08-24",
+     "date_text": "Sunday, August 24, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/231-2",
+     "date": "2025-08-21",
+     "date_text": "Thursday, August 21, 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/231-3",
+     "date": "2025-08-18",
+     "date_text": "Monday, August 18, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/231-4",
+     "date": "2025-08-12",
+     "date_text": "Tuesday, August 12, 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/231-5",
+     "date": "2025-08-20",
+     "date_text": "Wednesday, August 20, 2025"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/231-6",
+     "date": "2025-08-19",
+     "date_text": "Tuesday, August 19, 2025"
+    }
+   ]
+  },
+  {
+   "name": "en-flat-weekday",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "flat",
+   "date_style": "weekday",
+   "page": "pages/en-flat-weekday.html",
+   "expected": [
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/232-1",
+     "date": "2025-06-18",
+     "date_text": "Wednesday, June 18, 2025"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/232-2",
+     "date": "2025-06-14",
+     "date_text": "Saturday, June 14, 2025"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/232-3",
+     "date": "2025-06-14",
+     "date_text": "Saturday, June 14, 2025"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/232-4",
+     "date": "2025-06-15",
+     "date_text": "Sunday, June 15, 2025"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/232-5",
+     "date": "2025-06-06",
+     "date_text": "Friday, June 6, 2025"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/232-6",
+     "date": "2025-06-03",
+     "date_text": "Tuesday, June 3, 2025"
+    }
+   ]
   }
  ]
 }
