@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_feed(cached_p=...)`) now narrow every parser that reads the page.
 
 ### Fixed
+- **Day/month order of numeric dates** — a page's numeric dates are now read
+  in one order per group of dates (a cluster or a spec's items). A date with a
+  number above 12 decides (`13/05/2022` day first, `05/13/2022` month first);
+  otherwise `en-US` pages read month first and all other pages day first.
+  Before, `05/06/2022` was always 5 June while `05/13/2022` was 13 May and
+  `05/06/22` was 6 May, so one list could mix both orders. `explain` shows the
+  order chosen for each group and why.
 - **Atom full content** — Atom output kept the item description as `<content>`
   even when the item had full content (for example `extract --full-text -f atom`
   or a native feed with `content:encoded`). Atom now emits the full content as

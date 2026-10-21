@@ -32,6 +32,9 @@ class ClusterReport:
     patterns: list[str]
     samples: list[str]
     chosen: bool = False
+    #: Day/month order of the group's numeric dates (``dmy``/``mdy``) and why.
+    date_order: str | None = None
+    date_order_reason: str | None = None
 
 
 @dataclass
@@ -45,6 +48,8 @@ class Explanation:
     warnings: list[str]
     hints: list[str]
     items: list[dict[str, Any]] = field(default_factory=list)
+    #: Day/month order used for each group of numeric dates in the result.
+    date_orders: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -77,6 +82,7 @@ def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
         for path, info in clusters.items():
             links, titles, dates, news_bonus = analyzer._cluster_score(info)
             nodes = info["nodes"]
+            order = info.get("date_order")
             reports.append(
                 ClusterReport(
                     container=path,
@@ -87,6 +93,8 @@ def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
                     patterns=sorted({str(n.get("t_key")) for n in nodes if n.get("t_key")}),
                     samples=[_node_text(n["node"]) for n in nodes[:3]],
                     chosen=path == chosen_path,
+                    date_order=order.order if order is not None else None,
+                    date_order_reason=order.reason if order is not None else None,
                 )
             )
     reports.sort(key=lambda r: (not r.chosen, -r.links, -r.titles, -r.dates))
@@ -165,6 +173,7 @@ def explain(service, url: str, data: bytes | None = None, *, source: str = "netw
         attempts=[dataclasses.asdict(a) for a in diagnostics.attempts] if diagnostics else [],
         warnings=list(diagnostics.warnings) if diagnostics else [],
         hints=_hints(url, clusters, feed, diagnostics),
+        date_orders=list(diagnostics.metadata.get("date_order", [])) if diagnostics else [],
         items=[
             {
                 "title": item.get("title"),
@@ -193,6 +202,10 @@ def to_text(report: Explanation) -> str:
             f" {mark} {cluster.dates} dates, {cluster.links} linked, {cluster.titles} titled "
             f"{cluster.container} e.g. {', '.join(cluster.samples)}"
         )
+        if cluster.date_order:
+            lines.append(f"     date order {cluster.date_order}: {cluster.date_order_reason}")
+    for entry in report.date_orders:
+        lines.append(f"date order {entry['order']} for {entry['group']}: {entry['reason']}")
     for attempt in report.attempts:
         lines.append(
             f"attempt {attempt['strategy']}: {attempt['status']}, {attempt['item_count']} items"
@@ -236,6 +249,9 @@ def to_html(report: Explanation) -> str:
             + cell(cluster.titles)
             + f"<td><code>{escape(cluster.container)}</code></td>"
             + cell("; ".join(cluster.samples))
+            + cell(
+                f"{cluster.date_order}: {cluster.date_order_reason}" if cluster.date_order else ""
+            )
             + "</tr>"
         )
     items = "".join(
@@ -250,6 +266,11 @@ def to_html(report: Explanation) -> str:
         for a in report.attempts
     )
     hints = "".join(f'<p class="hint">{escape(h)}</p>' for h in report.hints + report.warnings)
+    orders = "".join(
+        f"<p>Numeric dates in <code>{escape(str(entry['group']))}</code> read as "
+        f"<b>{escape(str(entry['order']))}</b>: {escape(str(entry['reason']))}.</p>"
+        for entry in report.date_orders
+    )
     spec = (
         f"<pre>{escape(report.spec_yaml)}</pre>"
         if report.spec_yaml
@@ -265,10 +286,11 @@ def to_html(report: Explanation) -> str:
 Strategy <b>{escape(report.strategy or "none")}</b>, {len(report.items)} items,
 heuristic confidence {report.confidence:.2f}.</p>
 {hints}
+{orders}
 <h2>Repeated date groups ({len(report.clusters)})</h2>
 <p class="muted">The highlighted group was chosen: groups with more linked and titled items win.</p>
 <table><tr><th></th><th>Dates</th><th>Linked</th><th>Titled</th><th>Container</th>
-<th>Examples</th></tr>{"".join(rows)}</table>
+<th>Examples</th><th>Date order</th></tr>{"".join(rows)}</table>
 <h2>Strategies tried</h2>
 <table><tr><th>Strategy</th><th>Result</th><th>Items</th></tr>{attempts}</table>
 <h2>Items</h2>

@@ -20,7 +20,16 @@ from .consts import (
     TAG_TYPE_TAIL,
     TAG_TYPE_TEXT,
 )
-from .dates import build_match_datetime, date_text_variants, has_letters, qddate_language
+from .dates import (
+    DateReading,
+    build_match_datetime,
+    choose_date_order,
+    date_text_variants,
+    has_letters,
+    is_ambiguous,
+    numeric_order,
+    qddate_language,
+)
 from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport, new_session
 from .runtime import ExtractionContext
 from .tagmapper import TagBlock, TagPath
@@ -28,7 +37,7 @@ from .tools import (
     Logger,
     clean_url,
     decode_html,
-    detect_page_language_metadata,
+    detect_page_locale,
     get_abs_url,
     looks_like_fuzzy_date,
     parse_datetime_attr,
@@ -232,22 +241,32 @@ class FeedExtractor:
         else the page metadata (``<html lang>``, ``og:locale`` …), else the
         ``Content-Language`` header. Item text is not consulted: dates are read
         before the items exist. Without evidence, or for a language qddate does
-        not know, only the general parser is used.
+        not know, only the general parser is used. The tag as written
+        (``en-US``) also decides the order of ambiguous numeric dates.
         """
+        context = self._context()
+        headers = context.response_meta.get("headers") or {}
+        header = headers.get("Content-Language") or headers.get("content-language")
         tag = (
             language
             or self.default_language
-            or detect_page_language_metadata(document)
+            or detect_page_locale(document)
+            or (str(header).split(",")[0].strip() if header else None)
             or self._last_content_language
         )
-        self._context().set_date_language(qddate_language(tag))
+        context.set_date_language(qddate_language(tag))
+        context.date_locale = tag or None
 
     def narrowed_dates(self, patterns):
         """Context manager: match only ``patterns`` (qddate keys) inside the block."""
         return self._context().narrowed_dates(patterns)
 
+    def ordered_dates(self, order):
+        """Context manager: read ambiguous numeric dates as ``"dmy"`` or ``"mdy"``."""
+        return self._context().ordered_dates(order)
+
     def _qddate_match(self, text):
-        """``(match, matched_text)`` from the first parser that reads ``text``.
+        """``(match, matched_text, language)`` from the first parser that reads ``text``.
 
         The page language's parser is tried first. The general parser is the
         fallback for text with letters, so wrong page metadata does not lose
@@ -279,18 +298,92 @@ class FeedExtractor:
         if not has_letters(text):
             parsers = parsers[:1]
         variants = None
-        for _language, parser in parsers:
+        for language, parser in parsers:
             res = parser.match(text)
             if res:
-                return res, text
+                return res, text, language
             if variants is None:
                 # "GENEVA, 29 July 2022", "Monday, January 31, 2022", "21-22 July 2022"
                 variants = list(date_text_variants(text))
             for variant in variants:
                 res = parser.match(variant)
                 if res:
-                    return res, variant
-        return None, text
+                    return res, variant, language
+        return None, text, None
+
+    def _reordered(self, res, date_text, order):
+        """qddate's other reading of an ambiguous numeric date, in ``order``.
+
+        ``05/06/2022`` reads as 5 June (``date_1``) and as 6 May
+        (``date_usa``); ``match_all`` offers both. The other reading must keep
+        the same fields (a time stays a time). Returns ``res`` when there is
+        none, for instance a dotted date, which qddate only reads day first.
+        """
+        if numeric_order(res) in (None, order) or not is_ambiguous(res):
+            return res
+        context = self._context()
+        memo = context.date_memo()
+        patterns = context.date_patterns
+        key = (
+            "order",
+            order,
+            date_text,
+            context.date_language,
+            None if patterns is None else tuple(patterns),
+        )
+        if key not in memo:
+            fields = set(res["values"].keys())
+            memo[key] = next(
+                (
+                    alternative
+                    for _language, parser in context.date_parsers()
+                    for alternative in parser.match_all(date_text)
+                    if numeric_order(alternative) == order
+                    and set(alternative["values"].keys()) == fields
+                ),
+                res,
+            )
+        return memo[key]
+
+    def read_text(self, text):
+        """How ``text`` reads as a publication date: a :class:`DateReading` or ``None``."""
+        if text is None:
+            return None
+        context = self._context()
+        res, date_text, language = self._qddate_match(text)
+        if self.session:
+            self.session["debug"]["num_textcompared"] += 1
+        if res:
+            reordered = False
+            if context.date_order:
+                again = self._reordered(res, date_text, context.date_order)
+                reordered, res = again is not res, again
+            the_date = build_match_datetime(
+                res, date_text, now=context.clock(), default_timezone=context.default_timezone
+            )
+            if the_date is None:
+                self.log.save("match_text", "Rejected implausible or invalid date %r" % text)
+                return None
+            if self.session:
+                self.session["debug"]["num_matched"] += 1
+            return DateReading(
+                key=res["pattern"]["key"],
+                text=text,
+                value=the_date,
+                match=res,
+                matched_text=date_text,
+                parser_language=language,
+                order=numeric_order(res),
+                reordered=reordered,
+            )
+        fuzzy_date = parse_fuzzy_date(
+            text, now=context.clock(), default_timezone=context.default_timezone
+        )
+        if fuzzy_date is not None:
+            if self.session:
+                self.session["debug"]["num_matched"] += 1
+            return DateReading(key="fuzzy", text=text, value=fuzzy_date)
+        return None
 
     def match_text(self, text):
         """Matches text to the regular expressions.
@@ -298,38 +391,16 @@ class FeedExtractor:
         Always returns a 5-tuple ``(matched, key, pattern, text, date)`` so
         callers can unpack it uniformly whether or not a date was found.
         """
-        if text is None:
+        reading = self.read_text(text)
+        if reading is None:
             return False, None, None, None, None
-        res, date_text = self._qddate_match(text)
-        if self.session:
-            self.session["debug"]["num_textcompared"] += 1
-        if res:
-            p = res["pattern"]
-            the_date = build_match_datetime(
-                res,
-                date_text,
-                now=self._context().clock(),
-                default_timezone=self._context().default_timezone,
-            )
-            if the_date is None:
-                self.log.save("match_text", "Rejected implausible or invalid date %r" % text)
-                return False, None, None, None, None
-            if self.session:
-                self.session["debug"]["num_matched"] += 1
-            return True, p["key"], p, text, the_date
-        fuzzy_date = parse_fuzzy_date(
-            text, now=self._context().clock(), default_timezone=self._context().default_timezone
-        )
-        if fuzzy_date is not None:
-            if self.session:
-                self.session["debug"]["num_matched"] += 1
-            return True, "fuzzy", {"key": "fuzzy"}, text, fuzzy_date
-        return False, None, None, None, None
+        return reading.as_tuple()
 
-    def match_date(self, node):
-        """Matches date to regular expressions. Uses  node as parameter"""
+    def read_date(self, node):
+        """How an element reads as a publication date: ``<time datetime>``, else
+        its text, else its tail. Returns a :class:`DateReading` or ``None``."""
         if node is None:
-            return None, None, None, None, None
+            return None
         if isinstance(getattr(node, "tag", None), str) and node.tag == "time":
             dt_attr = node.get("datetime")
             if dt_attr:
@@ -341,29 +412,23 @@ class FeedExtractor:
                     if self.session:
                         self.session["debug"]["num_datematched"] += 1
                         self.session["debug"]["num_matched"] += 1
-                    return True, "html:time", {"key": "html:time"}, display, the_date
-        text_1 = None
-        text_2 = None
+                    return DateReading(key="html:time", text=display, value=the_date)
+        for raw in (node.text, node.tail):
+            if raw is None or not raw.strip():
+                continue
+            reading = self.read_text(str(raw.strip("/\\«[]»").strip().replace("\xa0", " ")))
+            if reading is not None:
+                if self.session:
+                    self.session["debug"]["num_datematched"] += 1
+                return reading
+        return None
 
-        if node.text is not None and len(node.text.strip()) > 0:
-            text_1 = str(node.text.strip("/\\«[]»").strip().replace("\xa0", " "))
-        if node.tail is not None and len(node.tail.strip()) > 0:
-            text_2 = str(node.tail.strip("/\\«[]»").strip().replace("\xa0", " "))
-        if text_1 is None and text_2 is None:
+    def match_date(self, node):
+        """Matches date to regular expressions. Uses  node as parameter"""
+        reading = self.read_date(node)
+        if reading is None:
             return None, None, None, None, None
-        if text_1 is not None:
-            results = self.match_text(text_1)
-            if results[0] is True:
-                if self.session:
-                    self.session["debug"]["num_datematched"] += 1
-                return results
-        if text_2 is not None:
-            results = self.match_text(text_2)
-            if results[0] is True:
-                if self.session:
-                    self.session["debug"]["num_datematched"] += 1
-                return results
-        return None, None, None, None, None
+        return reading.as_tuple()
 
     def _pick_title_from_anns(self, anns):
         """Prefers heading text over the first long text node in document order."""
@@ -432,9 +497,10 @@ class FeedExtractor:
         first = True
         # Only match patterns on potential date nodes
         for node in potential_date_nodes:
-            (match, t_key, t_data, the_text, the_date) = self.match_date(node)
-            if match:
+            reading = self.read_date(node)
+            if reading is not None:
                 path = TagPath(node)
+                current = {"t_key": reading.key, "node": node, "reading": reading}
                 if last is not None and last_path is not None and path.level == last_path.level:
                     snode = TagPath.getSharedNode(node, last)
                     if shared_node is None:
@@ -445,14 +511,46 @@ class FeedExtractor:
                     if first:
                         clusters[spath]["nodes"].append(last_d)
                         first = False
-                    clusters[spath]["nodes"].append({"t_key": t_key, "node": node})
+                    clusters[spath]["nodes"].append(current)
 
                 last = node
-                last_d = {"t_key": t_key, "node": node}
+                last_d = current
                 last_path = path
+        for info in clusters.values():
+            self._order_cluster(info)
         self.session["debug"]["num_clusters"] = len(clusters)
         self.session["debug"]["clusters"] = clusters
         return clusters
+
+    def _note_date_order(self, group, order):
+        """Record a group's day/month order for diagnostics and ``explain``."""
+        diagnostics = self._context().diagnostics
+        if diagnostics is not None:
+            entry = {"group": group, **order.to_dict()}
+            orders = diagnostics.metadata.setdefault("date_order", [])
+            if entry not in orders:
+                orders.append(entry)
+
+    def _order_cluster(self, info):
+        """Choose one day/month order for a cluster and read its dates that way.
+
+        ``info["date_order"]`` records the :class:`~newsworker.dates.DateOrder`;
+        dates qddate read the other way get the chosen reading and pattern key.
+        """
+        order = choose_date_order(
+            (node.get("reading") for node in info["nodes"]), self._context().date_locale
+        )
+        info["date_order"] = order
+        if order.order is None:
+            return
+        with self.ordered_dates(order.order):
+            for node in info["nodes"]:
+                reading = node.get("reading")
+                if reading is None or reading.order in (None, order.order):
+                    continue
+                again = self.read_date(node["node"])
+                if again is not None:
+                    node["reading"], node["t_key"] = again, again.key
 
     def process_clusters(self, base_url, clusters, feed):
         """Extracts news items from clustered date nodes into ``feed``.
@@ -465,7 +563,7 @@ class FeedExtractor:
         self.log.save("process_clusters", "Start cluster processing")
         self.session["debug"]["tagblocks"] = []
         self.session["debug"]["annotations"] = []
-        for _p, node_info in list(clusters.items()):
+        for path, node_info in list(clusters.items()):
             snode = node_info["snode"]
             nodes = node_info["nodes"]
             if snode.tag == "table":
@@ -476,11 +574,15 @@ class FeedExtractor:
             snode_path = TagPath(snode)
             # Position of each date node among its siblings under ``snode``.
             data = [list(TagPath(ni["node"], snode).values())[1] for ni in nodes]
-            blocks = self._build_item_blocks(snode, snode_path, nodes, data)
-            for block in blocks:
-                item = self._item_from_block(base_url, block, cache_block)
-                if item is not None:
-                    feed["items"].append(item)
+            order = node_info.get("date_order")
+            if order is not None and order.order is not None:
+                self._note_date_order(path, order)
+            with self.ordered_dates(order.order if order is not None else None):
+                blocks = self._build_item_blocks(snode, snode_path, nodes, data)
+                for block in blocks:
+                    item = self._item_from_block(base_url, block, cache_block)
+                    if item is not None:
+                        feed["items"].append(item)
         feed["cache"] = cache_block
         self.log.save("process_clusters", "End cluster processing")
         return feed

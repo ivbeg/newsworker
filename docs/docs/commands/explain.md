@@ -29,6 +29,11 @@ newsworker explain --file page.html --base-url https://example.com/news [OPTIONS
 newsworker explain "https://example.com/news" -f html -o report.html
 ```
 
+Each date group also shows the day/month order its numeric dates were read in
+(`dmy` or `mdy`) and why: a date such as `13/05/2022` or `05/13/2022` that can
+only be read one way, or the page locale when every date is ambiguous. A
+`date order` line names the order used for the extracted items.
+
 Hints cover the common failure modes: no repeated dates (try `--render` or
 `--undated`), a chosen date group without links (a calendar or archive menu),
 items that all link to the listing page, undated items, a cached spec that was

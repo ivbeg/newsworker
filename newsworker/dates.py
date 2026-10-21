@@ -3,7 +3,8 @@
 qddate reports the raw components it matched (day, month, year, time and, in
 newer releases, a ``timezone`` token).  This module owns the policy that turns
 them into an aware UTC ``datetime``: two-digit years, explicit offsets written
-in the text, dates printed without a year, and implausible values.
+in the text, dates printed without a year, implausible values, and the
+day/month order of numeric dates shared by a group of dates.
 """
 
 from __future__ import annotations
@@ -11,7 +12,8 @@ from __future__ import annotations
 import datetime as dt
 import re
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -116,6 +118,138 @@ def thread_date_parser(language: str | None = None) -> Any:
 def has_letters(text: str) -> bool:
     """Whether ``text`` has a letter; without one only numeric patterns can match."""
     return any(char.isalpha() for char in text)
+
+
+@dataclass(frozen=True)
+class DateReading:
+    """One text read as a publication date, with the evidence behind it."""
+
+    #: qddate pattern key, ``"fuzzy"`` for relative dates, ``"html:time"``.
+    key: str
+    #: The text as shown on the page.
+    text: str
+    #: Aware UTC publication time.
+    value: dt.datetime
+    #: The qddate match; ``None`` for relative dates and ``<time datetime>``.
+    match: Mapping[str, Any] | None = None
+    #: The text qddate read: ``text`` without a leading dateline or day span.
+    matched_text: str | None = None
+    #: qddate code of the parser that read it; ``None`` for all languages.
+    parser_language: str | None = None
+    #: ``"dmy"`` or ``"mdy"`` for a numeric day-month date, else ``None``.
+    order: str | None = None
+    #: Read again in the order chosen for its group of dates.
+    reordered: bool = False
+
+    @property
+    def pattern(self) -> Mapping[str, Any]:
+        return self.match["pattern"] if self.match else {"key": self.key}
+
+    def as_tuple(self) -> tuple[bool, str, Mapping[str, Any], str, dt.datetime]:
+        """The ``(matched, key, pattern, text, date)`` tuple of ``match_text``."""
+        return True, self.key, self.pattern, self.text, self.value
+
+
+#: Locales whose numeric dates put the month first (``05/13/2022``).
+MONTH_FIRST_LOCALES = frozenset({"en-us"})
+
+_DATE_FIELDS = ("day", "month", "year")
+
+
+def _numeric_fields(match: Mapping[str, Any]) -> list[str] | None:
+    """Day, month and year in printed order for a numeric date, else ``None``."""
+    pattern = match.get("pattern") or {}
+    basekey = pattern.get("basekey", pattern.get("key"))
+    if pattern.get("language") is not None and basekey not in _WORDLESS_ENGLISH_PATTERNS:
+        return None  # a month name
+    values = match.get("values") or {}
+    # ParseResults iterates its tokens; ``keys()`` gives the names in printed order.
+    fields = [key for key in values.keys() if key in _DATE_FIELDS]  # noqa: SIM118
+    if len(fields) < 2 or fields[0] == "year" or "month" not in fields[:2]:
+        return None
+    return fields
+
+
+def numeric_order(match: Mapping[str, Any] | None) -> str | None:
+    """``"dmy"`` or ``"mdy"`` for a numeric day-month qddate match.
+
+    Dates with a month name, year-first dates (``2022-05-06``) and anything
+    that is not a qddate match have no order.
+    """
+    fields = _numeric_fields(match) if match else None
+    if fields is None:
+        return None
+    return "dmy" if fields[0] == "day" else "mdy"
+
+
+def leading_numbers(match: Mapping[str, Any]) -> tuple[int, int] | None:
+    """The first and second number of a numeric day-month date, as printed."""
+    fields = _numeric_fields(match)
+    if fields is None:
+        return None
+    values = match["values"]
+    try:
+        return int(values[fields[0]]), int(values[fields[1]])
+    except (TypeError, ValueError):
+        return None
+
+
+def is_ambiguous(match: Mapping[str, Any] | None) -> bool:
+    """Whether a numeric date reads as two different dates (``05/06/2022``)."""
+    numbers = leading_numbers(match) if match else None
+    return numbers is not None and max(numbers) <= 12 and numbers[0] != numbers[1]
+
+
+@dataclass(frozen=True)
+class DateOrder:
+    """The day/month order chosen for a group of dates, and why."""
+
+    #: ``"dmy"``, ``"mdy"``, or ``None`` when the group has no numeric
+    #: day-month dates or its dates contradict each other.
+    order: str | None
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"order": self.order, "reason": self.reason}
+
+
+def choose_date_order(
+    readings: Iterable[DateReading | None], locale: str | None = None
+) -> DateOrder:
+    """Pick one day/month order for the numeric dates a page prints together.
+
+    A date whose first number is above 12 can only start with the day, one
+    whose second number is above 12 only with the month; one such date
+    decides for the whole group. Ambiguous groups follow the page ``locale``:
+    ``en-US`` puts the month first, anything else the day.
+    """
+    day_first = month_first = None
+    numeric = False
+    for reading in readings:
+        if reading is None or reading.match is None:
+            continue
+        numbers = leading_numbers(reading.match)
+        if numbers is None:
+            continue
+        numeric = True
+        if numbers[0] > 12 and day_first is None:
+            day_first = reading.text
+        elif numbers[1] > 12 and month_first is None:
+            month_first = reading.text
+    if day_first and month_first:
+        return DateOrder(None, f"contradicting dates {day_first!r} and {month_first!r}")
+    if day_first:
+        return DateOrder("dmy", f"{day_first!r} starts with a day above 12")
+    if month_first:
+        return DateOrder("mdy", f"{month_first!r} has a day above 12 in second place")
+    if not numeric:
+        return DateOrder(None, "no numeric day-month dates")
+    tag = str(locale or "").strip().replace("_", "-").lower()
+    if tag in MONTH_FIRST_LOCALES:
+        return DateOrder("mdy", f"ambiguous dates, page locale {locale}")
+    if tag:
+        return DateOrder("dmy", f"ambiguous dates, page locale {locale}")
+    return DateOrder("dmy", "ambiguous dates, day first by default")
 
 
 def _offset_from_token(token: Any) -> dt.timezone | None:

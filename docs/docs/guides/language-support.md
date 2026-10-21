@@ -49,6 +49,25 @@ patterns can read it, and the first parser has them all. Without language
 evidence, or for a language qddate does not know (`ja`, `zh`), every date is
 matched with all languages, as before.
 
+## Day and month order
+
+qddate reads `05/06/2022` day first (5 June) but `05/13/2022` month first
+(13 May), and a two-digit year (`05/06/22`) month first. A list mixing them
+would put items in the wrong order, so newsworker picks one order for every
+group of dates a page prints together (a date cluster, or the items of a spec):
+
+1. If any numeric date starts with a number above 12 (`13/05/2022`), the group
+   is read day first; if any has a number above 12 in second place
+   (`05/13/2022`), month first. Contradicting groups keep each date as read.
+2. Otherwise the page locale decides: `en-US` (from `--language`,
+   `<html lang>`, `og:locale` or `Content-Language`) reads month first, every
+   other locale and a page without one day first.
+
+Ambiguous dates are then read again in that order with qddate's other reading
+(`date_1` ↔ `date_usa`, `date_8` ↔ `date_usa_1`), keeping any time of day.
+Dotted and dashed dates (`05.06.2022`) have only a day-first reading in qddate
+and keep it. `newsworker explain` shows the order of each group and why.
+
 An explicit `--language` override wins over every automatic signal. With
 diagnostics enabled, automatic selection reports `automatic_evidence`,
 `ambiguous_evidence`, or `default_fallback` instead of silently implying

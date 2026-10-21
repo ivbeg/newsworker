@@ -35,6 +35,10 @@ class ExtractionContext:
     logger: Any = field(default=None, repr=False)
     #: qddate code of the page language (see :func:`newsworker.dates.qddate_language`).
     date_language: str | None = None
+    #: The page language tag as written (``en-US``); decides ambiguous date order.
+    date_locale: str | None = None
+    #: ``"dmy"``/``"mdy"``: read ambiguous numeric dates in this order.
+    date_order: str | None = None
     #: qddate pattern keys matching is narrowed to; see :meth:`narrowed_dates`.
     date_patterns: list[str] | None = None
     _date_parser: Any = field(default=None, repr=False)
@@ -101,6 +105,16 @@ class ExtractionContext:
         finally:
             self.date_patterns = previous
             self._sync_date_sessions(start=False)
+
+    @contextlib.contextmanager
+    def ordered_dates(self, order: str | None) -> Iterator[None]:
+        """Read ambiguous numeric dates as ``order`` (``"dmy"``/``"mdy"``) inside the block."""
+        previous = self.date_order
+        self.date_order = order
+        try:
+            yield
+        finally:
+            self.date_order = previous
 
     def _sync_date_sessions(self, *, start: bool) -> None:
         # Sessions that no longer apply end at once. Starting one is costly
