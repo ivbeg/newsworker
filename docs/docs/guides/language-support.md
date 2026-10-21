@@ -61,7 +61,8 @@ group of dates a page prints together (a date cluster, or the items of a spec):
    (`05/13/2022`), month first. Contradicting groups keep each date as read.
 2. Otherwise the page locale decides: `en-US` (from `--language`,
    `<html lang>`, `og:locale` or `Content-Language`) reads month first, every
-   other locale and a page without one day first.
+   other locale and a page without one day first. A `--language` without a
+   region (`en`) keeps the region of a page in that language (`en-US`).
 
 Ambiguous dates are then read again in that order with qddate's other reading
 (`date_1` ↔ `date_usa`, `date_8` ↔ `date_usa_1`), keeping any time of day.

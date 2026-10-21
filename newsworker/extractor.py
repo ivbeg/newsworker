@@ -45,6 +45,7 @@ from .tools import (
     detect_page_locale,
     get_abs_url,
     looks_like_fuzzy_date,
+    normalize_language_tag,
     pick_link_node,
     resolve_feed_language,
     validate_url,
@@ -245,20 +246,29 @@ class FeedExtractor:
         ``Content-Language`` header. Item text is not consulted: dates are read
         before the items exist. Without evidence, or for a language qddate does
         not know, only the general parser is used. The tag as written
-        (``en-US``) also decides the order of ambiguous numeric dates.
+        (``en-US``) also decides the order of ambiguous numeric dates; an
+        explicit language without a region keeps the page's region when both
+        name the same language.
         """
         context = self._context()
         headers = context.response_meta.get("headers") or {}
         header = headers.get("Content-Language") or headers.get("content-language")
-        tag = (
-            language
-            or self.default_language
-            or detect_page_locale(document)
+        page = (
+            detect_page_locale(document)
             or (str(header).split(",")[0].strip() if header else None)
             or self._last_content_language
         )
+        tag = language or self.default_language or page
+        locale = tag
+        if (
+            tag
+            and page
+            and normalize_language_tag(tag) == str(tag).strip().lower()
+            and normalize_language_tag(page) == normalize_language_tag(tag)
+        ):
+            locale = page
         context.set_date_language(qddate_language(tag))
-        context.date_locale = tag or None
+        context.date_locale = locale or None
 
     def narrowed_dates(self, patterns):
         """Context manager: match only ``patterns`` (qddate keys) inside the block."""

@@ -3,6 +3,7 @@
 import datetime as dt
 
 import pytest
+from lxml.html import fromstring
 
 from newsworker.dates import choose_date_order, is_ambiguous, numeric_order
 from newsworker.explain import explain, to_html, to_text
@@ -148,3 +149,19 @@ def test_explain_shows_the_order(tmp_path):
     text = to_text(report)
     assert "date order mdy" in text and "page locale en-US" in text
     assert "<b>mdy</b>" in to_html(report)
+
+
+def test_explicit_language_without_region_keeps_the_page_region():
+    def locale(page_lang, override):
+        extractor = FeedExtractor(default_language=override)
+        context = ExtractionContext()
+        with extractor.activate_context(context):
+            extractor.use_page_language(
+                fromstring(f'<html lang="{page_lang}"><body></body></html>')
+            )
+        return context.date_locale, context.date_language
+
+    assert locale("en-US", "en") == ("en-US", "en")
+    assert locale("en-US", "en-GB") == ("en-GB", "en")
+    assert locale("en-US", "fr") == ("fr", "fr")
+    assert locale("de-DE", None) == ("de-DE", "de")
