@@ -32,6 +32,23 @@ qddate cannot read as written: a leading dateline place or weekday is dropped
 and a day span keeps its first day, so `GENEVA, 21-22 July 2022` reads as
 21 July 2022 and `Monday, January 31, 2022` as 31 January 2022.
 
+## Page language and dates
+
+Dates are matched with the page language's qddate patterns first. The language
+is the explicit `--language` / `default_language`, else the page metadata
+(`<html lang>`, `<meta http-equiv="content-language">`, `og:locale`,
+`<meta name="language">`), else the `Content-Language` header; item text is not
+used, because dates are read before items exist. Codes are mapped to qddate's
+(`cs` is qddate's `cz`), and the language-specific parser also knows every
+numeric pattern (`05.06.2022`, `2022-05-06`, `05/13/2022`).
+
+A text that the page language's patterns do not read is tried again with all
+of qddate's languages, so wrong metadata (`<html lang="en">` on a German site)
+does not lose dates. Text without letters skips that second pass: only numeric
+patterns can read it, and the first parser has them all. Without language
+evidence, or for a language qddate does not know (`ja`, `zh`), every date is
+matched with all languages, as before.
+
 An explicit `--language` override wins over every automatic signal. With
 diagnostics enabled, automatic selection reports `automatic_evidence`,
 `ambiguous_evidence`, or `default_fallback` instead of silently implying

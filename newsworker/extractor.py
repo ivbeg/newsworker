@@ -20,7 +20,7 @@ from .consts import (
     TAG_TYPE_TAIL,
     TAG_TYPE_TEXT,
 )
-from .dates import build_match_datetime, date_text_variants
+from .dates import build_match_datetime, date_text_variants, has_letters, qddate_language
 from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport, new_session
 from .runtime import ExtractionContext
 from .tagmapper import TagBlock, TagPath
@@ -28,6 +28,7 @@ from .tools import (
     Logger,
     clean_url,
     decode_html,
+    detect_page_language_metadata,
     get_abs_url,
     looks_like_fuzzy_date,
     parse_datetime_attr,
@@ -211,6 +212,7 @@ class FeedExtractor:
             document=document,
             content_language=self._last_content_language,
         )
+        self.use_page_language(document)
         feed = {
             "title": feed_title,
             "language": language,
@@ -223,6 +225,73 @@ class FeedExtractor:
         self.log.save("initfeed", "Feed parsed")
         return feed
 
+    def use_page_language(self, document=None, language=None):
+        """Match dates with the page language's qddate parser first.
+
+        The language is ``language``, else the explicit ``default_language``,
+        else the page metadata (``<html lang>``, ``og:locale`` …), else the
+        ``Content-Language`` header. Item text is not consulted: dates are read
+        before the items exist. Without evidence, or for a language qddate does
+        not know, only the general parser is used.
+        """
+        tag = (
+            language
+            or self.default_language
+            or detect_page_language_metadata(document)
+            or self._last_content_language
+        )
+        self._context().set_date_language(qddate_language(tag))
+
+    def narrowed_dates(self, patterns):
+        """Context manager: match only ``patterns`` (qddate keys) inside the block."""
+        return self._context().narrowed_dates(patterns)
+
+    def _qddate_match(self, text):
+        """``(match, matched_text)`` from the first parser that reads ``text``.
+
+        The page language's parser is tried first. The general parser is the
+        fallback for text with letters, so wrong page metadata does not lose
+        dates; without letters only numeric patterns can match, and every
+        parser has those.
+
+        Results are remembered for the rest of the build: a page's date nodes
+        are read for clusters, item blocks and annotations, and again by the
+        spec built from them. A pattern restriction only removes candidates,
+        so an unrestricted miss, or a match by one of the allowed patterns,
+        is also the restricted result.
+        """
+        context = self._context()
+        memo = context.date_memo()
+        patterns = context.date_patterns
+        key = (text, context.date_language, None if patterns is None else tuple(patterns))
+        found = memo.get(key)
+        if found is None and patterns is not None:
+            free = memo.get((text, context.date_language, None))
+            if free is not None and (free[0] is None or free[0]["pattern"]["key"] in patterns):
+                found = free
+        if found is None:
+            found = self._match_parsers(text)
+        memo[key] = found
+        return found
+
+    def _match_parsers(self, text):
+        parsers = self._context().date_parsers()
+        if not has_letters(text):
+            parsers = parsers[:1]
+        variants = None
+        for _language, parser in parsers:
+            res = parser.match(text)
+            if res:
+                return res, text
+            if variants is None:
+                # "GENEVA, 29 July 2022", "Monday, January 31, 2022", "21-22 July 2022"
+                variants = list(date_text_variants(text))
+            for variant in variants:
+                res = parser.match(variant)
+                if res:
+                    return res, variant
+        return None, text
+
     def match_text(self, text):
         """Matches text to the regular expressions.
 
@@ -231,15 +300,7 @@ class FeedExtractor:
         """
         if text is None:
             return False, None, None, None, None
-        res = self.indexer.match(text)
-        date_text = text
-        if not res:
-            # "GENEVA, 29 July 2022", "Monday, January 31, 2022", "21-22 July 2022"
-            for variant in date_text_variants(text):
-                res = self.indexer.match(variant)
-                if res:
-                    date_text = variant
-                    break
+        res, date_text = self._qddate_match(text)
         if self.session:
             self.session["debug"]["num_textcompared"] += 1
         if res:
@@ -340,6 +401,7 @@ class FeedExtractor:
             self.session["debug"]["clusters"] = {}
             self.log.save("getclusters", "Document is None, returning empty clusters")
             return {}
+        self.use_page_language(document)
 
         # Optimized XPath: exclude script/style nodes early for better performance
         nodes = document.xpath(
@@ -744,11 +806,8 @@ class FeedExtractor:
         self.init_session()
         if cached_p is None:
             return self._build_feed(url, data, user_agent)
-        self.indexer.start_session(list(cached_p))
-        try:
+        with self.narrowed_dates(list(cached_p)):
             return self._build_feed(url, data, user_agent)
-        finally:
-            self.indexer.end_session()
 
     def _build_feed(self, url, data, user_agent):
         if data is None:

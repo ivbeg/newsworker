@@ -46,24 +46,76 @@ _DAY_RANGE_RE = re.compile(r"^(\d{1,2})\s*[-–—]\s*\d{1,2}(?=\s+[^\W\d_])")
 #: Longer text is prose, not a date line; it is not worth a second match.
 MAX_DATELINE_CHARS = 64
 
+#: ISO 639-1 codes that qddate spells differently.
+QDDATE_LANGUAGE_CODES = {"cs": "cz"}
+
+#: US month-first numeric dates contain no words but are filed under English in
+#: qddate. Every language's parser keeps them, so a date without letters never
+#: needs the general parser.
+_WORDLESS_ENGLISH_PATTERNS = frozenset({"dt:date:date_usa", "dt:date:date_usa_1"})
+
 _local = threading.local()
 
 
-def thread_date_parser() -> Any:
+def qddate_language(language: str | None) -> str | None:
+    """qddate's code for ``language`` (a BCP 47 tag such as ``cs`` or ``en-US``).
+
+    Returns ``None`` when the tag is empty or qddate has no month names for it.
+    """
+    if not language:
+        return None
+    from qddate.patterns import SUPPORTED_LANGUAGES
+
+    primary = re.split(r"[-_]", str(language).strip(), maxsplit=1)[0].lower()
+    code = QDDATE_LANGUAGE_CODES.get(primary, primary)
+    return code if code in SUPPORTED_LANGUAGES else None
+
+
+def _language_patterns(language: str) -> list[dict[str, Any]]:
+    from qddate.patterns import ALL_PATTERNS
+
+    return [
+        pattern
+        for pattern in ALL_PATTERNS
+        if pattern.get("language") in (None, language)
+        or pattern["key"] in _WORDLESS_ENGLISH_PATTERNS
+    ]
+
+
+def thread_date_parser(language: str | None = None) -> Any:
     """Return this thread's qddate parser, building it on first use.
+
+    Without ``language`` the parser knows every language qddate supports. With
+    a qddate code from :func:`qddate_language` it knows that language's month
+    and weekday names plus every pattern without words (numeric dates), so a
+    page's own dates are tried against a small fraction of the patterns.
 
     Building a ``DateParser(generate=True)`` costs tens of milliseconds, so a
     parser is shared by every request a thread serves instead of being rebuilt
-    per request.  Callers must pair ``start_session`` with ``end_session`` (in a
-    ``finally`` block) so a narrowed pattern set never leaks between requests.
+    per request.  Pattern sessions are opened and closed by
+    :meth:`newsworker.runtime.ExtractionContext.narrowed_dates`, so a narrowed
+    pattern set never leaks between requests.
     """
-    parser = getattr(_local, "parser", None)
+    parsers = getattr(_local, "parsers", None)
+    if parsers is None:
+        parsers = _local.parsers = {}
+    parser = parsers.get(language)
     if parser is None:
         from qddate import DateParser
 
-        parser = DateParser(generate=True)
-        _local.parser = parser
+        if language is None:
+            parser = DateParser(generate=True)
+        else:
+            if qddate_language(language) != language:
+                raise ValueError(f"qddate has no date patterns for {language!r}")
+            parser = DateParser(generate=True, patterns=_language_patterns(language))
+        parsers[language] = parser
     return parser
+
+
+def has_letters(text: str) -> bool:
+    """Whether ``text`` has a letter; without one only numeric patterns can match."""
+    return any(char.isalpha() for char in text)
 
 
 def _offset_from_token(token: Any) -> dt.timezone | None:

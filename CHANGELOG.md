@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Requires `requests` 2.32.2 or newer.
+- **Dates in the page language first** — dates are matched with a qddate
+  parser for the page language (explicit `--language`, `<html lang>` and other
+  page metadata, or `Content-Language`) before the parser for all languages.
+  Month names shared between languages no longer pick a foreign pattern, and
+  text without letters is matched once instead of against every language.
+  Wrong metadata still falls back to all languages. Each text is matched
+  once per build, although clusters, item blocks and the inferred spec read
+  the same date nodes again. Cached pattern sessions (spec date `patterns`,
+  `get_feed(cached_p=...)`) now narrow every parser that reads the page.
 
 ### Fixed
 - **Atom full content** — Atom output kept the item description as `<content>`

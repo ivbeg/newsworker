@@ -124,13 +124,8 @@ def extract_date_from_scope(ext, scope, date_rule, patterns):
 def _parse_date_text(ext, text, patterns):
     if not text:
         return None
-    if patterns:
-        ext.indexer.start_session(list(patterns))
-    try:
+    with ext.narrowed_dates(list(patterns) if patterns else None):
         match, _key, _data, _matched_text, the_date = ext.match_text(text)
-    finally:
-        if patterns:
-            ext.indexer.end_session()
     if match:
         return the_date
     return None
@@ -167,6 +162,7 @@ class SpecExtractor:
         }
         if document is None:
             return feed
+        self.ext.use_page_language(document)
 
         date_rule = spec.fields.get("date")
         patterns = date_rule.patterns if date_rule else None
