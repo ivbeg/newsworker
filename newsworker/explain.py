@@ -179,10 +179,21 @@ def explain(service, url: str, data: bytes | None = None, *, source: str = "netw
                 "title": item.get("title"),
                 "link": item.get("link"),
                 "pubdate": item.get("pubdate"),
+                "date_precision": item.get("date_precision"),
             }
             for item in feed.get("items", [])[:25]
         ],
     )
+
+
+def _item_date(item: dict[str, Any]) -> str:
+    """The item date with its precision: ``2022-05-05 (day)``."""
+    pubdate = item.get("pubdate")
+    if not pubdate:
+        return "-"
+    precision = item.get("date_precision")
+    shown = pubdate.date().isoformat() if precision == "day" else _date_handler(pubdate)
+    return f"{shown} ({precision})" if precision else str(shown)
 
 
 def to_text(report: Explanation) -> str:
@@ -211,10 +222,7 @@ def to_text(report: Explanation) -> str:
             f"attempt {attempt['strategy']}: {attempt['status']}, {attempt['item_count']} items"
         )
     for item in report.items[:10]:
-        lines.append(
-            f"  {_date_handler(item['pubdate']) if item['pubdate'] else '-'}  "
-            f"{item['title']}  <{item['link']}>"
-        )
+        lines.append(f"  {_item_date(item)}  {item['title']}  <{item['link']}>")
     return "\n".join(lines)
 
 
@@ -256,7 +264,7 @@ def to_html(report: Explanation) -> str:
         )
     items = "".join(
         "<tr>"
-        + cell(_date_handler(item["pubdate"]) if item["pubdate"] else "—")
+        + cell(_item_date(item) if item["pubdate"] else "—")
         + cell(item["title"] or "")
         + f"<td><code>{escape(str(item['link'] or ''))}</code></td></tr>"
         for item in report.items

@@ -14,8 +14,10 @@ import json
 import re
 from collections.abc import Iterable
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from .tools import clean_url, get_abs_url, is_safe_link, parse_datetime_attr
+from .dates import DAY, read_datetime_attr
+from .tools import clean_url, get_abs_url, is_safe_link
 
 ARTICLE_TYPES = {
     "article",
@@ -97,15 +99,15 @@ def _item(node: dict[str, Any], base_url: str, default_timezone: str) -> dict[st
     if not is_safe_link(link):
         return None
     published = _text(node.get("datePublished")) or _text(node.get("startDate"))
-    pubdate = (
-        parse_datetime_attr(published, default_timezone=default_timezone) if published else None
-    )
+    parsed = read_datetime_attr(published, default_timezone) if published else None
     item: dict[str, Any] = {
         "title": title,
         "link": link,
-        "pubdate": pubdate,
+        "pubdate": parsed[0] if parsed else None,
         "description": _text(node.get("description")) or title,
     }
+    if parsed:
+        item["date_precision"] = parsed[1]
     author = node.get("author")
     if isinstance(author, list):
         author = author[0] if author else None
@@ -195,12 +197,27 @@ def extract_structured_items(
     return items
 
 
-def merge_structured_dates(items: list[dict[str, Any]], structured: list[dict[str, Any]]) -> int:
+def _adds_time_of_day(
+    current: Any, current_precision: Any, exact: dt.datetime, exact_precision: Any, zone: str
+) -> bool:
+    """Whether ``exact`` is ``current``'s calendar day with a time of day added."""
+    if not isinstance(current, dt.datetime):
+        return False
+    # Items without a recorded precision (plugins) fall back to midnight checks.
+    day_only = current_precision == DAY if current_precision else current.time() == dt.time(0)
+    has_time = exact_precision != DAY if exact_precision else exact.time() != dt.time(0)
+    return day_only and has_time and exact.astimezone(ZoneInfo(zone)).date() == current.date()
+
+
+def merge_structured_dates(
+    items: list[dict[str, Any]], structured: list[dict[str, Any]], default_timezone: str = "UTC"
+) -> int:
     """Fill or sharpen item dates and authors from structured data, by link.
 
     A structured date replaces a heuristic one when the heuristic item has no
-    date, or when both fall on the same calendar day and the structured value
-    carries a time of day. Returns the number of items changed.
+    date, or when the heuristic date is a calendar day (day precision) and the
+    structured value is a time on that day in ``default_timezone``. Returns the
+    number of items changed.
     """
     by_link = {item["link"]: item for item in structured}
     changed = 0
@@ -213,14 +230,19 @@ def merge_structured_dates(items: list[dict[str, Any]], structured: list[dict[st
         current = item.get("pubdate")
         if isinstance(exact, dt.datetime) and (
             current is None
-            or (
-                isinstance(current, dt.datetime)
-                and current.date() == exact.date()
-                and current.time() == dt.time(0)
-                and exact.time() != dt.time(0)
+            or _adds_time_of_day(
+                current,
+                item.get("date_precision"),
+                exact,
+                match.get("date_precision"),
+                default_timezone,
             )
         ):
             item["pubdate"] = exact
+            if match.get("date_precision"):
+                item["date_precision"] = match["date_precision"]
+            else:
+                item.pop("date_precision", None)
             updated = True
         if match.get("author") and not item.get("author"):
             item["author"] = match["author"]

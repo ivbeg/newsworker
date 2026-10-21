@@ -5,9 +5,9 @@ import hashlib
 from lxml import etree
 from lxml.html import fromstring
 
-from ..dates import DateReading, choose_date_order
+from ..dates import DateReading, choose_date_order, read_datetime_attr
 from ..extractor import FeedExtractor
-from ..tools import clean_url, decode_html, get_abs_url, parse_datetime_attr, resolve_feed_language
+from ..tools import clean_url, decode_html, get_abs_url, resolve_feed_language
 from .model import HTML_TIME_PATTERN
 from .selectors import _element_text, select_nodes
 
@@ -121,9 +121,12 @@ def read_scope_date(ext, scope, date_rule, patterns):
 
     date_text = _extract_value(scope, date_rule)
     if date_text and (date_rule.source == "attr:datetime" or use_html_time):
-        the_date = parse_datetime_attr(date_text)
-        if the_date is not None:
-            return date_text, DateReading(key=HTML_TIME_PATTERN, text=date_text, value=the_date)
+        parsed = read_datetime_attr(date_text, ext._context().default_timezone)
+        if parsed is not None:
+            value, precision = parsed
+            return date_text, DateReading(
+                key=HTML_TIME_PATTERN, text=date_text, value=value, precision=precision
+            )
 
     return date_text, _read_date_text(ext, date_text, _qddate_patterns(patterns))
 
@@ -207,11 +210,12 @@ class SpecExtractor:
 
     def _extract_item(self, base_url, scope, spec, date_rule, patterns):
         date_text = None
-        pubdate = None
+        reading = None
         if date_rule is not None:
-            date_text, pubdate = extract_date_from_scope(self.ext, scope, date_rule, patterns)
-            if date_rule.required and pubdate is None:
+            date_text, reading = read_scope_date(self.ext, scope, date_rule, patterns)
+            if date_rule.required and reading is None:
                 return None
+        pubdate = reading.value if reading is not None else None
 
         title = self._field(scope, spec.fields.get("title"), base_url)
         description = self._field(scope, spec.fields.get("description"), base_url)
@@ -238,6 +242,8 @@ class SpecExtractor:
             "raw_html": raw_html,
             "link": link or clean_url(base_url),
         }
+        if reading is not None:
+            item["date_precision"] = reading.precision
         item["extra"] = {
             "links": [link] if link else [],
             "images": [image] if image else [],

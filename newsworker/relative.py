@@ -245,6 +245,26 @@ _DAY_WORDS: dict[str, int] = {
     "anteontem": 2,
 }
 
+# Day words that mean the current moment rather than the current day.
+_NOW_WORDS = frozenset(
+    {
+        "just now",
+        "now",
+        "moments ago",
+        "a moment ago",
+        "только что",
+        "щойно",
+        "gerade eben",
+        "soeben",
+        "à l'instant",
+        "à l’instant",
+        "ahora mismo",
+        "proprio ora",
+        "adesso",
+        "agora mesmo",
+    }
+)
+
 # Words that stand in for "1" ("an hour ago", "una hora", "год назад" = 1 year).
 _ONE = r"a|an|one|un|une|una|uno|um|uma|ein|eine|einem|einer"
 
@@ -288,6 +308,19 @@ def parse_relative(
     text: str | None, now: dt.datetime | None = None, default_timezone: str = "UTC"
 ) -> dt.datetime | None:
     """Resolve a relative date expression to an aware datetime, or ``None``."""
+    found = read_relative(text, now=now, default_timezone=default_timezone)
+    return found[0] if found else None
+
+
+def read_relative(
+    text: str | None, now: dt.datetime | None = None, default_timezone: str = "UTC"
+) -> tuple[dt.datetime, str] | None:
+    """``(datetime, precision)`` for a relative date expression, or ``None``.
+
+    The precision is ``"second"`` or ``"minute"`` for seconds, minutes, hours
+    and "just now", ``"minute"`` for today/yesterday with a clock time, and
+    ``"day"`` for days, weeks, months, years and a bare today/yesterday.
+    """
     if not text:
         return None
     if now is None:
@@ -303,7 +336,8 @@ def parse_relative(
         seconds = units.get(match.group("unit").lower().rstrip("."))
         if seconds is None:
             continue
-        return now - dt.timedelta(seconds=amount * seconds)
+        precision = "second" if seconds < MINUTE else "minute" if seconds < DAY else "day"
+        return now - dt.timedelta(seconds=amount * seconds), precision
     match = _DAY_WORD_RE.match(low)
     if match is None:
         return None
@@ -318,11 +352,11 @@ def parse_relative(
     if clock is None:
         # Same clock time N days back keeps the calendar date right in the
         # site's timezone and orders items as before.
-        return now - dt.timedelta(days=days)
+        precision = "minute" if match.group("word") in _NOW_WORDS else "day"
+        return now - dt.timedelta(days=days), precision
     zone = ZoneInfo(default_timezone)
     local_now = now.astimezone(zone)
     day = local_now.date() - dt.timedelta(days=days)
     hour, minute = int(clock.group(1)), int(clock.group(2))
-    return dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone).astimezone(
-        dt.timezone.utc
-    )
+    value = dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
+    return value.astimezone(dt.timezone.utc), "minute"

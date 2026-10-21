@@ -10,6 +10,9 @@ publication time decides what a feed says. A review of qddate and newsworker
   text node and lets a foreign month pattern win.
 - qddate reads `05/06/2022` day first but `05/13/2022` (and `05/06/22`) month
   first, so one US listing can mix both orders.
+- A date without a time becomes 00:00 in `default_timezone` and is then
+  converted to UTC, so on a UTC+3 site "5 May" is `2022-05-04T21:00Z`: another
+  day in every output. The item model cannot say that no time was known.
 
 ## What Changes
 - **Page language first**: dates are matched with a per-thread qddate parser
@@ -23,10 +26,19 @@ publication time decides what a feed says. A review of qddate and newsworker
   else by the page locale (`en-US` month first). Ambiguous dates are read again
   with qddate's other reading (`match_all`). `explain` shows each group's order
   and why.
+- **Date precision**: `date_precision` (`day`/`minute`/`second`) on every item
+  dated by a built-in strategy. A day-precision date is 00:00 UTC on its
+  calendar day and is not shifted between time zones. JSON/YAML, CSV and JSON
+  Feed (`_newsworker` extension) carry the precision; RSS/Atom keep the day;
+  previews show the date alone; `explain` prints the precision.
 
 ## Impact
-- Affected specs: `language-support`, `feed-extraction`, `extraction-diagnostics`
-- Affected code: `dates.py`, `runtime.py`, `extractor.py`, `spec/execute.py`,
-  `tools.py`, `explain.py`
+- Affected specs: `language-support`, `feed-extraction`, `extraction-diagnostics`,
+  `output-contracts`
+- Affected code: `dates.py`, `relative.py`, `runtime.py`, `extractor.py`,
+  `spec/execute.py`, `tools.py`, `structured.py`, `native.py`, `model.py`,
+  `formats.py`, `mcp_server.py`, `explain.py`, `service.py`
+- Behaviour change: with a non-UTC `default_timezone`, date-only items move to
+  00:00 UTC of their day, so `watch` sees them as changed once.
 - No new dependency; works with qddate 1.0.17 and with the unreleased qddate
   whose default filter honours sessions.

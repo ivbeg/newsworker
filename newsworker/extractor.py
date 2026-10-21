@@ -21,16 +21,21 @@ from .consts import (
     TAG_TYPE_TEXT,
 )
 from .dates import (
+    DAY,
     DateReading,
+    anchor_day,
     build_match_datetime,
     choose_date_order,
     date_text_variants,
     has_letters,
     is_ambiguous,
+    match_precision,
     numeric_order,
     qddate_language,
+    read_datetime_attr,
 )
 from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport, new_session
+from .relative import read_relative
 from .runtime import ExtractionContext
 from .tagmapper import TagBlock, TagPath
 from .tools import (
@@ -40,8 +45,6 @@ from .tools import (
     detect_page_locale,
     get_abs_url,
     looks_like_fuzzy_date,
-    parse_datetime_attr,
-    parse_fuzzy_date,
     pick_link_node,
     resolve_feed_language,
     validate_url,
@@ -375,14 +378,18 @@ class FeedExtractor:
                 parser_language=language,
                 order=numeric_order(res),
                 reordered=reordered,
+                precision=match_precision(res),
             )
-        fuzzy_date = parse_fuzzy_date(
+        relative = read_relative(
             text, now=context.clock(), default_timezone=context.default_timezone
         )
-        if fuzzy_date is not None:
+        if relative is not None:
+            value, precision = relative
+            if precision == DAY:
+                value = anchor_day(value, context.default_timezone)
             if self.session:
                 self.session["debug"]["num_matched"] += 1
-            return DateReading(key="fuzzy", text=text, value=fuzzy_date)
+            return DateReading(key="fuzzy", text=text, value=value, precision=precision)
         return None
 
     def match_text(self, text):
@@ -404,15 +411,15 @@ class FeedExtractor:
         if isinstance(getattr(node, "tag", None), str) and node.tag == "time":
             dt_attr = node.get("datetime")
             if dt_attr:
-                the_date = parse_datetime_attr(
-                    dt_attr, default_timezone=self._context().default_timezone
-                )
-                if the_date is not None:
+                parsed = read_datetime_attr(dt_attr, self._context().default_timezone)
+                if parsed is not None:
                     display = (node.text or "").strip() or dt_attr
                     if self.session:
                         self.session["debug"]["num_datematched"] += 1
                         self.session["debug"]["num_matched"] += 1
-                    return DateReading(key="html:time", text=display, value=the_date)
+                    return DateReading(
+                        key="html:time", text=display, value=parsed[0], precision=parsed[1]
+                    )
         for raw in (node.text, node.tail):
             if raw is None or not raw.strip():
                 continue
@@ -718,9 +725,10 @@ class FeedExtractor:
                 description = description + "\n" + "\n".join(description_parts)
         if title is not None and description is None:
             description = title
-        (match, t_key, t_data, the_text, a_date) = self.match_date(the_date)
-        if match is None:
+        reading = self.read_date(the_date)
+        if reading is None:
             return None
+        t_key = reading.key
         if not block.entities:
             return None
         if t_key not in cache_block["pats"]:
@@ -737,7 +745,8 @@ class FeedExtractor:
         item = {
             "title": title,
             "description": description,
-            "pubdate": a_date,
+            "pubdate": reading.value,
+            "date_precision": reading.precision,
             "unique_id": str(ahash),
             "raw_html": block.as_html(),
         }

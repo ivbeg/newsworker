@@ -3,8 +3,9 @@
 qddate reports the raw components it matched (day, month, year, time and, in
 newer releases, a ``timezone`` token).  This module owns the policy that turns
 them into an aware UTC ``datetime``: two-digit years, explicit offsets written
-in the text, dates printed without a year, implausible values, and the
-day/month order of numeric dates shared by a group of dates.
+in the text, dates printed without a year, implausible values, the
+day/month order of numeric dates shared by a group of dates, and how precisely
+a date is known (a calendar day, or a time to the minute or second).
 """
 
 from __future__ import annotations
@@ -47,6 +48,15 @@ _DAY_RANGE_RE = re.compile(r"^(\d{1,2})\s*[-–—]\s*\d{1,2}(?=\s+[^\W\d_])")
 
 #: Longer text is prose, not a date line; it is not worth a second match.
 MAX_DATELINE_CHARS = 64
+
+#: How precisely a publication date is known: the calendar day only, or a
+#: clock time to the minute or to the second.
+DAY, MINUTE, SECOND = "day", "minute", "second"
+DATE_PRECISIONS = (DAY, MINUTE, SECOND)
+
+# The clock time of an ISO 8601 or RFC 822 date-time: "2022-05-05T10:00",
+# "Thu, 05 May 2022 10:00:30 +0000".
+_ISO_CLOCK_RE = re.compile(r"[T ]\d{1,2}:\d{2}(?P<seconds>:\d{2})?")
 
 #: ISO 639-1 codes that qddate spells differently.
 QDDATE_LANGUAGE_CODES = {"cs": "cz"}
@@ -140,6 +150,8 @@ class DateReading:
     order: str | None = None
     #: Read again in the order chosen for its group of dates.
     reordered: bool = False
+    #: ``"day"``, ``"minute"`` or ``"second"`` (see :func:`anchor_day`).
+    precision: str | None = None
 
     @property
     def pattern(self) -> Mapping[str, Any]:
@@ -311,6 +323,54 @@ def is_plausible(value: dt.datetime, now: dt.datetime) -> bool:
     return value.year >= MIN_PLAUSIBLE_YEAR and value <= now + FUTURE_TOLERANCE
 
 
+def match_precision(match: Mapping[str, Any]) -> str:
+    """``"day"``, ``"minute"`` or ``"second"``: the finest clock field qddate matched."""
+    names = set((match.get("values") or {}).keys())
+    if "second" in names:
+        return SECOND
+    if names & {"hour", "minute"}:
+        return MINUTE
+    return DAY
+
+
+def anchor_day(value: dt.datetime, default_timezone: str = "UTC") -> dt.datetime:
+    """A day-precision date as 00:00 UTC on its calendar day.
+
+    A date printed without a time of day names a calendar day, not an instant,
+    so it is not converted between time zones: "5 May" on a site in UTC+3
+    stays 5 May in every output instead of becoming 4 May, 21:00 UTC. The day
+    is taken in ``default_timezone`` for values computed as instants (relative
+    dates, date-only ISO values read as local midnight).
+    """
+    local = value.astimezone(ZoneInfo(default_timezone)) if value.tzinfo else value
+    return dt.datetime(local.year, local.month, local.day, tzinfo=dt.timezone.utc)
+
+
+def read_datetime_attr(
+    value: str | None, default_timezone: str = "UTC"
+) -> tuple[dt.datetime, str] | None:
+    """An ISO 8601 date or date-time (``<time datetime>``, JSON-LD, JSON Feed)
+    with its precision; a date without a time is anchored by :func:`anchor_day`."""
+    from .tools import parse_datetime_attr
+
+    parsed = parse_datetime_attr(value, default_timezone=default_timezone)
+    if parsed is None:
+        return None
+    precision = clock_precision(value)
+    if precision == DAY:
+        return anchor_day(parsed, default_timezone), DAY
+    return parsed, precision
+
+
+def clock_precision(value: Any) -> str:
+    """The precision of a machine-readable date string: ``"day"`` without a
+    clock time, else ``"minute"`` or ``"second"``."""
+    clock = _ISO_CLOCK_RE.search(str(value or ""))
+    if clock is None:
+        return DAY
+    return SECOND if clock.group("seconds") else MINUTE
+
+
 def build_match_datetime(
     match: Mapping[str, Any],
     text: str | None,
@@ -320,7 +380,10 @@ def build_match_datetime(
 ) -> dt.datetime | None:
     """Convert a qddate ``match()`` result into an aware UTC datetime.
 
-    Returns ``None`` when the components do not form a valid, plausible date.
+    A date without a time of day is the calendar day as printed, at 00:00 UTC
+    (see :func:`anchor_day`); a time is read in its written offset, else in
+    ``default_timezone``. Returns ``None`` when the components do not form a
+    valid, plausible date.
     """
     pattern = match.get("pattern") or {}
     values = match.get("values") or {}
@@ -352,9 +415,12 @@ def build_match_datetime(
         )
     except (TypeError, ValueError):
         return None
-    if offset is None and ":time" in str(pattern.get("key", "")):
-        offset = offset_from_text(text)
-    value = naive.replace(tzinfo=offset or zone)
+    if match_precision(match) == DAY:
+        value = naive.replace(tzinfo=dt.timezone.utc)
+    else:
+        if offset is None and ":time" in str(pattern.get("key", "")):
+            offset = offset_from_text(text)
+        value = naive.replace(tzinfo=offset or zone)
     if no_year and value > now + NOYEAR_ROLLOVER_GRACE:
         try:
             value = value.replace(year=value.year - 1)

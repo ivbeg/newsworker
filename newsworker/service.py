@@ -451,7 +451,9 @@ class FeedService:
             return feed
         diagnostics = context.diagnostics
         if feed.get("items"):
-            changed = merge_structured_dates(feed["items"], structured)
+            changed = merge_structured_dates(
+                feed["items"], structured, default_timezone=self.settings.default_timezone
+            )
             if diagnostics and changed:
                 diagnostics.metadata["structured_dates"] = changed
             return feed

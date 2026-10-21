@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Date precision** — every dated item has `date_precision`: `day` (no time
+  of day), `minute` or `second`, for page text, `<time datetime>`, relative
+  dates, JSON-LD/microdata and native feeds. JSON and YAML carry the key, CSV a
+  new last column `date_precision`, JSON Feed `"_newsworker": {"date_precision":
+  "day"}` on day items; HTML and Markdown previews show a day date without a
+  time, and `explain` prints the precision next to each date.
 - **Legacy TLS ciphers** — `legacy_tls_ciphers` (CLI `--legacy-tls-ciphers` on
   `analyze` and `extract`, env `NEWSWORKER_LEGACY_TLS_CIPHERS`) lets newsworker
   also offer TLS 1.2 ciphers with static RSA key exchange, for servers that
@@ -27,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_feed(cached_p=...)`) now narrow every parser that reads the page.
 
 ### Fixed
+- **Dates without a time keep their day** — a date printed without a time
+  of day is now 00:00 UTC on that calendar day. Before, it was midnight in
+  `default_timezone` converted to UTC, so on a UTC+3 site "5 May" became
+  `2022-05-04T21:00Z` and showed as 4 May in every output. Relative days
+  (`yesterday`, `3 days ago`) are the day in `default_timezone`. With a
+  non-UTC `default_timezone`, `watch` reports such items as changed once after
+  the upgrade. Spec `attr:datetime` values without an offset now use
+  `default_timezone` like `<time datetime>` elsewhere, and JSON-LD times now
+  sharpen a calendar day in `default_timezone`, not only in UTC.
 - **Day/month order of numeric dates** — a page's numeric dates are now read
   in one order per group of dates (a cluster or a spec's items). A date with a
   number above 12 decides (`13/05/2022` day first, `05/13/2022` month first);
