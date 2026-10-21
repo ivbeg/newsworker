@@ -23,6 +23,7 @@ The feed dictionary has the following shape::
                 "title": str | None,
                 "description": str | None,
                 "pubdate": datetime | None,
+                "date_precision": "day" | "minute" | "second",  # with pubdate
                 "unique_id": str,
                 "link": str | None,
                 "extra": {"links": [...], "images": [...]},
@@ -125,25 +126,30 @@ def content_fingerprint(feed: Feed, fmt: str = "json", public_url: str | None = 
         "self": public_url,
         "title": feed.get("title"),
         "language": feed.get("language"),
-        "items": [
-            {
-                key: item.get(key)
-                for key in (
-                    "unique_id",
-                    "title",
-                    "link",
-                    "description",
-                    "pubdate",
-                    "content",
-                    "author",
-                    "categories",
-                )
-            }
-            for item in feed.get("items", [])
-        ],
+        "items": [_fingerprint_item(item) for item in feed.get("items", [])],
     }
     payload = json.dumps(projection, sort_keys=True, default=_date_handler, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _fingerprint_item(item):
+    projected = {
+        key: item.get(key)
+        for key in (
+            "unique_id",
+            "title",
+            "link",
+            "description",
+            "pubdate",
+            "content",
+            "author",
+            "categories",
+        )
+    }
+    # Only when known, so feeds without precision keep their validators.
+    if item.get("date_precision"):
+        projected["date_precision"] = item["date_precision"]
+    return projected
 
 
 def _build_feedgen(feed, public_url=None):
@@ -232,6 +238,7 @@ def to_csv(feed):
         "author",
         "categories",
         "unique_id",
+        "date_precision",
     ]
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
@@ -249,6 +256,7 @@ def to_csv(feed):
                 "author": item.get("author") or "",
                 "categories": ", ".join(item.get("categories") or []),
                 "unique_id": item.get("unique_id") or "",
+                "date_precision": item.get("date_precision") or "",
             }
         )
     return buffer.getvalue()
@@ -286,6 +294,9 @@ def to_jsonfeed(feed, public_url=None):
         pubdate = _ensure_tz(item.get("pubdate"))
         if pubdate is not None:
             entry["date_published"] = pubdate.isoformat()
+            if item.get("date_precision") == "day":
+                # JSON Feed needs a full RFC 3339 time; say that 00:00 is not one.
+                entry["_newsworker"] = {"date_precision": "day"}
         if item.get("author"):
             entry["authors"] = [{"name": item["author"]}]
         if item.get("categories"):
@@ -302,6 +313,8 @@ def _format_item_date(item):
     if pubdate is None:
         return ""
     try:
+        if item.get("date_precision") == "day":
+            return pubdate.date().isoformat()
         return pubdate.isoformat()
     except AttributeError:
         return str(pubdate)

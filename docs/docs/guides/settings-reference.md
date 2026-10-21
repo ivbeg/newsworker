@@ -63,8 +63,8 @@ redacted wherever configuration is printed.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `filtered_text_length`<br/>`NEWSWORKER_FILTERED_TEXT_LENGTH` | `150` | Longest text node considered as a date candidate. |
-| `default_language`<br/>`NEWSWORKER_DEFAULT_LANGUAGE` | — | Feed language to report instead of detecting it. |
-| `default_timezone`<br/>`NEWSWORKER_DEFAULT_TIMEZONE` | `UTC` | IANA time zone for dates printed without an offset. |
+| `default_language`<br/>`NEWSWORKER_DEFAULT_LANGUAGE` | — | Feed language to report instead of detecting it; dates are matched in it first. |
+| `default_timezone`<br/>`NEWSWORKER_DEFAULT_TIMEZONE` | `UTC` | IANA time zone for times printed without an offset; dates without a time keep their calendar day. |
 | `structured_data`<br/>`NEWSWORKER_STRUCTURED_DATA` | `true` | Use JSON-LD and microdata article lists when the page has them. |
 | `native_feeds`<br/>`NEWSWORKER_NATIVE_FEEDS` | `true` | Read RSS, Atom and JSON Feed responses as feeds. |
 | `full_text`<br/>`NEWSWORKER_FULL_TEXT` | `false` | Fetch every item link and store the article body (`fulltext` extra). |

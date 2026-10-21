@@ -24,6 +24,7 @@ def _item(item: dict[str, Any]) -> dict[str, Any]:
         "title": item.get("title"),
         "link": item.get("link"),
         "published": pubdate.isoformat() if isinstance(pubdate, dt.datetime) else None,
+        "date_precision": item.get("date_precision"),
         "description": description[:_DESCRIPTION_CHARS],
         "author": item.get("author"),
         "categories": item.get("categories") or [],

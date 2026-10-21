@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 import time
-from pprint import pprint
 from typing import Any, cast
 
 import typer
@@ -1350,9 +1349,40 @@ def history(
         typer.echo(rendered, nl=False)
 
 
+def _parse_now(value, timezone):
+    """``--now`` as an aware datetime; without an offset it is read in ``timezone``."""
+    from zoneinfo import ZoneInfo
+
+    try:
+        moment = datetime.datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.BadParameter("expected an ISO 8601 date-time", param_hint="--now") from exc
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=ZoneInfo(timezone))
+    return moment.astimezone(datetime.timezone.utc)
+
+
 @app.command()
 def parsedate(
     datestr: str = typer.Argument(..., help="Date string to parse"),
+    as_json: bool = typer.Option(False, "--json", help="Print the reading as JSON."),
+    now: str | None = typer.Option(
+        None,
+        "--now",
+        help="Reference time for relative dates and the plausibility check (ISO 8601; "
+        "without an offset it is read in --timezone). Default: the current time.",
+    ),
+    timezone: str | None = typer.Option(
+        None,
+        "--timezone",
+        help="IANA time zone for times without an offset (default: the default_timezone setting).",
+    ),
+    language: str | None = typer.Option(
+        None,
+        "--language",
+        help="Page language tag such as 'ru' or 'en-US' (default: the default_language setting).",
+    ),
+    config: str | None = typer.Option(None, "--config", "-c", help="Settings file."),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -1360,15 +1390,27 @@ def parsedate(
         help="Verbose output. Print additional info on command execution",
     ),
 ):
-    """Parses date and time strings"""
-    from qddate import DateParser
+    """Show how extraction reads a date string: pattern, language, order and UTC time.
+
+    Exits with code 1 when the text is not a date.
+    """
+    from newsworker.explain import date_report_text, explain_date
+    from newsworker.settings import SettingsError
 
     if verbose:
         enableVerbose()
     try:
-        parser = DateParser(generate=True)
-        res = parser.match(datestr)
-        pprint(res)
+        settings = Settings.resolve(config, cli={"default_timezone": timezone})
+    except SettingsError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--timezone") from exc
+    moment = _parse_now(now, settings.default_timezone) if now else None
+    try:
+        report = explain_date(
+            datestr,
+            now=moment,
+            timezone=settings.default_timezone,
+            language=language or settings.default_language or None,
+        )
     except Exception as e:
         logging.error(f"Failed to parse date '{datestr}': {e}")
         if verbose:
@@ -1376,6 +1418,14 @@ def parsedate(
 
             traceback.print_exc()
         sys.exit(1)
+    if as_json:
+        typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
+    elif report["matched"]:
+        typer.echo(date_report_text(report))
+    else:
+        typer.echo(date_report_text(report), err=True)
+    if not report["matched"]:
+        raise typer.Exit(1)
 
 
 @app.command()

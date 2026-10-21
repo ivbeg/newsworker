@@ -203,34 +203,45 @@ def detect_html_language(document):
     return normalize_language_tag(langs[0])
 
 
-def detect_page_language_metadata(document):
-    """Returns a language subtag from common HTML metadata, or ``None``.
+_LANGUAGE_METADATA_QUERIES = (
+    "//html/@lang",
+    (
+        "//meta[translate(@http-equiv, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+        "'abcdefghijklmnopqrstuvwxyz')='content-language']/@content"
+    ),
+    "//meta[@property='og:locale']/@content",
+    "//meta[@name='og:locale']/@content",
+    "//meta[@name='language']/@content",
+)
+
+
+def detect_page_locale(document):
+    """Returns the first language tag from common HTML metadata as written
+    (``en-US``, ``en_GB``), or ``None``.
 
     Checks ``<html lang>``, ``<meta http-equiv="content-language">``,
     ``og:locale``, and ``<meta name="language">`` in that order.
     """
     if document is None:
         return None
-    queries = (
-        "//html/@lang",
-        (
-            "//meta[translate(@http-equiv, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-            "'abcdefghijklmnopqrstuvwxyz')='content-language']/@content"
-        ),
-        "//meta[@property='og:locale']/@content",
-        "//meta[@name='og:locale']/@content",
-        "//meta[@name='language']/@content",
-    )
-    for query in queries:
+    for query in _LANGUAGE_METADATA_QUERIES:
         try:
             values = document.xpath(query)
         except Exception:  # noqa: S112 - a query the document cannot answer is skipped
             continue
         for value in values:
-            lang = normalize_language_tag(value)
-            if lang:
-                return lang
+            if normalize_language_tag(value):
+                return str(value).strip().split(",")[0].strip()
     return None
+
+
+def detect_page_language_metadata(document):
+    """Returns a language subtag from common HTML metadata, or ``None``.
+
+    Checks ``<html lang>``, ``<meta http-equiv="content-language">``,
+    ``og:locale``, and ``<meta name="language">`` in that order.
+    """
+    return normalize_language_tag(detect_page_locale(document))
 
 
 #: Distinctive letters used to guess Latin-script languages from item text.

@@ -68,8 +68,11 @@ SETTINGS_HELP: dict[str, dict[str, str]] = {
     },
     "Extraction": {
         "filtered_text_length": "Longest text node considered as a date candidate.",
-        "default_language": "Feed language to report instead of detecting it.",
-        "default_timezone": "IANA time zone for dates printed without an offset.",
+        "default_language": "Feed language to report instead of detecting it; dates are matched in it first.",
+        "default_timezone": (
+            "IANA time zone for times printed without an offset; dates without a time "
+            "keep their calendar day."
+        ),
         "structured_data": "Use JSON-LD and microdata article lists when the page has them.",
         "native_feeds": "Read RSS, Atom and JSON Feed responses as feeds.",
         "full_text": "Fetch every item link and store the article body (`fulltext` extra).",

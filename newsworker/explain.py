@@ -5,20 +5,28 @@ items, the evidence behind them: every repeated group of dates on the page
 with its score, the spec a fresh analysis would write, every strategy that was
 tried, and plain-language hints when the result looks wrong (no dates, items
 linking to the listing itself, a cached spec that stopped matching).
+
+``newsworker parsedate TEXT`` explains one date string the same way
+(:func:`explain_date`): the pattern, language, order, precision and offset
+behind the UTC time ``extract`` would give it.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import json
 from dataclasses import dataclass, field
 from html import escape
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from lxml import etree
 from lxml.html import fromstring
 
+from .dates import DAY, choose_date_order, pattern_language, written_offset
 from .formats import _date_handler
+from .runtime import ExtractionContext, closing_context
 from .tools import decode_html
 
 
@@ -32,6 +40,9 @@ class ClusterReport:
     patterns: list[str]
     samples: list[str]
     chosen: bool = False
+    #: Day/month order of the group's numeric dates (``dmy``/``mdy``) and why.
+    date_order: str | None = None
+    date_order_reason: str | None = None
 
 
 @dataclass
@@ -45,6 +56,8 @@ class Explanation:
     warnings: list[str]
     hints: list[str]
     items: list[dict[str, Any]] = field(default_factory=list)
+    #: Day/month order used for each group of numeric dates in the result.
+    date_orders: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -77,6 +90,7 @@ def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
         for path, info in clusters.items():
             links, titles, dates, news_bonus = analyzer._cluster_score(info)
             nodes = info["nodes"]
+            order = info.get("date_order")
             reports.append(
                 ClusterReport(
                     container=path,
@@ -87,6 +101,8 @@ def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
                     patterns=sorted({str(n.get("t_key")) for n in nodes if n.get("t_key")}),
                     samples=[_node_text(n["node"]) for n in nodes[:3]],
                     chosen=path == chosen_path,
+                    date_order=order.order if order is not None else None,
+                    date_order_reason=order.reason if order is not None else None,
                 )
             )
     reports.sort(key=lambda r: (not r.chosen, -r.links, -r.titles, -r.dates))
@@ -165,15 +181,27 @@ def explain(service, url: str, data: bytes | None = None, *, source: str = "netw
         attempts=[dataclasses.asdict(a) for a in diagnostics.attempts] if diagnostics else [],
         warnings=list(diagnostics.warnings) if diagnostics else [],
         hints=_hints(url, clusters, feed, diagnostics),
+        date_orders=list(diagnostics.metadata.get("date_order", [])) if diagnostics else [],
         items=[
             {
                 "title": item.get("title"),
                 "link": item.get("link"),
                 "pubdate": item.get("pubdate"),
+                "date_precision": item.get("date_precision"),
             }
             for item in feed.get("items", [])[:25]
         ],
     )
+
+
+def _item_date(item: dict[str, Any]) -> str:
+    """The item date with its precision: ``2022-05-05 (day)``."""
+    pubdate = item.get("pubdate")
+    if not pubdate:
+        return "-"
+    precision = item.get("date_precision")
+    shown = pubdate.date().isoformat() if precision == "day" else _date_handler(pubdate)
+    return f"{shown} ({precision})" if precision else str(shown)
 
 
 def to_text(report: Explanation) -> str:
@@ -193,15 +221,16 @@ def to_text(report: Explanation) -> str:
             f" {mark} {cluster.dates} dates, {cluster.links} linked, {cluster.titles} titled "
             f"{cluster.container} e.g. {', '.join(cluster.samples)}"
         )
+        if cluster.date_order:
+            lines.append(f"     date order {cluster.date_order}: {cluster.date_order_reason}")
+    for entry in report.date_orders:
+        lines.append(f"date order {entry['order']} for {entry['group']}: {entry['reason']}")
     for attempt in report.attempts:
         lines.append(
             f"attempt {attempt['strategy']}: {attempt['status']}, {attempt['item_count']} items"
         )
     for item in report.items[:10]:
-        lines.append(
-            f"  {_date_handler(item['pubdate']) if item['pubdate'] else '-'}  "
-            f"{item['title']}  <{item['link']}>"
-        )
+        lines.append(f"  {_item_date(item)}  {item['title']}  <{item['link']}>")
     return "\n".join(lines)
 
 
@@ -236,11 +265,14 @@ def to_html(report: Explanation) -> str:
             + cell(cluster.titles)
             + f"<td><code>{escape(cluster.container)}</code></td>"
             + cell("; ".join(cluster.samples))
+            + cell(
+                f"{cluster.date_order}: {cluster.date_order_reason}" if cluster.date_order else ""
+            )
             + "</tr>"
         )
     items = "".join(
         "<tr>"
-        + cell(_date_handler(item["pubdate"]) if item["pubdate"] else "—")
+        + cell(_item_date(item) if item["pubdate"] else "—")
         + cell(item["title"] or "")
         + f"<td><code>{escape(str(item['link'] or ''))}</code></td></tr>"
         for item in report.items
@@ -250,6 +282,11 @@ def to_html(report: Explanation) -> str:
         for a in report.attempts
     )
     hints = "".join(f'<p class="hint">{escape(h)}</p>' for h in report.hints + report.warnings)
+    orders = "".join(
+        f"<p>Numeric dates in <code>{escape(str(entry['group']))}</code> read as "
+        f"<b>{escape(str(entry['order']))}</b>: {escape(str(entry['reason']))}.</p>"
+        for entry in report.date_orders
+    )
     spec = (
         f"<pre>{escape(report.spec_yaml)}</pre>"
         if report.spec_yaml
@@ -265,10 +302,11 @@ def to_html(report: Explanation) -> str:
 Strategy <b>{escape(report.strategy or "none")}</b>, {len(report.items)} items,
 heuristic confidence {report.confidence:.2f}.</p>
 {hints}
+{orders}
 <h2>Repeated date groups ({len(report.clusters)})</h2>
 <p class="muted">The highlighted group was chosen: groups with more linked and titled items win.</p>
 <table><tr><th></th><th>Dates</th><th>Linked</th><th>Titled</th><th>Container</th>
-<th>Examples</th></tr>{"".join(rows)}</table>
+<th>Examples</th><th>Date order</th></tr>{"".join(rows)}</table>
 <h2>Strategies tried</h2>
 <table><tr><th>Strategy</th><th>Result</th><th>Items</th></tr>{attempts}</table>
 <h2>Items</h2>
@@ -279,3 +317,104 @@ heuristic confidence {report.confidence:.2f}.</p>
 {spec}
 </body></html>
 """
+
+
+def _format_offset(offset: dt.timedelta | None) -> str | None:
+    if offset is None:
+        return None
+    sign = "-" if offset < dt.timedelta(0) else "+"
+    minutes = abs(int(offset.total_seconds())) // 60
+    return f"{sign}{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def explain_date(
+    text: str,
+    *,
+    now: dt.datetime | None = None,
+    timezone: str = "UTC",
+    language: str | None = None,
+) -> dict[str, Any]:
+    """How extraction reads one date string, as plain data.
+
+    The text goes through :meth:`FeedExtractor.read_text` like a page's date
+    nodes: the ``language`` parser first (a tag such as ``ru`` or ``en-US``),
+    dateline and day-span rewrites, relative dates, the day/month order a
+    group of this one date would get, the offset and the plausibility check
+    against ``now``.
+    """
+    from .extractor import FeedExtractor
+
+    moment = now or dt.datetime.now(dt.timezone.utc)
+    extractor = FeedExtractor()
+    context = ExtractionContext(source="text", clock=lambda: moment, default_timezone=timezone)
+    with extractor.activate_context(context), closing_context(context):
+        extractor.use_page_language(language=language)
+        reading = extractor.read_text(text)
+        order = choose_date_order([reading], context.date_locale)
+        if reading is not None and order.order not in (None, reading.order):
+            with extractor.ordered_dates(order.order):
+                reading = extractor.read_text(text) or reading
+        parser = context.date_language
+    report: dict[str, Any] = {
+        "text": text,
+        "matched": reading is not None,
+        "now": moment.isoformat(),
+        "timezone": timezone,
+        "language": language,
+    }
+    if reading is None:
+        return report
+    match = reading.match
+    offset = offset_source = None
+    if match is not None and reading.precision != DAY:
+        written = written_offset(match, reading.matched_text)
+        if written is not None:
+            offset, offset_source = written.utcoffset(None), "text"
+        else:
+            offset = reading.value.astimezone(ZoneInfo(timezone)).utcoffset()
+            offset_source = "timezone"
+    report.update(
+        {
+            "source": "qddate" if match is not None else "relative",
+            "pattern": reading.key,
+            "matched_text": reading.matched_text or text,
+            "pattern_language": pattern_language(match["pattern"]) if match else None,
+            "parser_language": (reading.parser_language or "all") if match else None,
+            "page_language": parser,
+            "values": {key: str(value) for key, value in match["values"].items()} if match else {},
+            "order": reading.order,
+            "order_reason": order.reason if reading.order else None,
+            "reordered": reading.reordered,
+            "precision": reading.precision,
+            "offset": _format_offset(offset),
+            "offset_source": offset_source,
+            "utc": reading.value.isoformat(),
+        }
+    )
+    return report
+
+
+def date_report_text(report: dict[str, Any]) -> str:
+    """The :func:`explain_date` report as aligned ``name: value`` lines."""
+    if not report["matched"]:
+        return f"No date found in {report['text']!r}"
+    rows = [("text", report["text"])]
+    if report["matched_text"] != report["text"]:
+        rows.append(("matched", f"{report['matched_text']} (dateline or day span removed)"))
+    if report["source"] == "relative":
+        rows.append(("pattern", f"relative date (now {report['now']})"))
+    else:
+        language = report["pattern_language"] or "numeric"
+        rows.append(("pattern", f"{report['pattern']} ({language})"))
+        rows.append(("parser", report["parser_language"]))
+    if report["order"]:
+        again = ", read again" if report["reordered"] else ""
+        rows.append(("order", f"{report['order']}{again} ({report['order_reason']})"))
+    rows.append(("precision", report["precision"]))
+    if report["offset"]:
+        where = "written" if report["offset_source"] == "text" else report["timezone"]
+        rows.append(("offset", f"{report['offset']} ({where})"))
+    elif report["precision"] == DAY:
+        rows.append(("offset", "none: a calendar day is kept as 00:00 UTC"))
+    rows.append(("utc", report["utc"]))
+    return "\n".join(f"{name + ':':<11}{value}" for name, value in rows)

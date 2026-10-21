@@ -21,7 +21,7 @@ Commands:
   watch      Poll a page and emit/deliver only new items
   cache      Inspect and manage the spec and content caches
   spec       Validate a parsing spec without fetching
-  parsedate  Parse a date/time string (debugging helper)
+  parsedate  Show how extraction reads a date string
 ```
 
 ## High-level Python service

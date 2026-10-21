@@ -153,7 +153,7 @@ Commands:
   watch      Poll pages (one URL, a list or OPML) and deliver only new items
   cache      Inspect and manage the spec and content caches
   spec       Validate a parsing spec without fetching
-  parsedate  Parse a date/time string (debugging helper)
+  parsedate  Show how extraction reads a date string
   languages  Show the language support matrix
 ```
 
@@ -515,10 +515,14 @@ newsworker spec validate example.yaml
 
 ### `parsedate` — inspect date parsing
 
-A debugging helper that shows how `qddate` interprets a date string.
+Shows how extraction reads a date string: the qddate pattern and its language,
+dateline rewrites, relative dates, the day/month order, precision, offset and
+the resulting UTC time. Exits with code 1 when the text is not a date.
 
 ```bash
 newsworker parsedate "18/06/2018"
+newsworker parsedate "05/06/2022" --language en-US --json
+newsworker parsedate "3 hours ago" --now 2022-05-06T12:00:00+00:00 --timezone Europe/Moscow
 ```
 
 ### `languages` — what is supported
@@ -579,7 +583,7 @@ structured_data: true            # use JSON-LD / microdata article lists when pr
 native_feeds: true               # read RSS/Atom/JSON Feed responses as feeds
 trust_env_proxy: false           # honor HTTP(S)_PROXY / NO_PROXY / .netrc
 history_retention_days: 365      # item history kept by watch (0 = forever)
-default_timezone: UTC            # time zone for dates printed without an offset
+default_timezone: UTC            # time zone for times printed without an offset
 ```
 
 Every setting — server access control, delivery channels, rendering and undated
@@ -603,7 +607,7 @@ caches for a single run/request.
 | `jsonfeed` | [JSON Feed 1.1](https://jsonfeed.org/version/1.1) document. |
 | `rss`  | RSS 2.0 document generated with [`feedgen`](https://github.com/lkiesow/python-feedgen). |
 | `atom` | Atom 1.0 document generated with `feedgen`. |
-| `csv`  | Flat table of items: `title, link, pubdate, description, image, unique_id`. |
+| `csv`  | Flat table of items: `title, link, pubdate, description, content, content_kind, image, author, categories, unique_id, date_precision`. |
 | `html` | A standalone HTML preview page rendering items as cards. |
 | `markdown` | A Markdown bulleted list (date, title, link per item). |
 | `yaml` | The feed dictionary serialized as YAML (symmetric with the spec format). |
@@ -618,9 +622,12 @@ caches for a single run/request.
 | `opml` | OPML 2.0 subscription list — the standard interchange format for importing feeds into readers. |
 
 Publication dates are timezone-aware UTC values. Offsets written on the page
-(`<time datetime="…+03:00">`, `10:00 +0300`, `10:00 GMT+3`) are honoured; dates
+(`<time datetime="…+03:00">`, `10:00 +0300`, `10:00 GMT+3`) are honoured; times
 without an offset are interpreted in the `default_timezone` setting (UTC by
-default). Two-digit years are expanded to the nearest century that is not in the
+default). A date without a time of day keeps its calendar day (00:00 UTC on
+that day), and each item says how precise its date is in `date_precision`
+(`day`, `minute` or `second`; see
+[output formats](docs/docs/guides/output-formats.md#date-precision)). Two-digit years are expanded to the nearest century that is not in the
 future, and implausible dates (before 1970 or more than a year ahead) are ignored.
 
 ---

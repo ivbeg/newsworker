@@ -14,8 +14,9 @@ import json
 from collections.abc import Mapping
 from typing import Any, cast
 
+from .dates import clock_precision, read_datetime_attr
 from .model import Feed
-from .tools import clean_url, get_abs_url, parse_datetime_attr
+from .tools import clean_url, get_abs_url
 
 _FEED_TYPES = (
     "application/rss+xml",
@@ -67,6 +68,7 @@ def _item(
     title,
     description,
     pubdate,
+    date_precision=None,
     author,
     categories,
     content,
@@ -84,6 +86,8 @@ def _item(
         "native_id": entry_id or None,
         "extra": {"links": [link] if link else [], "images": [image] if image else []},
     }
+    if pubdate is not None and date_precision:
+        item["date_precision"] = date_precision
     if author:
         item["author"] = author
     if categories:
@@ -115,14 +119,20 @@ def _from_feedparser(data: bytes, url: str) -> dict[str, Any] | None:
             if str(enclosure.get("type", "")).startswith("image/"):
                 image = enclosure.get("href")
                 break
+        # feedparser reads a date-only value as 00:00 UTC, which is how a
+        # day-precision date is stored.
+        raw_date = "published"
+        pubdate = _struct_time(entry.get("published_parsed"))
+        if pubdate is None:
+            raw_date, pubdate = "updated", _struct_time(entry.get("updated_parsed"))
         items.append(
             _item(
                 entry_id=entry.get("id"),
                 link=entry.get("link"),
                 title=entry.get("title"),
                 description=entry.get("summary"),
-                pubdate=_struct_time(entry.get("published_parsed"))
-                or _struct_time(entry.get("updated_parsed")),
+                pubdate=pubdate,
+                date_precision=clock_precision(entry.get(raw_date)),
                 author=entry.get("author"),
                 categories=[tag.get("term") for tag in entry.get("tags") or [] if tag.get("term")],
                 content=content,
@@ -161,15 +171,15 @@ def _from_json_feed(data: bytes, url: str, default_timezone: str) -> dict[str, A
             (a.get("name") for a in authors if isinstance(a, Mapping) and a.get("name")), None
         )
         html = entry.get("content_html")
+        parsed = read_datetime_attr(published, default_timezone) if published else None
         items.append(
             _item(
                 entry_id=str(entry["id"]) if entry.get("id") is not None else None,
                 link=entry.get("url") or entry.get("external_url"),
                 title=entry.get("title"),
                 description=entry.get("summary"),
-                pubdate=parse_datetime_attr(published, default_timezone=default_timezone)
-                if published
-                else None,
+                pubdate=parsed[0] if parsed else None,
+                date_precision=parsed[1] if parsed else None,
                 author=author,
                 categories=[str(tag) for tag in entry.get("tags") or []],
                 content=html or entry.get("content_text"),

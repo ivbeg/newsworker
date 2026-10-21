@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Date precision** — every dated item has `date_precision`: `day` (no time
+  of day), `minute` or `second`, for page text, `<time datetime>`, relative
+  dates, JSON-LD/microdata and native feeds. JSON and YAML carry the key, CSV a
+  new last column `date_precision`, JSON Feed `"_newsworker": {"date_precision":
+  "day"}` on day items; HTML and Markdown previews show a day date without a
+  time, and `explain` prints the precision next to each date.
 - **Legacy TLS ciphers** — `legacy_tls_ciphers` (CLI `--legacy-tls-ciphers` on
   `analyze` and `extract`, env `NEWSWORKER_LEGACY_TLS_CIPHERS`) lets newsworker
   also offer TLS 1.2 ciphers with static RSA key exchange, for servers that
@@ -16,8 +22,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Requires `requests` 2.32.2 or newer.
+- **`newsworker parsedate`** reads the text the way extraction does
+  (`FeedExtractor.read_text`): page language first, dateline and day-span
+  rewrites, relative dates, day/month order, offset, precision and the
+  plausibility check. It prints the pattern key and language, the parser,
+  order, precision, offset and UTC time instead of the raw qddate match, adds
+  `--json`, `--now`, `--timezone`, `--language` and `--config`, and exits
+  with code 1 when the text is not a date.
+- **Dates in the page language first** — dates are matched with a qddate
+  parser for the page language (explicit `--language`, `<html lang>` and other
+  page metadata, or `Content-Language`) before the parser for all languages.
+  Month names shared between languages no longer pick a foreign pattern, and
+  text without letters is matched once instead of against every language.
+  Wrong metadata still falls back to all languages. Each text is matched
+  once per build, although clusters, item blocks and the inferred spec read
+  the same date nodes again. Cached pattern sessions (spec date `patterns`,
+  `get_feed(cached_p=...)`) now narrow every parser that reads the page.
 
 ### Fixed
+- **Dates without a time keep their day** — a date printed without a time
+  of day is now 00:00 UTC on that calendar day. Before, it was midnight in
+  `default_timezone` converted to UTC, so on a UTC+3 site "5 May" became
+  `2022-05-04T21:00Z` and showed as 4 May in every output. Relative days
+  (`yesterday`, `3 days ago`) are the day in `default_timezone`. With a
+  non-UTC `default_timezone`, `watch` reports such items as changed once after
+  the upgrade. Spec `attr:datetime` values without an offset now use
+  `default_timezone` like `<time datetime>` elsewhere, and JSON-LD times now
+  sharpen a calendar day in `default_timezone`, not only in UTC.
+- **Day/month order of numeric dates** — a page's numeric dates are now read
+  in one order per group of dates (a cluster or a spec's items). A date with a
+  number above 12 decides (`13/05/2022` day first, `05/13/2022` month first);
+  otherwise `en-US` pages read month first and all other pages day first.
+  Before, `05/06/2022` was always 5 June while `05/13/2022` was 13 May and
+  `05/06/22` was 6 May, so one list could mix both orders. `explain` shows the
+  order chosen for each group and why.
 - **Atom full content** — Atom output kept the item description as `<content>`
   even when the item had full content (for example `extract --full-text -f atom`
   or a native feed with `content:encoded`). Atom now emits the full content as

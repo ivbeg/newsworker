@@ -28,7 +28,12 @@ class Item(TypedDict, total=False):
     title: str | None
     description: str | None
     #: Timezone-aware UTC publication time; ``None`` for undated listings.
+    #: A ``"day"`` precision date is 00:00 UTC on the calendar day printed.
     pubdate: dt.datetime | None
+    #: How precisely ``pubdate`` is known: ``"day"`` (no time of day),
+    #: ``"minute"`` or ``"second"``. Set with ``pubdate`` by the built-in
+    #: strategies; plugins may leave it out.
+    date_precision: str
     link: str | None
     #: Stable identity: from the native entry id, else the link, else the text.
     unique_id: str
