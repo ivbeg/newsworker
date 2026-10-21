@@ -21,3 +21,9 @@
 - [x] 3.4 Structured data sharpens a calendar day by precision and in `default_timezone`
 - [x] 3.5 JSON/YAML key, CSV column, JSON Feed extension, preview dates, fingerprint, MCP, `explain`
 - [x] 3.6 Tests, output-formats guide, README, settings reference and CHANGELOG
+
+## 4. `parsedate`
+- [x] 4.1 `explain_date` / `date_report_text` in `explain.py` over `FeedExtractor.read_text`
+- [x] 4.2 `written_offset` and `pattern_language` helpers in `dates.py`
+- [x] 4.3 CLI options `--json`, `--now`, `--timezone`, `--language`, `--config`; exit code 1 without a date
+- [x] 4.4 Tests, command page, README, settings reference and CHANGELOG

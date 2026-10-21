@@ -5,20 +5,28 @@ items, the evidence behind them: every repeated group of dates on the page
 with its score, the spec a fresh analysis would write, every strategy that was
 tried, and plain-language hints when the result looks wrong (no dates, items
 linking to the listing itself, a cached spec that stopped matching).
+
+``newsworker parsedate TEXT`` explains one date string the same way
+(:func:`explain_date`): the pattern, language, order, precision and offset
+behind the UTC time ``extract`` would give it.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import json
 from dataclasses import dataclass, field
 from html import escape
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from lxml import etree
 from lxml.html import fromstring
 
+from .dates import DAY, choose_date_order, pattern_language, written_offset
 from .formats import _date_handler
+from .runtime import ExtractionContext, closing_context
 from .tools import decode_html
 
 
@@ -309,3 +317,104 @@ heuristic confidence {report.confidence:.2f}.</p>
 {spec}
 </body></html>
 """
+
+
+def _format_offset(offset: dt.timedelta | None) -> str | None:
+    if offset is None:
+        return None
+    sign = "-" if offset < dt.timedelta(0) else "+"
+    minutes = abs(int(offset.total_seconds())) // 60
+    return f"{sign}{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def explain_date(
+    text: str,
+    *,
+    now: dt.datetime | None = None,
+    timezone: str = "UTC",
+    language: str | None = None,
+) -> dict[str, Any]:
+    """How extraction reads one date string, as plain data.
+
+    The text goes through :meth:`FeedExtractor.read_text` like a page's date
+    nodes: the ``language`` parser first (a tag such as ``ru`` or ``en-US``),
+    dateline and day-span rewrites, relative dates, the day/month order a
+    group of this one date would get, the offset and the plausibility check
+    against ``now``.
+    """
+    from .extractor import FeedExtractor
+
+    moment = now or dt.datetime.now(dt.timezone.utc)
+    extractor = FeedExtractor()
+    context = ExtractionContext(source="text", clock=lambda: moment, default_timezone=timezone)
+    with extractor.activate_context(context), closing_context(context):
+        extractor.use_page_language(language=language)
+        reading = extractor.read_text(text)
+        order = choose_date_order([reading], context.date_locale)
+        if reading is not None and order.order not in (None, reading.order):
+            with extractor.ordered_dates(order.order):
+                reading = extractor.read_text(text) or reading
+        parser = context.date_language
+    report: dict[str, Any] = {
+        "text": text,
+        "matched": reading is not None,
+        "now": moment.isoformat(),
+        "timezone": timezone,
+        "language": language,
+    }
+    if reading is None:
+        return report
+    match = reading.match
+    offset = offset_source = None
+    if match is not None and reading.precision != DAY:
+        written = written_offset(match, reading.matched_text)
+        if written is not None:
+            offset, offset_source = written.utcoffset(None), "text"
+        else:
+            offset = reading.value.astimezone(ZoneInfo(timezone)).utcoffset()
+            offset_source = "timezone"
+    report.update(
+        {
+            "source": "qddate" if match is not None else "relative",
+            "pattern": reading.key,
+            "matched_text": reading.matched_text or text,
+            "pattern_language": pattern_language(match["pattern"]) if match else None,
+            "parser_language": (reading.parser_language or "all") if match else None,
+            "page_language": parser,
+            "values": {key: str(value) for key, value in match["values"].items()} if match else {},
+            "order": reading.order,
+            "order_reason": order.reason if reading.order else None,
+            "reordered": reading.reordered,
+            "precision": reading.precision,
+            "offset": _format_offset(offset),
+            "offset_source": offset_source,
+            "utc": reading.value.isoformat(),
+        }
+    )
+    return report
+
+
+def date_report_text(report: dict[str, Any]) -> str:
+    """The :func:`explain_date` report as aligned ``name: value`` lines."""
+    if not report["matched"]:
+        return f"No date found in {report['text']!r}"
+    rows = [("text", report["text"])]
+    if report["matched_text"] != report["text"]:
+        rows.append(("matched", f"{report['matched_text']} (dateline or day span removed)"))
+    if report["source"] == "relative":
+        rows.append(("pattern", f"relative date (now {report['now']})"))
+    else:
+        language = report["pattern_language"] or "numeric"
+        rows.append(("pattern", f"{report['pattern']} ({language})"))
+        rows.append(("parser", report["parser_language"]))
+    if report["order"]:
+        again = ", read again" if report["reordered"] else ""
+        rows.append(("order", f"{report['order']}{again} ({report['order_reason']})"))
+    rows.append(("precision", report["precision"]))
+    if report["offset"]:
+        where = "written" if report["offset_source"] == "text" else report["timezone"]
+        rows.append(("offset", f"{report['offset']} ({where})"))
+    elif report["precision"] == DAY:
+        rows.append(("offset", "none: a calendar day is kept as 00:00 UTC"))
+    rows.append(("utc", report["utc"]))
+    return "\n".join(f"{name + ':':<11}{value}" for name, value in rows)

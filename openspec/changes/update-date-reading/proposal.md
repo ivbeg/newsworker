@@ -13,6 +13,9 @@ publication time decides what a feed says. A review of qddate and newsworker
 - A date without a time becomes 00:00 in `default_timezone` and is then
   converted to UTC, so on a UTC+3 site "5 May" is `2022-05-04T21:00Z`: another
   day in every output. The item model cannot say that no time was known.
+- `newsworker parsedate` prints the raw qddate match of a fresh parser, so it
+  can disagree with `extract` (datelines, relative dates, offsets,
+  plausibility).
 
 ## What Changes
 - **Page language first**: dates are matched with a per-thread qddate parser
@@ -31,14 +34,19 @@ publication time decides what a feed says. A review of qddate and newsworker
   calendar day and is not shifted between time zones. JSON/YAML, CSV and JSON
   Feed (`_newsworker` extension) carry the precision; RSS/Atom keep the day;
   previews show the date alone; `explain` prints the precision.
+- **`parsedate` through the extraction path**: `FeedExtractor.read_text` with
+  `--json`, `--now`, `--timezone`, `--language` (defaults from settings); the
+  report names the pattern, languages, order, precision, offset and UTC time;
+  exit code 1 for text that is not a date.
 
 ## Impact
 - Affected specs: `language-support`, `feed-extraction`, `extraction-diagnostics`,
-  `output-contracts`
+  `output-contracts`, `cli`
 - Affected code: `dates.py`, `relative.py`, `runtime.py`, `extractor.py`,
   `spec/execute.py`, `tools.py`, `structured.py`, `native.py`, `model.py`,
-  `formats.py`, `mcp_server.py`, `explain.py`, `service.py`
+  `formats.py`, `mcp_server.py`, `explain.py`, `service.py`, `core.py`
 - Behaviour change: with a non-UTC `default_timezone`, date-only items move to
-  00:00 UTC of their day, so `watch` sees them as changed once.
+  00:00 UTC of their day, so `watch` sees them as changed once. `parsedate`
+  output changes shape and exits with code 1 for text that is not a date.
 - No new dependency; works with qddate 1.0.17 and with the unreleased qddate
   whose default filter honours sessions.

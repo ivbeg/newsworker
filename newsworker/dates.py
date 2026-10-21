@@ -168,11 +168,16 @@ MONTH_FIRST_LOCALES = frozenset({"en-us"})
 _DATE_FIELDS = ("day", "month", "year")
 
 
+def pattern_language(pattern: Mapping[str, Any]) -> str | None:
+    """The language of a qddate pattern's words; ``None`` for numeric patterns."""
+    if pattern.get("basekey", pattern.get("key")) in _WORDLESS_ENGLISH_PATTERNS:
+        return None
+    return pattern.get("language")
+
+
 def _numeric_fields(match: Mapping[str, Any]) -> list[str] | None:
     """Day, month and year in printed order for a numeric date, else ``None``."""
-    pattern = match.get("pattern") or {}
-    basekey = pattern.get("basekey", pattern.get("key"))
-    if pattern.get("language") is not None and basekey not in _WORDLESS_ENGLISH_PATTERNS:
+    if pattern_language(match.get("pattern") or {}) is not None:
         return None  # a month name
     values = match.get("values") or {}
     # ParseResults iterates its tokens; ``keys()`` gives the names in printed order.
@@ -295,6 +300,17 @@ def offset_from_text(text: str | None) -> dt.timezone | None:
     return dt.timezone(sign * dt.timedelta(hours=hours, minutes=minutes))
 
 
+def written_offset(match: Mapping[str, Any], text: str | None) -> dt.timezone | None:
+    """The UTC offset written with a matched time: qddate's ``timezone``
+    token, else an offset after the clock time in ``text``."""
+    values = match.get("values") or {}
+    offset = _offset_from_token(values["timezone"]) if "timezone" in values else None
+    pattern = match.get("pattern") or {}
+    if offset is None and ":time" in str(pattern.get("key", "")):
+        offset = offset_from_text(text)
+    return offset
+
+
 def date_text_variants(text: str | None) -> Iterator[str]:
     """Rewrites of ``text`` that qddate may match when ``text`` itself does not.
 
@@ -390,10 +406,8 @@ def build_match_datetime(
     zone = ZoneInfo(default_timezone)
     local_now = now.astimezone(zone)
     parts = {"year": 0, "month": 0, "day": 0}
-    offset = None
     for key, value in values.items():
         if key == "timezone":
-            offset = _offset_from_token(value)
             continue
         try:
             parts[key] = int(value)
@@ -418,9 +432,7 @@ def build_match_datetime(
     if match_precision(match) == DAY:
         value = naive.replace(tzinfo=dt.timezone.utc)
     else:
-        if offset is None and ":time" in str(pattern.get("key", "")):
-            offset = offset_from_text(text)
-        value = naive.replace(tzinfo=offset or zone)
+        value = naive.replace(tzinfo=written_offset(match, text) or zone)
     if no_year and value > now + NOYEAR_ROLLOVER_GRACE:
         try:
             value = value.replace(year=value.year - 1)

@@ -153,7 +153,7 @@ Commands:
   watch      Poll pages (one URL, a list or OPML) and deliver only new items
   cache      Inspect and manage the spec and content caches
   spec       Validate a parsing spec without fetching
-  parsedate  Parse a date/time string (debugging helper)
+  parsedate  Show how extraction reads a date string
   languages  Show the language support matrix
 ```
 
@@ -515,10 +515,14 @@ newsworker spec validate example.yaml
 
 ### `parsedate` — inspect date parsing
 
-A debugging helper that shows how `qddate` interprets a date string.
+Shows how extraction reads a date string: the qddate pattern and its language,
+dateline rewrites, relative dates, the day/month order, precision, offset and
+the resulting UTC time. Exits with code 1 when the text is not a date.
 
 ```bash
 newsworker parsedate "18/06/2018"
+newsworker parsedate "05/06/2022" --language en-US --json
+newsworker parsedate "3 hours ago" --now 2022-05-06T12:00:00+00:00 --timezone Europe/Moscow
 ```
 
 ### `languages` — what is supported

@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Requires `requests` 2.32.2 or newer.
+- **`newsworker parsedate`** reads the text the way extraction does
+  (`FeedExtractor.read_text`): page language first, dateline and day-span
+  rewrites, relative dates, day/month order, offset, precision and the
+  plausibility check. It prints the pattern key and language, the parser,
+  order, precision, offset and UTC time instead of the raw qddate match, adds
+  `--json`, `--now`, `--timezone`, `--language` and `--config`, and exits
+  with code 1 when the text is not a date.
 - **Dates in the page language first** — dates are matched with a qddate
   parser for the page language (explicit `--language`, `<html lang>` and other
   page metadata, or `Content-Language`) before the parser for all languages.

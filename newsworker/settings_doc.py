@@ -68,7 +68,7 @@ SETTINGS_HELP: dict[str, dict[str, str]] = {
     },
     "Extraction": {
         "filtered_text_length": "Longest text node considered as a date candidate.",
-        "default_language": "Feed language to report instead of detecting it.",
+        "default_language": "Feed language to report instead of detecting it; dates are matched in it first.",
         "default_timezone": (
             "IANA time zone for times printed without an offset; dates without a time "
             "keep their calendar day."
