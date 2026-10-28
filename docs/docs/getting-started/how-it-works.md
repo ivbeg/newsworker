@@ -28,7 +28,8 @@ in order, and keeps the first that yields items:
 1. the **native feed**, when the URL already serves RSS, Atom or JSON Feed;
 2. a matching **plugin** or **site bridge**;
 3. the **cached spec** for the URL (re-analysed once if the site changed its
-   layout), or a freshly analysed one;
+   layout), or a freshly analysed one; a spec with no title or link rule is
+   skipped and not cached;
 4. **dynamic date clustering** (above);
 5. **JSON-LD / microdata** article lists in the page;
 6. the opt-in **undated** fallback for listings without dates;

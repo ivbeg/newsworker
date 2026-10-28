@@ -40,7 +40,8 @@ concern each.
 
 Strategy order in `FeedService.get_feed()`: native feed (when the response is
 RSS/Atom/JSON Feed and no explicit spec is given) → plugin → bridge → cached or
-freshly analysed spec (re-analysed once if it matches nothing) → dynamic
+freshly analysed spec (re-analysed once if it matches nothing; skipped and not
+cached when it has no title or link rule) → dynamic
 extraction → JSON-LD/microdata when no items were found → undated fallback
 (opt-in) → browser rendering (opt-in). Links are then sanitised and item identities
 assigned from links before formatting.
