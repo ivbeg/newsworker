@@ -45,6 +45,44 @@ def test_obsolete_inferred_spec_is_rebuilt(tmp_path):
     assert service.spec_cache.get(URL).items.selector != "section.removed-layout"
 
 
+DATE_FIRST_FLAT = b"""<html lang="en"><head><title>News</title></head><body><main>
+<div class="news">
+<span class="date">2025-08-17</span><h2><a href="/n/1">Ministry announces grants for innovation</a></h2>
+<p>Teaser text that describes the first article in some detail.</p>
+<span class="date">2025-08-15</span><h2><a href="/n/2">Board appoints a new statistics director</a></h2>
+<p>Teaser text that describes the second article in some detail.</p>
+<span class="date">2025-08-12</span><h2><a href="/n/3">Researchers publish coastal water report</a></h2>
+<p>Teaser text that describes the third article in some detail.</p>
+</div></main></body></html>"""
+
+
+def test_date_only_inferred_spec_falls_back_to_dynamic(tmp_path):
+    service = _service(tmp_path)
+    feed, diagnostics = service.get_feed_with_diagnostics(URL, data=DATE_FIRST_FLAT)
+    assert diagnostics.chosen_strategy == "dynamic"
+    assert [item["link"] for item in feed["items"]] == [
+        "https://example.org/n/1",
+        "https://example.org/n/2",
+        "https://example.org/n/3",
+    ]
+    assert all(item["title"] for item in feed["items"])
+    assert service.spec_cache.get(URL) is None
+
+
+def test_cached_date_only_spec_is_replaced(tmp_path):
+    service = _service(tmp_path)
+    service.spec_cache.set(
+        URL,
+        FeedSpec.from_dict(
+            {"items": {"selector": "li"}, "fields": {"date": {"selector": "span.date"}}}
+        ),
+    )
+    feed, diagnostics = service.get_feed_with_diagnostics(URL, data=NEWS_LIST)
+    assert len(feed["items"]) == 4
+    assert diagnostics.chosen_strategy == "spec"
+    assert "title" in service.spec_cache.get(URL).fields
+
+
 def test_explicit_empty_spec_is_not_replaced(tmp_path):
     service = _service(tmp_path)
     spec = FeedSpec.from_dict(
