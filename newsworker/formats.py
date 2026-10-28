@@ -525,27 +525,39 @@ def _scan_to_feed(results):
 
 
 def scan_to_csv(results):
-    """Serializes discovered feeds to a CSV string."""
+    """Serializes discovered feeds to a CSV string.
+
+    A crawl (``scan --crawl``) adds a last ``found_on`` column with the first
+    page each candidate was found on.
+    """
     buffer = io.StringIO()
     fieldnames = ["title", "url", "feedtype", "num_entries", "language", "confidence"]
+    crawled = "crawl" in results
+    if crawled:
+        fieldnames.append("found_on")
     writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
     for entry in results.get("items", []):
-        writer.writerow(
-            {
-                "title": entry.get("title") or "",
-                "url": entry.get("url") or "",
-                "feedtype": entry.get("feedtype") or "",
-                "num_entries": entry.get("num_entries", ""),
-                "language": entry.get("language") or "",
-                "confidence": entry.get("confidence", ""),
-            }
-        )
+        row = {
+            "title": entry.get("title") or "",
+            "url": entry.get("url") or "",
+            "feedtype": entry.get("feedtype") or "",
+            "num_entries": entry.get("num_entries", ""),
+            "language": entry.get("language") or "",
+            "confidence": entry.get("confidence", ""),
+        }
+        if crawled:
+            row["found_on"] = (entry.get("found_on") or [""])[0]
+        writer.writerow(row)
     return buffer.getvalue()
 
 
 def scan_to_opml(results):
-    """Serializes discovered feeds to an OPML 2.0 subscription list."""
+    """Serializes discovered feeds to an OPML 2.0 subscription list.
+
+    News listing pages (``feedtype`` ``html``) are left out: a reader cannot
+    subscribe to an HTML page.
+    """
     source = results.get("url") or ""
     lines = [
         "<?xml version='1.0' encoding='UTF-8'?>",
@@ -556,6 +568,8 @@ def scan_to_opml(results):
         "  <body>",
     ]
     for entry in results.get("items", []):
+        if entry.get("feedtype") == "html":
+            continue
         title = entry.get("title") or entry.get("url") or ""
         xml_url = entry.get("url") or ""
         lines.append(

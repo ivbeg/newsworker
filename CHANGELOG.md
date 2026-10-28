@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`scan --crawl`** — `scan` can follow same-site links from the given URL
+  and look for feeds on every page it visits, news sections first and
+  pagination last (#7). `--max-pages` (default 50) and `--max-depth`
+  (default 2) bound the crawl; pages are fetched one at a time through
+  robots.txt and per-host pacing, and a failing page is skipped. Each
+  candidate lists the pages it was found on (`found_on`, `found_on_count`),
+  the JSON result has a `crawl` summary and CSV a last `found_on` column.
+  Library: `FeedsFinder.find_feeds(url, crawl=True, max_pages=..., max_depth=...)`.
+- **`scan --listings`** — also reports pages that extraction reads as a news
+  listing with at least three dated items as `html` candidates, with their
+  item count and extraction confidence. OPML output leaves them out.
 - **Date precision** — every dated item has `date_precision`: `day` (no time
   of day), `minute` or `second`, for page text, `<time datetime>`, relative
   dates, JSON-LD/microdata and native feeds. JSON and YAML carry the key, CSV a
@@ -24,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flag on `analyze`, `extract` and `explain`.
 
 ### Changed
+- `FeedsFinder.find_feeds(extractrss=True)` reads the page through
+  `FeedService` with the finder's settings and no cache, reports it only with
+  at least three dated items, and adds the extraction `confidence`. It used a
+  default-settings `FeedExtractor` and reported any page with an item.
 - Requires `requests` 2.32.2 or newer.
 - **`newsworker parsedate`** reads the text the way extraction does
   (`FeedExtractor.read_text`): page language first, dateline and day-span

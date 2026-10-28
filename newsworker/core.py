@@ -12,7 +12,7 @@ import typer
 from newsworker import __version__
 from newsworker.cache import ContentCache, SpecCache
 from newsworker.extractor import FeedExtractor
-from newsworker.finder import FeedsFinder
+from newsworker.finder import CRAWL_MAX_DEPTH, CRAWL_MAX_PAGES, FeedsFinder
 from newsworker.formats import (
     SCAN_FORMATS,
     SUPPORTED_FORMATS,
@@ -898,6 +898,26 @@ def scan(
         "--ignore-robots",
         help="Fetch even when the site's robots.txt disallows it.",
     ),
+    crawl: bool = typer.Option(
+        False,
+        "--crawl",
+        help="Also follow same-site links and look for feeds on those pages.",
+    ),
+    max_pages: int | None = typer.Option(
+        None,
+        "--max-pages",
+        help="Pages a crawl fetches at most (default %d). Needs --crawl." % CRAWL_MAX_PAGES,
+    ),
+    max_depth: int | None = typer.Option(
+        None,
+        "--max-depth",
+        help="Link steps a crawl goes from the URL (default %d). Needs --crawl." % CRAWL_MAX_DEPTH,
+    ),
+    listings: bool = typer.Option(
+        False,
+        "--listings",
+        help="Also report pages that extraction reads as dated news listings.",
+    ),
     config: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(
         False,
@@ -915,6 +935,13 @@ def scan(
             "Unsupported format '%s'. Supported formats: %s" % (format, ", ".join(SCAN_FORMATS))
         )
         sys.exit(2)
+    for value, hint in ((max_pages, "--max-pages"), (max_depth, "--max-depth")):
+        if value is None:
+            continue
+        if not crawl:
+            raise typer.BadParameter("needs --crawl", param_hint=hint)
+        if value <= 0:
+            raise typer.BadParameter("must be positive", param_hint=hint)
     cli = {"respect_robots": False} if ignore_robots else None
     try:
         r = FeedsFinder(Settings.resolve(config, cli=cli)).find_feeds(
@@ -922,6 +949,10 @@ def scan(
             noverify=no_verify,
             include_sitemap=sitemap,
             max_workers=max_workers,
+            extractrss=listings,
+            crawl=crawl,
+            max_pages=max_pages or CRAWL_MAX_PAGES,
+            max_depth=max_depth or CRAWL_MAX_DEPTH,
         )
         if r.get("error"):
             raise RuntimeError(r["error"])

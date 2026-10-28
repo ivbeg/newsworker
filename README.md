@@ -291,7 +291,7 @@ expires, so the reader can poll frequently without hammering the source site.
 
 ### `scan` — discover existing feeds
 
-Scans a page for already-published RSS/Atom feeds (via autodiscovery links, feed icons and link heuristics) and reports them.
+Scans a page for already-published RSS/Atom feeds (via autodiscovery links, feed icons and link heuristics) and reports them. With `--crawl` it also visits same-site pages, news sections first.
 
 ```bash
 newsworker scan URL [OPTIONS]
@@ -305,6 +305,10 @@ newsworker scan URL [OPTIONS]
 | `--max-workers` | | `8` | Candidate feeds verified at the same time. |
 | `--fail-on-empty` | | `false` | Exit with status `3` when no feeds are found. |
 | `--ignore-robots` | | `false` | Fetch even when the site's `robots.txt` disallows it. |
+| `--crawl` | | `false` | Also follow same-site links and look for feeds on those pages. |
+| `--max-pages` | | `50` | Pages a crawl fetches at most. Needs `--crawl`. |
+| `--max-depth` | | `2` | Link steps a crawl goes from the URL. Needs `--crawl`. |
+| `--listings` | | `false` | Also report pages that extraction reads as dated news listings. |
 | `--output` | `-o` | *(stdout)* | Write the result to a file instead of printing it. |
 | `--config` | `-c` | *(default)* | Path to a settings YAML file. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
@@ -323,6 +327,9 @@ newsworker scan "https://www.dta.gov.au/news/" -f csv
 
 # Represent each discovered feed as an entry in a single RSS/Atom feed
 newsworker scan "https://www.dta.gov.au/news/" -f rss
+
+# Crawl up to 50 same-site pages for feeds and feedless news listings
+newsworker scan "https://www.dta.gov.au/" --crawl --listings
 ```
 
 > **Note:** `scan` verifies every candidate feed by parsing it, so it may take longer than a raw link scan. `feedtype`, `num_entries` and `language` metadata are included where available.
@@ -619,8 +626,8 @@ caches for a single run/request.
 | --- | --- |
 | `json` | The raw list of discovered feeds. Default. |
 | `rss` / `atom` | Each discovered feed becomes an entry (its title and URL), so a feed reader can browse them. |
-| `csv`  | Flat table: `title, url, feedtype, num_entries, language, confidence`. |
-| `opml` | OPML 2.0 subscription list — the standard interchange format for importing feeds into readers. |
+| `csv`  | Flat table: `title, url, feedtype, num_entries, language, confidence`, plus `found_on` after `--crawl`. |
+| `opml` | OPML 2.0 subscription list — the standard interchange format for importing feeds into readers. News listing pages (`--listings`) are left out. |
 
 Publication dates are timezone-aware UTC values. Offsets written on the page
 (`<time datetime="…+03:00">`, `10:00 +0300`, `10:00 GMT+3`) are honoured; times
@@ -754,6 +761,9 @@ finder.find_feeds("https://www.dta.gov.au/news/", noverify=False)
 # Fall back to HTML extraction when a page has no real feed.
 finder.find_feeds("https://government.bg/bg/prestsentar/novini", extractrss=True)
 
+# Crawl same-site pages too: candidates get found_on, the result a crawl summary.
+finder.find_feeds("https://www.dta.gov.au/", crawl=True, max_pages=20)
+
 # Include the parsed feed entries in the result.
 finder.find_feeds("https://www.dta.gov.au/news/", noverify=False, include_entries=True)
 ```
@@ -773,7 +783,7 @@ print(format_scan(results, fmt="opml"))
 
 - Identifies news blocks on arbitrary HTML pages using **date patterns** via [qddate](https://github.com/ivbeg/qddate), HTML `<time datetime>` attributes and relative dates in eight languages; datelines (`GENEVA, 29 July 2022`) and day spans are understood.
 - Reads **RSS, Atom and JSON Feed** natively and **JSON-LD / microdata** article lists; opt-in fallbacks for undated listings and JavaScript-rendered pages.
-- Discovers existing feeds (`scan`): autodiscovery, JSON Feed, sitemaps and WebSub hubs.
+- Discovers existing feeds (`scan`): autodiscovery, JSON Feed, sitemaps and WebSub hubs; `--crawl` searches a site's section pages and `--listings` finds feedless news listings.
 - Reusable YAML **specs** that heal themselves when a site changes layout, **site bridges** and third-party **plugins**.
 - `explain` shows why a page yields what it does; `languages` shows what is supported.
 - Output as JSON, JSON Feed 1.1, RSS, Atom, CSV, HTML, Markdown, YAML or OPML.

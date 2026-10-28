@@ -152,9 +152,10 @@ def test_find_direct_failure_malformed_extractrss_and_deep(monkeypatch):
         {"Content-Type": "text/html"},
         b"<html><body><main></main></body></html>",
     )
+    dated = [{"title": "x", "pubdate": "2026-10-01"}] * 3
     monkeypatch.setattr(
-        "newsworker.extractor.FeedExtractor.get_feed",
-        lambda self, url, data=None: ({"title": "HTML", "items": [{"title": "x"}]}, {}),
+        "newsworker.service.FeedService.get_feed_with_diagnostics",
+        lambda self, url, data=None: ({"title": "HTML", "items": dated}, None),
     )
     finder = FeedsFinder(Settings(block_private_hosts=False), Transport([page]))
     assert (
