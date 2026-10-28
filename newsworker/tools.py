@@ -23,6 +23,9 @@ ALLOWED_URL_SCHEMES = ("http", "https")
 #: Default User-Agent name used when consulting ``robots.txt``.
 DEFAULT_ROBOTS_AGENT = "newsworker"
 
+#: Largest ``robots.txt`` read; a bigger file counts as unreadable (allowed).
+ROBOTS_MAX_BYTES = 512 * 1024
+
 _ROBOTS_MISSING = object()
 
 
@@ -441,10 +444,40 @@ def robots_rules(root, fetch):
     return parser
 
 
+def robots_allows(url, fetch, agent="*"):
+    """Return whether ``robots.txt`` lets ``agent`` fetch ``url``.
+
+    ``fetch(robots_url)`` returns the body bytes through the caller's own
+    transport and policy, capped at :data:`ROBOTS_MAX_BYTES`. A missing or
+    unreadable ``robots.txt`` allows the fetch (lenient policy). The
+    ``Crawl-delay`` (or ``Request-rate``) for ``agent`` is applied to the
+    host's request pacing on :data:`newsworker.fetch.HOSTS`.
+    """
+    from .fetch import HOSTS
+
+    parsed = urlparse(url or "")
+    if parsed.scheme.lower() not in ALLOWED_URL_SCHEMES or not parsed.hostname:
+        return True
+    rules = robots_rules(f"{parsed.scheme}://{parsed.netloc}", fetch)
+    if rules is None:
+        return True
+    agent = agent or "*"
+    try:
+        delay = rules.crawl_delay(agent)
+        if delay is None:
+            rate = rules.request_rate(agent)
+            delay = rate.seconds / rate.requests if rate and rate.requests else None
+        if delay:
+            HOSTS.note_crawl_delay(parsed.hostname.lower(), float(delay))
+        return rules.can_fetch(agent, url)
+    except Exception:
+        return True
+
+
 def _default_robots_fetch(url):
     from .fetch import FetchPolicy, FetchRequest, RequestsTransport
 
-    policy = FetchPolicy(timeout=10, max_bytes=512 * 1024, user_agent=DEFAULT_ROBOTS_AGENT)
+    policy = FetchPolicy(timeout=10, max_bytes=ROBOTS_MAX_BYTES, user_agent=DEFAULT_ROBOTS_AGENT)
     return RequestsTransport().fetch(FetchRequest(url), policy).body
 
 

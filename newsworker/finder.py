@@ -7,7 +7,7 @@ import concurrent.futures
 import json
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -18,6 +18,7 @@ from lxml.html import fromstring
 
 from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport
 from .settings import Settings
+from .tools import ROBOTS_MAX_BYTES, robots_allows
 
 log = logging.getLogger(__name__)
 _FEED_TYPES = {
@@ -106,12 +107,22 @@ class FeedsFinder:
         )
 
     def _fetch(self, url, *, max_bytes=None):
+        if self.settings.respect_robots and not self._robots_allows(url):
+            raise PermissionError("robots.txt disallows fetching %s" % url)
         policy = self.policy
         if max_bytes is not None:
-            from dataclasses import replace
-
             policy = replace(policy, max_bytes=max_bytes)
         return self.transport.fetch(FetchRequest(url), policy)
+
+    def _robots_allows(self, url):
+        """Consult robots.txt through the same transport and policy, as
+        ``FeedExtractor`` does, and apply its ``Crawl-delay`` to the host."""
+        policy = replace(self.policy, max_bytes=min(self.policy.max_bytes, ROBOTS_MAX_BYTES))
+        return robots_allows(
+            url,
+            lambda robots_url: self.transport.fetch(FetchRequest(robots_url), policy).body,
+            self.settings.user_agent,
+        )
 
     def collect_feeds(self, root, url):  # noqa: C901
         candidates: dict[str, FeedCandidate] = {}

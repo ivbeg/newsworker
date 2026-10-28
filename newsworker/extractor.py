@@ -842,30 +842,14 @@ class FeedExtractor:
     def _can_fetch_policy(self, url, user_agent):
         """Consult robots.txt (fetched through the same bounded transport and
         policy) and apply its ``Crawl-delay`` to the host's request pacing."""
-        from urllib.parse import urlparse
+        from .tools import ROBOTS_MAX_BYTES, robots_allows
 
-        from .fetch import HOSTS
-        from .tools import robots_rules
-
-        parsed = urlparse(url)
-        root = f"{parsed.scheme}://{parsed.netloc}"
-        policy = replace(self._policy(user_agent), max_bytes=min(self.max_bytes, 512 * 1024))
-        rules = robots_rules(
-            root, lambda robots_url: self.transport.fetch(FetchRequest(robots_url), policy).body
+        policy = replace(self._policy(user_agent), max_bytes=min(self.max_bytes, ROBOTS_MAX_BYTES))
+        return robots_allows(
+            url,
+            lambda robots_url: self.transport.fetch(FetchRequest(robots_url), policy).body,
+            user_agent,
         )
-        if rules is None:
-            return True
-        agent = user_agent or "*"
-        try:
-            delay = rules.crawl_delay(agent)
-            if delay is None:
-                rate = rules.request_rate(agent)
-                delay = rate.seconds / rate.requests if rate and rate.requests else None
-            if delay:
-                HOSTS.note_crawl_delay((parsed.hostname or "").lower(), float(delay))
-            return rules.can_fetch(agent, url)
-        except Exception:
-            return True
 
     def fetch(self, url, user_agent=None, max_bytes=None, conditional=None, context=None):
         """Fetches ``url`` and returns its bytes, capped at ``max_bytes``.

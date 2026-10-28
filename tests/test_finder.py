@@ -107,6 +107,8 @@ class Transport:
         self.values = list(values)
 
     def fetch(self, request, policy):
+        if request.url.endswith("/robots.txt"):
+            raise FileNotFoundError(request.url)  # no robots.txt: everything allowed
         value = self.values.pop(0)
         if isinstance(value, Exception):
             raise value
