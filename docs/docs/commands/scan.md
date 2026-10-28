@@ -21,6 +21,7 @@ newsworker scan URL [OPTIONS]
 | `--max-workers` | | `8` | Candidate feeds verified at the same time. |
 | `--output` | `-o` | *(stdout)* | Write the result to a file. |
 | `--fail-on-empty` | | `false` | Exit with status `3` when no feeds are found. An unreachable page always exits with `1`. |
+| `--ignore-robots` | | `false` | Fetch even when `robots.txt` disallows it. |
 | `--config` | `-c` | *(default)* | Settings YAML file. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
 

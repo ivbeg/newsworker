@@ -893,6 +893,11 @@ def scan(
     fail_on_empty: bool = typer.Option(
         False, "--fail-on-empty", help="Exit with status 3 when no feeds are found."
     ),
+    ignore_robots: bool = typer.Option(
+        False,
+        "--ignore-robots",
+        help="Fetch even when the site's robots.txt disallows it.",
+    ),
     config: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(
         False,
@@ -910,8 +915,9 @@ def scan(
             "Unsupported format '%s'. Supported formats: %s" % (format, ", ".join(SCAN_FORMATS))
         )
         sys.exit(2)
+    cli = {"respect_robots": False} if ignore_robots else None
     try:
-        r = FeedsFinder(Settings.resolve(config)).find_feeds(
+        r = FeedsFinder(Settings.resolve(config, cli=cli)).find_feeds(
             url,
             noverify=no_verify,
             include_sitemap=sitemap,

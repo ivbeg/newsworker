@@ -147,6 +147,22 @@ def test_scan_exits_1_and_mcp_reports_error_on_disallowed_page(tmp_path, monkeyp
     assert result["error"].startswith("PermissionError: robots.txt disallows")
 
 
+def test_scan_ignore_robots_scans_disallowed_page(tmp_path, monkeypatch):
+    transport = MapTransport(_site())
+    monkeypatch.setattr("newsworker.finder.RequestsTransport", lambda: transport)
+    monkeypatch.delenv("NEWSWORKER_RESPECT_ROBOTS", raising=False)
+    config = tmp_path / "config.yaml"
+    config.write_text("block_private_hosts: false\n", encoding="utf-8")
+    scan = CliRunner().invoke(
+        app,
+        ["scan", "https://example.com/private/page", "--ignore-robots", "--config", str(config)],
+    )
+    assert scan.exit_code == 0, scan.output
+    assert "https://example.com/private/feed.xml" in scan.stdout
+    assert "https://example.com/private/page" in transport.urls()
+    assert "https://example.com/robots.txt" not in transport.urls()
+
+
 def test_robots_allows_uses_request_rate_and_is_lenient():
     rules = b"User-agent: *\nRequest-rate: 1/5\nDisallow: /x\n"
     assert not robots_allows("https://rate.example/x", lambda url: rules, "newsworker")
