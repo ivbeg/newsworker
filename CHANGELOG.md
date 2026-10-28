@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_feed(cached_p=...)`) now narrow every parser that reads the page.
 
 ### Fixed
+- **Inferred specs that read only dates** — when analysis found dates but no
+  title or link rule (for example a flat listing where each date comes before
+  its heading, `dt`/`dd` pairs or `<br>`-separated lines), `extract` applied
+  that spec and returned items with `title: null` that all linked to the
+  listing page. Such a spec is no longer applied or cached: the page goes to
+  the dynamic extractor, and a date-only spec cached earlier is dropped.
 - **Dates without a time keep their day** — a date printed without a time
   of day is now 00:00 UTC on that calendar day. Before, it was midnight in
   `default_timezone` converted to UTC, so on a UTC+3 site "5 May" became

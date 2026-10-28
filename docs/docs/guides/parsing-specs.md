@@ -9,7 +9,7 @@ A **parsing spec** (YAML) captures how to extract a news feed from a fixed page 
 
 The `analyze` CLI command runs newsworker's dynamic heuristics once and **distils** them into this portable spec. Later runs use `extract --spec` (or a matching site bridge) to apply deterministic selectors instead of re-running discovery — much faster on repeat crawls of the same site.
 
-Implementation: `newsworker/spec.py` (`FeedSpec`, `SpecAnalyzer`, `SpecExtractor`).
+Implementation: `newsworker/spec/` (`FeedSpec`, `SpecAnalyzer`, `SpecExtractor`).
 
 ## Quick start
 
@@ -309,5 +309,5 @@ For pages without a news listing, use dynamic extraction (`extract` without `--s
 
 - User CLI overview: [`analyze`](/commands/analyze)
 - Site bridges example: [`newsworker/bridges/example.com.yaml`](https://github.com/ivbeg/newsworker/blob/master/newsworker/bridges/example.com.yaml)
-- Module docstring and API: `newsworker/spec.py`
+- Module docstring and API: `newsworker/spec/__init__.py`
 - Tests: `tests/test_spec.py`

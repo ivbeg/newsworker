@@ -191,7 +191,7 @@ class FeedService:
         use_cache = self._spec_cache_enabled(context)
         if use_cache and not rebuild:
             spec = self.spec_cache.get(url)
-            if spec is not None:
+            if _identifies_items(spec):
                 if context.diagnostics:
                     context.diagnostics.add_attempt("cached_spec", "selected")
                 return spec
@@ -199,11 +199,18 @@ class FeedService:
         def build():
             if use_cache and not rebuild:
                 cached = self.spec_cache.get(url)
-                if cached is not None:
+                if _identifies_items(cached):
                     return cached
             analyzer = SpecAnalyzer(extractor=self.extractor)
             spec = analyzer.analyze(url, data=data, user_agent=self.settings.user_agent)
-            if use_cache and spec is not None and spec.fields:
+            if not _identifies_items(spec):
+                # A date-only spec yields untitled items that all link to the
+                # listing page; leave the page to the dynamic extractor and drop
+                # any such spec cached by an earlier version.
+                if use_cache:
+                    self.spec_cache.discard(url)
+                return None
+            if use_cache:
                 try:
                     self.spec_cache.set(url, spec)
                 except OSError as exc:
@@ -355,15 +362,14 @@ class FeedService:
             # likely changed. Re-analyse once and keep the new spec only if it works.
             if diagnostics:
                 diagnostics.warnings.append("Cached spec matched no items; re-analysing the page")
+            # A failed rebuild has already dropped the cached spec.
             rebuilt = self._get_or_build_spec(url, data, context, rebuild=True)
-            if rebuilt is not None and rebuilt.fields:
+            if rebuilt is not None:
                 feed = self._apply_spec(
                     url, data, rebuilt, "rebuilt_spec", time.monotonic(), context
                 )
                 if feed.get("items"):
                     return feed
-            elif self._spec_cache_enabled(context):
-                self.spec_cache.discard(url)
             started = time.monotonic()
         feed, _session = self.extractor.get_feed(
             url,
@@ -823,6 +829,11 @@ class FeedService:
 
 
 MappingLike = dict[str, Any] | None
+
+
+def _identifies_items(spec: FeedSpec | None) -> bool:
+    """Whether an inferred spec can tell items apart (title or link rule)."""
+    return spec is not None and ("title" in spec.fields or "link" in spec.fields)
 
 
 def _header_language(meta: dict[str, Any]) -> str | None:
