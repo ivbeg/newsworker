@@ -97,6 +97,7 @@ finder = FeedsFinder()
 finder.find_feeds("https://www.dta.gov.au/news/")
 finder.find_feeds("https://www.dta.gov.au/news/", noverify=False)
 finder.find_feeds("https://government.bg/bg/prestsentar/novini", extractrss=True)
+finder.find_feeds("https://example.com/", crawl=True, max_pages=20, max_depth=2)
 
 results = finder.find_feeds("https://www.dta.gov.au/news/", noverify=False)
 print(format_scan(results, fmt="opml"))

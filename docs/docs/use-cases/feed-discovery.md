@@ -13,7 +13,12 @@ newsworker scan "https://www.dta.gov.au/news/"
 newsworker scan "https://www.dta.gov.au/news/" --format opml --output feeds.opml
 newsworker scan "https://example.com" --sitemap --format json
 newsworker scan "https://example.com" --no-verify --format csv
+newsworker scan "https://example.com" --crawl --listings
 ```
+
+`--crawl` also looks at same-site section pages (50 pages, two links deep by
+default) and `--listings` adds news listing pages that have no feed but that
+`extract` can turn into one.
 
 Verification is enabled by default and fetches bounded candidate bytes through
 the shared network policy. `--no-verify` is faster and skips parsing.

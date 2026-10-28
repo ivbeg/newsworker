@@ -40,7 +40,9 @@ module: the loop, link scoring and scope checks are a few functions in `finder.p
   given site and bound.
 - Visited set keyed by `_normalized(url)` with the fragment removed. The effective URL
   after redirects is also marked visited.
-- Stop when the frontier is empty or `max_pages` pages have been fetched. A page whose
+- Stop when the frontier is empty or `max_pages` requests have been sent. Failed
+  requests count (a site of broken links cannot cost more than the bound); robots.txt
+  refusals send none and do not. A page whose
   depth equals `max_depth` is scanned for candidates but its links are not queued.
 - `truncated` is true when the loop stopped at `max_pages` with entries left.
 
@@ -68,11 +70,12 @@ This favours section index pages over articles, which is where feeds and listing
 declared. Article pages reached anyway still contribute their header/footer feed links.
 
 ### Politeness
-- Robots: the logic of `FeedExtractor._can_fetch_policy()` moves to a helper in
-  `tools.py` (`robots_allows(url, fetch, agent)`), which reads cached rules through
-  `robots_rules()`, applies `Crawl-delay`/`Request-rate` to `HOSTS`, and returns
-  whether the URL may be fetched. `extractor.py` and the crawl use it. robots.txt is
-  fetched with the finder's transport and policy, capped at 512 KiB as today.
+- Robots: `tools.robots_allows(url, fetch, agent)` (landed with the single-page
+  `scan` fix, #81) reads cached rules through `robots_rules()`, applies
+  `Crawl-delay`/`Request-rate` to `HOSTS`, and returns whether the URL may be
+  fetched. The crawl checks it before each page, so a refusal is counted as
+  `robots` and sends no request. robots.txt is fetched with the finder's transport
+  and policy, capped at 512 KiB.
 - Pages are fetched sequentially. With one host, parallel page fetches would only
   queue on `per_host_concurrency`, and sequential fetching keeps the order (and tests)
   deterministic.
@@ -102,9 +105,9 @@ feeds from section feeds. Without `--crawl` neither key is emitted.
 
 ### News listing candidates (`--listings`)
 - For each fetched HTML page, after collecting candidates, run
-  `FeedService(settings).get_feed(page_url, data=body)` with one service per scan, so
-  the page is not fetched again and the user's settings (language, timezone, specs,
-  bridges, plugins) apply.
+  `FeedService(settings, use_cache=False).get_feed(page_url, data=body)` with one
+  service per scan, so the page is not fetched again, the user's settings (language,
+  timezone, bridges, plugins) apply, and the scan stores no spec for every page.
 - Report the page when the feed has at least `MIN_LISTING_ITEMS = 3` items with a
   `pubdate`: `feedtype: "html"`, `source: ["extraction"]`, `num_entries`,
   `confidence` from diagnostics, `verification: "valid"`, title from the feed.
