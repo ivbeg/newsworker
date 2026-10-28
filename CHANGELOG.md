@@ -46,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that spec and returned items with `title: null` that all linked to the
   listing page. Such a spec is no longer applied or cached: the page goes to
   the dynamic extractor, and a date-only spec cached earlier is dropped.
+- **`scan` honours robots.txt** — `newsworker scan` and the MCP `find_feeds`
+  tool never read robots.txt, although `respect_robots` is on by default.
+  They now check it like extraction does: a disallowed page is not fetched
+  and `scan` exits with code 1 (`PermissionError: robots.txt disallows
+  fetching ...`), a disallowed sitemap document is skipped, and a disallowed
+  feed candidate is not fetched and is marked `invalid` with that error.
+  `Crawl-delay` and `Request-rate` pace the scan's requests to the site. A
+  missing or unreadable robots.txt still allows everything, and
+  `respect_robots: false` (env `NEWSWORKER_RESPECT_ROBOTS=false`) turns the
+  check off.
 - **Dates without a time keep their day** — a date printed without a time
   of day is now 00:00 UTC on that calendar day. Before, it was midnight in
   `default_timezone` converted to UTC, so on a UTC+3 site "5 May" became
