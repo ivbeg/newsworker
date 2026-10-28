@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also offer TLS 1.2 ciphers with static RSA key exchange, for servers that
   accept nothing else (for example `minfin.am`). Off by default; certificates
   are still verified. A TLS handshake failure now suggests the option.
+- **`newsworker scan --ignore-robots`** scans a page, its sitemap documents
+  and feed candidates even when `robots.txt` disallows them, like the same
+  flag on `analyze`, `extract` and `explain`.
 
 ### Changed
 - Requires `requests` 2.32.2 or newer.

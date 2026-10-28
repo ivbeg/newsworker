@@ -304,6 +304,7 @@ newsworker scan URL [OPTIONS]
 | `--no-verify` | | `false` | Return candidates without fetching them for verification. |
 | `--max-workers` | | `8` | Candidate feeds verified at the same time. |
 | `--fail-on-empty` | | `false` | Exit with status `3` when no feeds are found. |
+| `--ignore-robots` | | `false` | Fetch even when the site's `robots.txt` disallows it. |
 | `--output` | `-o` | *(stdout)* | Write the result to a file instead of printing it. |
 | `--config` | `-c` | *(default)* | Path to a settings YAML file. |
 | `--verbose` | `-v` | `false` | Verbose logging. |
