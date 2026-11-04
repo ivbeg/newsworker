@@ -40,6 +40,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at least three dated items, and adds the extraction `confidence`. It used a
   default-settings `FeedExtractor` and reported any page with an item.
 - Requires `requests` 2.32.2 or newer.
+- **Requires qddate 1.1.0** — its date matching is several times faster on
+  text that is not a date, which is most of what extraction reads. On an
+  Apple M-series machine the extraction corpus (232 pages) takes 0.56 s
+  instead of 15.9 s on a first visit and 0.49 s instead of 4.7 s with cached
+  specs; ten saved news listings 0.24 s instead of 10.1 s and 0.17 s instead
+  of 3.3 s. The corpus scores stay at 1.0. qddate 1.1.0 also reads
+  dates that were skipped or lost their time: `Oct. 25, 2026`, `Sept. 5,
+  2026`, `5 May` and `Dec 25` (the current or previous year), `May 5, 2026 at
+  3:45 PM`, a time before the date (`12:30, 5 мая 2026`, `14:30 | 5 May
+  2026`), `05/05/2026 14h30`, `5. května 2026` and `2026年5月5日`. Such pages
+  gain items or minute precision: `python.org/downloads` lists 274 releases
+  instead of 107. A zone abbreviation after a time (`12:30 МСК`) is still
+  read in `default_timezone`.
+- **Faster feed builds** — on top of qddate 1.1.0, a build does less of its
+  own work and returns the same items and fields: the corpus takes 0.39 s
+  instead of 0.56 s on a first visit and 0.22 s instead of 0.49 s with cached
+  specs; the ten listings 0.16 s instead of 0.24 s and 0.09 s instead of
+  0.17 s. `benchmarks/extraction_benchmark.py` measures both cases.
+  - The page is parsed once per build for spec analysis, spec extraction, the
+    dynamic extractor and structured data. Microdata is still read from the
+    page with its whitespace-only text, in a second parse only when the page
+    has `itemscope`/`itemtype`.
+  - A spec's items share one qddate pattern session per parser instead of
+    starting and ending one for each date. qddate's candidate caches start
+    empty in every session, so each date cost 0.1–0.4 ms more per parser.
+  - Cached specs are read with libyaml when PyYAML has it (0.3 ms instead of
+    2.4 ms per build).
+  - CSS selectors are translated once, and spec, enrichment and page-language
+    XPath expressions are compiled once per thread.
+  - The text-node pre-filter and the relative-date check use one regex each;
+    a text that is not a relative date is remembered for the rest of the
+    build.
+  - `author`/`categories` enrichment parses an item's `raw_html` once instead
+    of up to three times; tag paths, element walks and text-language guesses
+    do less work per node.
 - **`newsworker parsedate`** reads the text the way extraction does
   (`FeedExtractor.read_text`): page language first, dateline and day-span
   rewrites, relative dates, day/month order, offset, precision and the

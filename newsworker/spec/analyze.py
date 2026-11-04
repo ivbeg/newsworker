@@ -2,12 +2,9 @@
 
 import datetime
 
-from lxml import etree
-from lxml.html import fromstring
-
 from ..consts import DATE_CLASSES_KEYWORDS, NEWS_CLASSES_KEYWORDS
 from ..extractor import FeedExtractor
-from ..tools import decode_html, pick_link_node, resolve_feed_language
+from ..tools import pick_link_node, resolve_feed_language
 from .execute import _select_item_scopes, _sibling_groups, extract_date_from_scope
 from .model import HTML_TIME_PATTERN, FeedSpec, FieldRule, ItemsRule
 from .selectors import (
@@ -19,6 +16,7 @@ from .selectors import (
     _shared_item_selector,
     _walk_elements,
     css_for_item_element,
+    css_select,
     relative_selector,
 )
 
@@ -44,9 +42,7 @@ class SpecAnalyzer:
     def _parse(self, url, data=None, user_agent=None):
         if data is None:
             data = self.ext.fetch(url, user_agent)
-        edata = decode_html(data)
-        parser = etree.HTMLParser(remove_blank_text=True)
-        return fromstring(edata, parser=parser)
+        return self.ext.parse_page(data)
 
     def _item_root(self, snode, node):
         """Returns the direct child of ``snode`` that contains ``node``."""
@@ -330,7 +326,7 @@ class SpecAnalyzer:
             return None
         selector = css_for_item_element(leads[0]) or str(leads[0].tag).lower()
         try:
-            matched = snode.cssselect(selector)
+            matched = css_select(snode, selector)
         except Exception:
             return None
         matched = [node for node in matched if node.getparent() is snode]
@@ -393,7 +389,7 @@ class SpecAnalyzer:
     def _css_items_rule(self, document, snode, item_roots, selector):
         container = document.getroottree().getpath(snode)
         try:
-            matched = snode.cssselect(selector)
+            matched = css_select(snode, selector)
         except Exception:
             matched = []
         min_needed = self._min_items_matched(len(item_roots))

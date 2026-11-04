@@ -60,34 +60,46 @@ class TagPath:
             return TagPath(node)
         return None
 
-    def __parseNode(self, node, limit, inprogress=False):
+    def __parseNode(self, node, limit):
         """Parses node to the tag path"""
-        # Handle case where node might not have a tag attribute
-        node_tag = getattr(node, "tag", None)
-        if node_tag is None:
-            # If tag is missing, use a default value
-            node_tag = "unknown"
+        shifts = self.__shifts
+        tag_names = self.__tag_names
+        # Walk up to the root (or ``limit``), then reverse: the path is built
+        # once per node, not once per ancestor.
+        while True:
+            # Handle case where node might not have a tag attribute
+            node_tag = getattr(node, "tag", None)
+            if node_tag is None:
+                # If tag is missing, use a default value
+                node_tag = "unknown"
 
-        parent = node.getparent()
-        if parent is not None and parent.tag != "<DOCUMENT_ROOT>" and node != limit:
-            try:
-                self.__shifts.append(parent.index(node))
-            except (AttributeError, ValueError):
-                # Fallback if index() fails
-                self.__shifts.append(0)
-            self.__tag_names.append(node_tag)
-            self.__parseNode(parent, limit, inprogress=True)
-        else:
-            self.__shifts.append(0)
-            self.__tag_names.append(node_tag)
-        self.level = len(self.__shifts)
-        if not inprogress:
-            self.__shifts.reverse()
-            self.__tag_names.reverse()
-        self.key = "_".join(map(str, self.__shifts))
-        md = hashlib.md5(usedforsecurity=False)
-        md.update(self.key.encode("utf8"))
-        self.hash = md.hexdigest()
+            parent = node.getparent()
+            if parent is not None and parent.tag != "<DOCUMENT_ROOT>" and node != limit:
+                try:
+                    shifts.append(parent.index(node))
+                except (AttributeError, ValueError):
+                    # Fallback if index() fails
+                    shifts.append(0)
+                tag_names.append(node_tag)
+                node = parent
+            else:
+                shifts.append(0)
+                tag_names.append(node_tag)
+                break
+        self.level = len(shifts)
+        shifts.reverse()
+        tag_names.reverse()
+        self.key = "_".join(map(str, shifts))
+
+    @property
+    def hash(self):
+        """MD5 hex digest of :attr:`key`, computed on first use."""
+        digest = self.__dict__.get("_hash")
+        if digest is None:
+            md = hashlib.md5(usedforsecurity=False)
+            md.update(self.key.encode("utf8"))
+            digest = self.__dict__["_hash"] = md.hexdigest()
+        return digest
 
     def __cmp__(self, tagpath):
         return bool(list(self.values()) == list(tagpath.values()) and self.limit == tagpath.limit)

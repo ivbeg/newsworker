@@ -1,13 +1,13 @@
 """Applying a :class:`FeedSpec` to a page: deterministic selectors, no heuristics."""
 
+import contextlib
 import hashlib
 
 from lxml import etree
-from lxml.html import fromstring
 
 from ..dates import DateReading, choose_date_order, read_datetime_attr
 from ..extractor import FeedExtractor
-from ..tools import clean_url, decode_html, get_abs_url, resolve_feed_language
+from ..tools import clean_url, get_abs_url, resolve_feed_language
 from .model import HTML_TIME_PATTERN
 from .selectors import _element_text, select_nodes
 
@@ -147,9 +147,7 @@ class SpecExtractor:
     def _parse(self, url, data=None, user_agent=None):
         if data is None:
             data = self.ext.fetch(url, user_agent)
-        edata = decode_html(data)
-        parser = etree.HTMLParser(remove_blank_text=True)
-        return fromstring(edata, parser=parser)
+        return self.ext.parse_page(data)
 
     def extract(self, url, spec, data=None, user_agent=None, context=None):
         if context is None:
@@ -175,12 +173,13 @@ class SpecExtractor:
         patterns = date_rule.patterns if date_rule else None
 
         scopes = [scope for scope in _select_item_scopes(document, spec.items) if scope]
-        order = self._date_order(spec, scopes, date_rule, patterns)
-        with self.ext.ordered_dates(order):
-            for scope in scopes:
-                item = self._extract_item(url, scope, spec, date_rule, patterns)
-                if item is not None:
-                    feed["items"].append(item)
+        with self._narrowed_item_dates(patterns):
+            order = self._date_order(spec, scopes, date_rule, patterns)
+            with self.ext.ordered_dates(order):
+                for scope in scopes:
+                    item = self._extract_item(url, scope, spec, date_rule, patterns)
+                    if item is not None:
+                        feed["items"].append(item)
         override = getattr(self.ext, "default_language", None)
         if override:
             feed["language"] = resolve_feed_language(override=override)
@@ -193,6 +192,23 @@ class SpecExtractor:
                 text_samples=samples,
             )
         return feed
+
+    def _narrowed_item_dates(self, patterns):
+        """The spec's date restriction around all of its items.
+
+        Each date text is read inside its own :meth:`narrowed_dates` block
+        (:func:`_read_date_text`), which opens a qddate session on every parser
+        and closes it again. qddate's candidate caches start empty in every
+        session, so a session per date cost 0.1–0.4 ms more per parser and
+        date. Opening the same restriction around all items keeps the sessions
+        open from one date to the next; they close when the items are done.
+        With ``html:time`` the ``<time>`` text is read unrestricted between
+        the dates, so those specs keep the per-date blocks.
+        """
+        qddate_patterns = _qddate_patterns(patterns)
+        if qddate_patterns is None or HTML_TIME_PATTERN in patterns:
+            return contextlib.nullcontext()
+        return self.ext.narrowed_dates(qddate_patterns)
 
     def _date_order(self, spec, scopes, date_rule, patterns):
         """The day/month order for the items' numeric dates (``"dmy"``/``"mdy"``).

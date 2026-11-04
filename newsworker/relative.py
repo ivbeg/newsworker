@@ -294,14 +294,23 @@ _DAY_WORD_RE = re.compile(
 _KEYWORDS = tuple(_DAY_WORDS) + tuple(
     word for shapes in _AGO_SHAPES.values() for pair in shapes for word in pair if word
 )
+_KEYWORD_ALTERNATION = "|".join(
+    sorted({re.escape(word) for word in _KEYWORDS}, key=len, reverse=True)
+)
+# Any keyword as a substring of lower-cased text, in one regex search: the
+# extractor asks this of every short text node without a digit.
+_KEYWORD_RE = re.compile(_KEYWORD_ALTERNATION)
+# The same words matched as the reading patterns match them (ignoring case).
+# Every pattern of read_relative contains one of them, so text without any
+# cannot be a relative date.
+_KEYWORD_ANYCASE_RE = re.compile(_KEYWORD_ALTERNATION, re.IGNORECASE)
 
 
 def looks_relative(text: str | None) -> bool:
     """Cheap pre-filter: does ``text`` contain a relative-date keyword?"""
     if not text:
         return False
-    low = text.lower()
-    return any(keyword in low for keyword in _KEYWORDS)
+    return _KEYWORD_RE.search(text.lower()) is not None
 
 
 def parse_relative(
@@ -327,6 +336,9 @@ def read_relative(
         now = dt.datetime.now(dt.timezone.utc)
     cleaned = " ".join(text.split()).strip(_EDGE_PUNCT)
     low = cleaned.lower()
+    if _KEYWORD_ANYCASE_RE.search(low) is None:
+        # Most texts the extractor reads here are not dates ("8 comments").
+        return None
     for pattern, units in _AGO_PATTERNS:
         match = pattern.search(low)
         if match is None:

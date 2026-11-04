@@ -176,19 +176,23 @@ def _from_microdata(document, base_url: str, default_timezone: str) -> list[dict
 
 
 def extract_structured_items(
-    document, base_url: str, *, default_timezone: str = "UTC"
+    document, base_url: str, *, default_timezone: str = "UTC", microdata_document=None
 ) -> list[dict[str, Any]]:
     """Return de-duplicated news items described by JSON-LD or microdata.
 
     The page itself (a ``WebPage`` whose URL is ``base_url``) is not an item.
+    ``microdata_document`` is the page parsed with its whitespace-only text,
+    whose microdata values keep the spaces between elements; ``document`` is
+    used when it is not given.
     """
     if document is None:
         return []
     page = clean_url(base_url)
     seen = set()
     items = []
+    microdata = document if microdata_document is None else microdata_document
     for item in _from_json_ld(document, base_url, default_timezone) + _from_microdata(
-        document, base_url, default_timezone
+        microdata, base_url, default_timezone
     ):
         if item["link"] in seen or item["link"] == page:
             continue
