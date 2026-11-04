@@ -1,6 +1,9 @@
 """Deriving a :class:`FeedSpec` from a page with the dynamic date heuristics."""
 
 import datetime
+from typing import Any
+
+from lxml import etree
 
 from ..consts import DATE_CLASSES_KEYWORDS, NEWS_CLASSES_KEYWORDS
 from ..extractor import FeedExtractor
@@ -18,10 +21,37 @@ from .selectors import (
     css_for_item_element,
     css_select,
     relative_selector,
+    select_nodes,
 )
 
 # Container tags that hold UI controls, not news listings.
 _FORM_CONTAINER_TAGS = frozenset({"select", "form", "option", "optgroup", "datalist"})
+
+
+def _signature(node):
+    """Tag and classes: the wrappers of one grouped listing share both."""
+    return node.tag, tuple(sorted(_element_classes(node)))
+
+
+def _date_path(root, node):
+    """The child tags leading from ``root`` down to ``node``."""
+    tags = []
+    while node is not None and node is not root:
+        tags.append(node.tag)
+        node = node.getparent()
+    return tuple(reversed(tags))
+
+
+def _follow(root, path):
+    """The first element reached from ``root`` by the child tags ``path``."""
+    if not path:
+        return root
+    for child in root:
+        if child.tag == path[0]:
+            found = _follow(child, path[1:])
+            if found is not None:
+                return found
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +115,10 @@ class SpecAnalyzer:
             return (-1, -1, -1, -1)
 
         snode = self._normalize_snode(snode)
-        item_roots, date_by_root = self._map_item_roots(snode, nodes)
+        if "item_roots" in cluster_info:
+            item_roots, date_by_root = cluster_info["item_roots"], cluster_info["date_by_root"]
+        else:
+            item_roots, date_by_root = self._map_item_roots(snode, nodes)
         links = titles = 0
         for root in item_roots[:6]:
             fields = self._detect_fields(root, date_by_root.get(root))
@@ -105,6 +138,116 @@ class SpecAnalyzer:
     def _pick_best_cluster(self, clusters):
         """Returns the cluster most likely to contain repeating news items."""
         return max(clusters.items(), key=lambda kv: self._cluster_score(kv[1]))
+
+    def candidate_clusters(self, clusters):
+        """The date groups to choose from: ``clusters`` with grouped listings merged.
+
+        A listing that puts its items into sibling wrappers (one per hour, day or
+        block) yields one date group per wrapper. Wrappers with one tag and class
+        whose items reach their date the same way become one group for their
+        parent (:meth:`_grouped_listing`). It replaces the wrappers' groups and
+        the parent's own group.
+        """
+        siblings: dict[tuple, list[str]] = {}
+        for path, info in clusters.items():
+            parent = info["snode"].getparent()
+            if parent is not None:
+                key = (parent, _signature(info["snode"]))
+                siblings.setdefault(key, []).append(path)
+        candidates = dict(clusters)
+        for (parent, signature), paths in siblings.items():
+            if len(paths) < 2:
+                continue
+            merged = self._grouped_listing(clusters, parent, signature, paths)
+            if merged is None:
+                continue
+            for path in paths:
+                candidates.pop(path, None)
+            candidates[parent.getroottree().getpath(parent)] = merged
+        return candidates
+
+    def _grouped_listing(self, clusters, parent, signature, paths):
+        """One date group for the sibling wrappers ``paths`` under ``parent``.
+
+        Returns ``None`` when the wrappers' items reach their date in different
+        ways, or when no CSS selector list in ``parent`` covers the items with
+        nine in ten of its matches dated.
+        """
+        groups = [clusters[path] for path in paths]
+        shapes: set[tuple] = set()
+        for info in groups:
+            roots, date_by_root = self._map_item_roots(
+                self._normalize_snode(info["snode"]), info["nodes"]
+            )
+            shapes.update(_date_path(root, date_by_root[root]) for root in roots)
+        if len(shapes) != 1:
+            return None
+        (shape,) = shapes
+        # Dates clustering already read: the wrappers' and the parent's own.
+        own = clusters.get(parent.getroottree().getpath(parent))
+        known: dict[Any, dict] = {}
+        for info in groups + ([own] if own else []):
+            for node_info in info["nodes"]:
+                known.setdefault(node_info["node"], node_info)
+
+        listing = self._grouped_items(parent, signature, shape, known)
+        if len(listing["item_roots"]) < 2 or listing["groups"] < 2:
+            return None
+        try:
+            matched = css_select(parent, listing["selector"])
+        except Exception:
+            return None
+        matched_ids = {id(node) for node in matched}
+        dated = sum(1 for node in matched if _follow(node, shape) is not None)
+        if dated < len(matched) * 0.9 or any(
+            id(root) not in matched_ids for root in listing["item_roots"]
+        ):
+            return None
+        return {"snode": parent, **listing}
+
+    def _grouped_items(self, parent, signature, shape, known):
+        """The items of a grouped listing, found by structure.
+
+        Items are the children of every wrapper, and the parent's other
+        children, that hold a date at ``shape``; a wrapper with one item, which
+        clustering cannot pair, counts too. ``known`` maps date nodes to the
+        clustering's readings; other dates are read here.
+        """
+        roots, date_by_root, nodes, parts, wrappers = [], {}, [], [], 0
+        for child in parent.iterchildren(etree.Element):
+            if _signature(child) == signature:
+                holder = self._normalize_snode(child)
+                prefix = css_for_item_element(child, NEWS_CLASSES_KEYWORDS)
+                if holder is not child:
+                    prefix += " > " + holder.tag
+                prefix, members = prefix + " > ", list(holder.iterchildren(etree.Element))
+            else:
+                prefix, members = "", [child]
+            found = 0
+            for member in members:
+                date_node = _follow(member, shape)
+                node_info = known.get(date_node) if date_node is not None else None
+                if date_node is not None and node_info is None:
+                    reading = self.ext.read_date(date_node)
+                    if reading is not None:
+                        node_info = {"t_key": reading.key, "node": date_node, "reading": reading}
+                if node_info is None:
+                    continue
+                roots.append(member)
+                date_by_root[member] = date_node
+                nodes.append(node_info)
+                found += 1
+                part = prefix + css_for_item_element(member, NEWS_CLASSES_KEYWORDS)
+                if part not in parts:
+                    parts.append(part)
+            wrappers += bool(prefix and found)
+        return {
+            "nodes": nodes,
+            "item_roots": roots,
+            "date_by_root": date_by_root,
+            "selector": ", ".join(parts),
+            "groups": wrappers,
+        }
 
     def _feed_title(self, document, url):
         nodes = document.xpath("//head/title")
@@ -227,24 +370,15 @@ class SpecAnalyzer:
                 raise SpecAnalysisError("No dated news listings detected on this page")
             return spec
 
-        best_path, best = self._pick_best_cluster(clusters)
+        best_path, best = self._pick_best_cluster(self.candidate_clusters(clusters))
         snode = self._normalize_snode(best["snode"])
-
-        # Map every date node to its item root (direct child of snode).
-        item_roots = []
-        date_by_root = {}
-        patterns = []
-        for node_info in best["nodes"]:
-            node = node_info["node"]
-            t_key = node_info.get("t_key")
-            if t_key and t_key not in patterns:
-                patterns.append(t_key)
-            root = self._item_root(snode, node)
-            if root is None:
-                continue
-            if root not in date_by_root:
-                item_roots.append(root)
-                date_by_root[root] = node
+        grouped = best.get("selector")
+        patterns = list(dict.fromkeys(n["t_key"] for n in best["nodes"] if n.get("t_key")))
+        if grouped:
+            item_roots, date_by_root = best["item_roots"], best["date_by_root"]
+        else:
+            # Map every date node to its item root (direct child of snode).
+            item_roots, date_by_root = self._map_item_roots(snode, best["nodes"])
 
         if not item_roots:
             if require_items:
@@ -258,7 +392,7 @@ class SpecAnalyzer:
             text_samples=self._item_text_samples(item_roots, date_by_root),
         )
 
-        flat = self._flat_layout(snode, item_roots)
+        flat = None if grouped else self._flat_layout(snode, item_roots)
         if flat is not None:
             # Heading, date line and teaser are siblings with no wrapper per
             # item: the heading before each date starts the item.
@@ -266,6 +400,12 @@ class SpecAnalyzer:
                 flat[0],
                 self._build_scope_field_rules(flat[1], date_by_root, patterns),
             )
+        elif grouped:
+            # Items in sibling wrappers and between them: the selector list
+            # checked by ``_grouped_listing``; links checked on every item.
+            spec.items = ItemsRule(selector=grouped, selector_type="css", container=best_path)
+            spec.fields = self._build_field_rules(item_roots, date_by_root, patterns)
+            self._agree_link_rule(spec.fields, item_roots)
         else:
             # Item selector: prefer a semantic tag.class shared by item roots.
             spec.items = self._build_items_rule(document, snode, item_roots)
@@ -274,7 +414,7 @@ class SpecAnalyzer:
             spec.fields = self._build_field_rules(item_roots, date_by_root, patterns)
 
         # Validate against the same document; fall back to positional if empty.
-        if flat is None and not self._validate(document, spec):
+        if flat is None and not grouped and not self._validate(document, spec):
             spec.items = self._positional_items_rule(document, snode, item_roots)
             if not self._validate(document, spec):
                 # Keep the semantic attempt; extraction may still work partially.
@@ -533,6 +673,40 @@ class SpecAnalyzer:
                 absolute=True,
             )
         return fields
+
+    def _agree_link_rule(self, fields, item_roots):
+        """Use the link rule that finds the article link in the most items.
+
+        The items of a grouped listing differ: some start with a category link,
+        others hold only the headline link. The sample item's link selector is
+        compared with the link holding the title heading (``.//a[.//h3]``) and
+        the link inside it (``h3 a``) on every item.
+        """
+        rule, title = fields.get("link"), fields.get("title")
+        if rule is None or title is None:
+            return
+        titles = [next(iter(select_nodes(root, title.selector)), None) for root in item_roots]
+        tags = {str(node.tag) for node in titles if node is not None}
+        candidates = [rule.selector]
+        if len(tags) == 1 and next(iter(tags)) in _HEADING_TAGS_ALL:
+            tag = next(iter(tags))
+            candidates += [".//a[.//%s]" % tag, "%s a" % tag]
+        wanted = [
+            pick_link_node(
+                [el for el in _walk_elements(root) if el.tag == "a" and el.get("href")],
+                _element_text(node) if node is not None else None,
+            )
+            for root, node in zip(item_roots, titles, strict=True)
+        ]
+
+        def agreement(selector):
+            found = 0
+            for root, want in zip(item_roots, wanted, strict=True):
+                links = [el for el in select_nodes(root, selector) if el.get("href")]
+                found += bool(links) and links[0] is want
+            return found
+
+        rule.selector = max(candidates, key=agreement)
 
     def _validate(self, document, spec):
         try:

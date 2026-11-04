@@ -58,7 +58,9 @@ flowchart TD
 
    Clusters inside `<select>`, `<form>`, and similar UI controls are rejected so callback time-slot forms do not beat real news lists.
 
-4. **Item roots** — For each date node in the winning cluster, the analyzer walks up to the **direct child** of the cluster container (`snode`). That element is one news **item root**. Tables normalize through `<tbody>` when present.
+   **Grouped listings** — Some listings put their items into sibling wrappers, one per hour, day or block (`div.timeline > div.timeline__group > div`), with single items between them. Clustering then finds one small cluster per wrapper. Before scoring, `SpecAnalyzer.candidate_clusters()` merges two or more sibling clusters into one cluster for their parent. The wrappers must share a tag and class, and their items must reach the date along the same tag path (for example `time`). Every child of a wrapper, and every other child of the parent, that holds a date at that path is an item. This includes a wrapper with one item, which clustering cannot pair. The merged cluster replaces the wrappers' clusters and the parent's own cluster.
+
+4. **Item roots** — For each date node in the winning cluster, the analyzer walks up to the **direct child** of the cluster container (`snode`). That element is one news **item root**. Tables normalize through `<tbody>` when present. A merged grouped listing keeps the items it found: children of the wrappers and of the parent.
 
 5. **Items rule** — The analyzer tries to emit a semantic CSS selector:
    - prefer a `tag.class` shared by all item roots (ignoring WordPress `category-*`, `tag-*`, and `post-<id>` classes);
@@ -67,11 +69,13 @@ flowchart TD
 
    A CSS selector is kept only if it matches at least ~90% of discovered items (minimum 2) and is not overly broad (bare `div` matching hundreds of nodes is rejected).
 
+   A grouped listing gets a CSS selector list in the parent container, one entry per item kind: `div.timeline__group > div, div.timeline__text, div.timeline__smalltext`. The list must match every item, and at least 90% of its matches must hold a date at the items' date path. Otherwise the merged cluster is not offered and the wrappers compete one by one, as before.
+
 6. **Field rules** — From one representative item root, heuristics locate:
    - **date** — the known date node; relative selector via CSS or XPath;
    - **title** — first heading (`h1`–`h4`) with text length > 10, else first long text/tail;
    - **description** — next long text block after title;
-   - **link** — first `<a href>`;
+   - **link** — the `<a href>` whose text is the title, else one inside or around a heading, else the longest. In a grouped listing some items lead with a category link, so the analyzer compares the sample's selector with `.//a[.//h3]` (the link around the heading) and `h3 a` (the link inside it). It keeps the one that finds the article link in the most items;
    - **image** — first `<img src>`.
 
    **Date patterns** — qddate pattern keys seen in the cluster (e.g. `dt:date:date_9`) are stored on the date field. If HTML `<time datetime="...">` was matched, the special marker `html:time` is included and `source` becomes `attr:datetime`.

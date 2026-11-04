@@ -29,6 +29,11 @@ newsworker explain --file page.html --base-url https://example.com/news [OPTIONS
 newsworker explain "https://example.com/news" -f html -o report.html
 ```
 
+A listing split into sibling wrappers (one per hour or day) is shown as one
+date group for the wrappers' parent, with the number of wrappers that hold
+items: `* 50 dates in 11 groups, 6 linked, 6 titled /html/body/main/div[1]/div/div[1]`.
+JSON and HTML reports carry the same number as `groups`.
+
 Each date group also shows the day/month order its numeric dates were read in
 (`dmy` or `mdy`) and why: a date such as `13/05/2022` or `05/13/2022` that can
 only be read one way, or the page locale when every date is ambiguous. A
