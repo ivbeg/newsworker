@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-04
+
+Speed, coverage and discovery: with qddate 1.1.0 and a leaner feed build the
+extraction corpus takes 0.39 s instead of 15.9 s on a first visit and 0.22 s
+instead of 4.7 s with cached specs. More date formats are read, listings split
+into sibling groups and `<time datetime>` without visible text give their
+items, every date has a precision, and `scan` can crawl a site for feeds and
+news listings and honours robots.txt. Requires qddate 1.1.0.
+
 ### Added
 - **`scan --crawl`** — `scan` can follow same-site links from the given URL
   and look for feeds on every page it visits, news sections first and
