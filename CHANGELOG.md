@@ -33,6 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`newsworker scan --ignore-robots`** scans a page, its sitemap documents
   and feed candidates even when `robots.txt` disallows them, like the same
   flag on `analyze`, `extract` and `explain`.
+- **Grouped listings** — a listing that puts its items into sibling wrappers
+  (one per hour, day or block) with single items between them is read as one
+  listing. Before, each wrapper became its own small date group and the
+  analysis picked one of them, or a table with more dates per group. Two or
+  more sibling date groups with one tag and class, whose items reach the date
+  along the same tag path, merge into one group for their parent. The spec
+  selects their items with a CSS selector list, for example
+  `div.timeline__group > div, div.timeline__text, div.timeline__smalltext`. Its
+  link rule is the one that finds the article link in the most items, for
+  example `.//a[.//h3]` when some items start with a category link. On
+  interfax.ru, `/russia/` now yields 50 of 50 items (was 10), `/business/` 50
+  timeline items (was 9 rows of a quotes table) and the home page 59 linked
+  items (was 34, 20 of them linked to the home page). `explain` shows the
+  merged group as `50 dates in 11 groups` (`groups` in JSON). Cached specs
+  keep their rules until they are analysed again. The corpus gains
+  `grouped` and `grouped-quotes` pages (ru, en).
 
 ### Changed
 - `FeedsFinder.find_feeds(extractrss=True)` reads the page through

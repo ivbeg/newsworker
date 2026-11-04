@@ -10675,6 +10675,238 @@
    ]
   },
   {
+   "name": "en-grouped",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "grouped",
+   "date_style": "none",
+   "page": "pages/en-grouped.html",
+   "expected": [
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/233-1",
+     "date": "2025-09-12",
+     "date_text": "17:00"
+    },
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/233-2",
+     "date": "2025-09-11",
+     "date_text": "16:13"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/233-3",
+     "date": "2025-09-10",
+     "date_text": "15:26"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/233-4",
+     "date": "2025-09-06",
+     "date_text": "14:39"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/233-5",
+     "date": "2025-09-04",
+     "date_text": "13:52"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/233-6",
+     "date": "2025-08-28",
+     "date_text": "12:05"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/233-7",
+     "date": "2025-09-06",
+     "date_text": "11:18"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/233-8",
+     "date": "2025-08-15",
+     "date_text": "10:31"
+    }
+   ]
+  },
+  {
+   "name": "en-grouped-quotes",
+   "url": "https://news.example.org/en/news/",
+   "language": "en",
+   "layout": "grouped-quotes",
+   "date_style": "none",
+   "page": "pages/en-grouped-quotes.html",
+   "expected": [
+    {
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/234-1",
+     "date": "2025-06-27",
+     "date_text": "17:00"
+    },
+    {
+     "title": "Researchers publish annual report on coastal water quality",
+     "link": "https://news.example.org/en/news/234-2",
+     "date": "2025-06-24",
+     "date_text": "16:13"
+    },
+    {
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/234-3",
+     "date": "2025-06-21",
+     "date_text": "15:26"
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/234-4",
+     "date": "2025-06-18",
+     "date_text": "14:39"
+    },
+    {
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/234-5",
+     "date": "2025-06-11",
+     "date_text": "13:52"
+    },
+    {
+     "title": "Council approves new budget for regional transport projects",
+     "link": "https://news.example.org/en/news/234-6",
+     "date": "2025-06-22",
+     "date_text": "12:05"
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/234-7",
+     "date": "2025-06-09",
+     "date_text": "11:18"
+    },
+    {
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/234-8",
+     "date": "2025-05-30",
+     "date_text": "10:31"
+    }
+   ]
+  },
+  {
+   "name": "ru-grouped",
+   "url": "https://news.example.org/ru/news/",
+   "language": "ru",
+   "layout": "grouped",
+   "date_style": "none",
+   "page": "pages/ru-grouped.html",
+   "expected": [
+    {
+     "title": "Министерство объявило гранты для малого бизнеса",
+     "link": "https://news.example.org/ru/news/235-1",
+     "date": "2025-10-14",
+     "date_text": "17:00"
+    },
+    {
+     "title": "Город открыл общественное обсуждение будущего порта",
+     "link": "https://news.example.org/ru/news/235-2",
+     "date": "2025-10-12",
+     "date_text": "16:13"
+    },
+    {
+     "title": "Правление назначило нового директора статистической службы",
+     "link": "https://news.example.org/ru/news/235-3",
+     "date": "2025-10-12",
+     "date_text": "15:26"
+    },
+    {
+     "title": "Исследователи опубликовали годовой отчёт о качестве воды",
+     "link": "https://news.example.org/ru/news/235-4",
+     "date": "2025-10-11",
+     "date_text": "14:39"
+    },
+    {
+     "title": "Совет утвердил новый бюджет региональных транспортных проектов",
+     "link": "https://news.example.org/ru/news/235-5",
+     "date": "2025-10-10",
+     "date_text": "13:52"
+    },
+    {
+     "title": "Университет запустил портал открытых климатических данных",
+     "link": "https://news.example.org/ru/news/235-6",
+     "date": "2025-09-24",
+     "date_text": "12:05"
+    },
+    {
+     "title": "Библиотека продлила часы работы на время сессии",
+     "link": "https://news.example.org/ru/news/235-7",
+     "date": "2025-10-02",
+     "date_text": "11:18"
+    },
+    {
+     "title": "Агентство обновило рекомендации по цифровым услугам",
+     "link": "https://news.example.org/ru/news/235-8",
+     "date": "2025-09-30",
+     "date_text": "10:31"
+    }
+   ]
+  },
+  {
+   "name": "ru-grouped-quotes",
+   "url": "https://news.example.org/ru/news/",
+   "language": "ru",
+   "layout": "grouped-quotes",
+   "date_style": "none",
+   "page": "pages/ru-grouped-quotes.html",
+   "expected": [
+    {
+     "title": "Университет запустил портал открытых климатических данных",
+     "link": "https://news.example.org/ru/news/236-1",
+     "date": "2025-07-12",
+     "date_text": "17:00"
+    },
+    {
+     "title": "Правление назначило нового директора статистической службы",
+     "link": "https://news.example.org/ru/news/236-2",
+     "date": "2025-07-10",
+     "date_text": "16:13"
+    },
+    {
+     "title": "Исследователи опубликовали годовой отчёт о качестве воды",
+     "link": "https://news.example.org/ru/news/236-3",
+     "date": "2025-07-06",
+     "date_text": "15:26"
+    },
+    {
+     "title": "Совет утвердил новый бюджет региональных транспортных проектов",
+     "link": "https://news.example.org/ru/news/236-4",
+     "date": "2025-07-03",
+     "date_text": "14:39"
+    },
+    {
+     "title": "Город открыл общественное обсуждение будущего порта",
+     "link": "https://news.example.org/ru/news/236-5",
+     "date": "2025-06-30",
+     "date_text": "13:52"
+    },
+    {
+     "title": "Библиотека продлила часы работы на время сессии",
+     "link": "https://news.example.org/ru/news/236-6",
+     "date": "2025-06-22",
+     "date_text": "12:05"
+    },
+    {
+     "title": "Министерство объявило гранты для малого бизнеса",
+     "link": "https://news.example.org/ru/news/236-7",
+     "date": "2025-06-30",
+     "date_text": "11:18"
+    },
+    {
+     "title": "Агентство обновило рекомендации по цифровым услугам",
+     "link": "https://news.example.org/ru/news/236-8",
+     "date": "2025-06-28",
+     "date_text": "10:31"
+    }
+   ]
+  },
+  {
    "name": "en-time-empty",
    "url": "https://news.example.org/en/news/",
    "language": "en",
@@ -10683,39 +10915,39 @@
    "page": "pages/en-time-empty.html",
    "expected": [
     {
-     "title": "Board appoints new director for the national statistics office",
-     "link": "https://news.example.org/en/news/233-1",
-     "date": "2025-09-12",
+     "title": "Agency updates guidance on digital service standards",
+     "link": "https://news.example.org/en/news/237-1",
+     "date": "2025-08-13",
      "date_text": null
     },
     {
-     "title": "Library extends opening hours during the exam season",
-     "link": "https://news.example.org/en/news/233-2",
-     "date": "2025-09-11",
+     "title": "University launches open data portal for climate records",
+     "link": "https://news.example.org/en/news/237-2",
+     "date": "2025-08-12",
+     "date_text": null
+    },
+    {
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/237-3",
+     "date": "2025-08-05",
      "date_text": null
     },
     {
      "title": "Council approves new budget for regional transport projects",
-     "link": "https://news.example.org/en/news/233-3",
-     "date": "2025-09-10",
-     "date_text": null
-    },
-    {
-     "title": "Agency updates guidance on digital service standards",
-     "link": "https://news.example.org/en/news/233-4",
-     "date": "2025-09-06",
+     "link": "https://news.example.org/en/news/237-4",
+     "date": "2025-08-10",
      "date_text": null
     },
     {
      "title": "Ministry announces grants for small business innovation",
-     "link": "https://news.example.org/en/news/233-5",
-     "date": "2025-09-04",
+     "link": "https://news.example.org/en/news/237-5",
+     "date": "2025-08-01",
      "date_text": null
     },
     {
-     "title": "Researchers publish annual report on coastal water quality",
-     "link": "https://news.example.org/en/news/233-6",
-     "date": "2025-08-28",
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/237-6",
+     "date": "2025-07-29",
      "date_text": null
     }
    ]
@@ -10729,39 +10961,39 @@
    "page": "pages/en-time-label.html",
    "expected": [
     {
-     "title": "Library extends opening hours during the exam season",
-     "link": "https://news.example.org/en/news/234-1",
-     "date": "2025-06-27",
-     "date_text": null
-    },
-    {
      "title": "Researchers publish annual report on coastal water quality",
-     "link": "https://news.example.org/en/news/234-2",
-     "date": "2025-06-24",
+     "link": "https://news.example.org/en/news/238-1",
+     "date": "2025-10-02",
      "date_text": null
     },
     {
-     "title": "Board appoints new director for the national statistics office",
-     "link": "https://news.example.org/en/news/234-3",
-     "date": "2025-06-21",
+     "title": "City opens public consultation on the future of the harbour",
+     "link": "https://news.example.org/en/news/238-2",
+     "date": "2025-10-01",
      "date_text": null
     },
     {
-     "title": "Ministry announces grants for small business innovation",
-     "link": "https://news.example.org/en/news/234-4",
-     "date": "2025-06-18",
+     "title": "Library extends opening hours during the exam season",
+     "link": "https://news.example.org/en/news/238-3",
+     "date": "2025-09-28",
      "date_text": null
     },
     {
      "title": "University launches open data portal for climate records",
-     "link": "https://news.example.org/en/news/234-5",
-     "date": "2025-06-11",
+     "link": "https://news.example.org/en/news/238-4",
+     "date": "2025-09-23",
      "date_text": null
     },
     {
-     "title": "Council approves new budget for regional transport projects",
-     "link": "https://news.example.org/en/news/234-6",
-     "date": "2025-06-22",
+     "title": "Board appoints new director for the national statistics office",
+     "link": "https://news.example.org/en/news/238-5",
+     "date": "2025-09-20",
+     "date_text": null
+    },
+    {
+     "title": "Ministry announces grants for small business innovation",
+     "link": "https://news.example.org/en/news/238-6",
+     "date": "2025-09-12",
      "date_text": null
     }
    ]
@@ -10775,38 +11007,38 @@
    "page": "pages/ru-time-empty.html",
    "expected": [
     {
-     "title": "Министерство объявило гранты для малого бизнеса",
-     "link": "https://news.example.org/ru/news/235-1",
-     "date": "2025-10-14",
-     "date_text": null
-    },
-    {
      "title": "Город открыл общественное обсуждение будущего порта",
-     "link": "https://news.example.org/ru/news/235-2",
-     "date": "2025-10-12",
-     "date_text": null
-    },
-    {
-     "title": "Правление назначило нового директора статистической службы",
-     "link": "https://news.example.org/ru/news/235-3",
-     "date": "2025-10-12",
-     "date_text": null
-    },
-    {
-     "title": "Исследователи опубликовали годовой отчёт о качестве воды",
-     "link": "https://news.example.org/ru/news/235-4",
-     "date": "2025-10-11",
-     "date_text": null
-    },
-    {
-     "title": "Совет утвердил новый бюджет региональных транспортных проектов",
-     "link": "https://news.example.org/ru/news/235-5",
-     "date": "2025-10-10",
+     "link": "https://news.example.org/ru/news/239-1",
+     "date": "2025-10-09",
      "date_text": null
     },
     {
      "title": "Университет запустил портал открытых климатических данных",
-     "link": "https://news.example.org/ru/news/235-6",
+     "link": "https://news.example.org/ru/news/239-2",
+     "date": "2025-10-05",
+     "date_text": null
+    },
+    {
+     "title": "Совет утвердил новый бюджет региональных транспортных проектов",
+     "link": "https://news.example.org/ru/news/239-3",
+     "date": "2025-10-07",
+     "date_text": null
+    },
+    {
+     "title": "Министерство объявило гранты для малого бизнеса",
+     "link": "https://news.example.org/ru/news/239-4",
+     "date": "2025-09-30",
+     "date_text": null
+    },
+    {
+     "title": "Правление назначило нового директора статистической службы",
+     "link": "https://news.example.org/ru/news/239-5",
+     "date": "2025-09-27",
+     "date_text": null
+    },
+    {
+     "title": "Агентство обновило рекомендации по цифровым услугам",
+     "link": "https://news.example.org/ru/news/239-6",
      "date": "2025-09-24",
      "date_text": null
     }
@@ -10821,39 +11053,39 @@
    "page": "pages/ru-time-label.html",
    "expected": [
     {
+     "title": "Министерство объявило гранты для малого бизнеса",
+     "link": "https://news.example.org/ru/news/240-1",
+     "date": "2025-10-02",
+     "date_text": null
+    },
+    {
      "title": "Университет запустил портал открытых климатических данных",
-     "link": "https://news.example.org/ru/news/236-1",
-     "date": "2025-07-12",
+     "link": "https://news.example.org/ru/news/240-2",
+     "date": "2025-10-01",
      "date_text": null
     },
     {
      "title": "Правление назначило нового директора статистической службы",
-     "link": "https://news.example.org/ru/news/236-2",
-     "date": "2025-07-10",
+     "link": "https://news.example.org/ru/news/240-3",
+     "date": "2025-09-26",
+     "date_text": null
+    },
+    {
+     "title": "Агентство обновило рекомендации по цифровым услугам",
+     "link": "https://news.example.org/ru/news/240-4",
+     "date": "2025-09-20",
      "date_text": null
     },
     {
      "title": "Исследователи опубликовали годовой отчёт о качестве воды",
-     "link": "https://news.example.org/ru/news/236-3",
-     "date": "2025-07-06",
-     "date_text": null
-    },
-    {
-     "title": "Совет утвердил новый бюджет региональных транспортных проектов",
-     "link": "https://news.example.org/ru/news/236-4",
-     "date": "2025-07-03",
+     "link": "https://news.example.org/ru/news/240-5",
+     "date": "2025-09-20",
      "date_text": null
     },
     {
      "title": "Город открыл общественное обсуждение будущего порта",
-     "link": "https://news.example.org/ru/news/236-5",
-     "date": "2025-06-30",
-     "date_text": null
-    },
-    {
-     "title": "Библиотека продлила часы работы на время сессии",
-     "link": "https://news.example.org/ru/news/236-6",
-     "date": "2025-06-22",
+     "link": "https://news.example.org/ru/news/240-6",
+     "date": "2025-09-22",
      "date_text": null
     }
    ]

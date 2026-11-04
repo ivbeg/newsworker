@@ -43,6 +43,8 @@ class ClusterReport:
     #: Day/month order of the group's numeric dates (``dmy``/``mdy``) and why.
     date_order: str | None = None
     date_order_reason: str | None = None
+    #: Sibling wrappers read as one listing (0: an ordinary date group).
+    groups: int = 0
 
 
 @dataclass
@@ -95,6 +97,7 @@ def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
             extractor.clear_session()
         if not clusters:
             return []
+        clusters = analyzer.candidate_clusters(clusters)
         chosen_path, _best = analyzer._pick_best_cluster(clusters)
         reports = []
         for path, info in clusters.items():
@@ -113,6 +116,7 @@ def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
                     chosen=path == chosen_path,
                     date_order=order.order if order is not None else None,
                     date_order_reason=order.reason if order is not None else None,
+                    groups=info.get("groups", 0),
                 )
             )
     reports.sort(key=lambda r: (not r.chosen, -r.links, -r.titles, -r.dates))
@@ -227,8 +231,9 @@ def to_text(report: Explanation) -> str:
     lines.append(f"date groups: {len(report.clusters)}")
     for cluster in report.clusters[:10]:
         mark = "*" if cluster.chosen else " "
+        groups = f" in {cluster.groups} groups" if cluster.groups else ""
         lines.append(
-            f" {mark} {cluster.dates} dates, {cluster.links} linked, {cluster.titles} titled "
+            f" {mark} {cluster.dates} dates{groups}, {cluster.links} linked, {cluster.titles} titled "
             f"{cluster.container} e.g. {', '.join(cluster.samples)}"
         )
         if cluster.date_order:
@@ -270,7 +275,9 @@ def to_html(report: Explanation) -> str:
         rows.append(
             f'<tr class="{"chosen" if cluster.chosen else ""}">'
             + cell("chosen" if cluster.chosen else "")
-            + cell(cluster.dates)
+            + cell(
+                f"{cluster.dates} in {cluster.groups} groups" if cluster.groups else cluster.dates
+            )
             + cell(cluster.links)
             + cell(cluster.titles)
             + f"<td><code>{escape(cluster.container)}</code></td>"

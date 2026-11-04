@@ -887,7 +887,7 @@ pip install -e ".[dev]"     # editable install with dev tools
 pip install -r requirements-lock.txt && pip install --no-deps -e .
 
 pre-commit install          # run ruff/format/whitespace hooks on commit
-make test                   # pytest (450+ tests, offline fixtures, 232-page corpus)
+make test                   # pytest (450+ tests, offline fixtures, 236-page corpus)
 make lint                   # ruff format + lint
 mypy                        # type-checks the whole package
 ```

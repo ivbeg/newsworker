@@ -404,6 +404,72 @@ EXTRA_LAYOUTS = {
 }
 
 
+def grouped_items(lang, seed):
+    """Items with a clock time: the timeline shows the time, ``datetime`` the day."""
+    items = items_for(lang, seed, count=8)
+    for i, item in enumerate(items):
+        item["label"] = f"{17 - i:02d}:{13 * i % 60:02d}"
+        item["stamp"] = f"{item['date'].isoformat()}T{item['label']}"
+    return items
+
+
+#: Wrappers of the grouped timeline: three, two and one item, and items between them.
+TIMELINE_PLAN = ([0, 1, 2], 3, "ad", [4, 5], 6, [7])
+TOPICS = {"en": "Markets", "ru": "Рынки"}
+QUOTES = {
+    "en": ["Gold", "Silver", "Copper", "Nickel", "Zinc", "Brent", "Aluminium", "Platinum"],
+    "ru": ["Золото", "Серебро", "Медь", "Никель", "Цинк", "Нефть", "Алюминий", "Платина"],
+}
+
+
+def _timeline_entry(lang, it, css):
+    """``time`` and the headline link; a ``smalltext`` entry leads with a topic link."""
+    topic = (
+        f'<a href="/{lang}/topics/markets" class="timeline_link">{TOPICS[lang]}</a>'
+        if css == "timeline__smalltext"
+        else ""
+    )
+    return (
+        f'<div class="{css}"><time datetime="{it["stamp"]}">{it["label"]}</time>{topic}'
+        f'<a href="{it["path"]}" title="{esc(it["title"])}"><h3>{esc(it["title"])}</h3></a></div>'
+    )
+
+
+def layout_grouped(lang, items, style):
+    """A timeline that puts most items into ``timeline__group`` wrappers (interfax.ru)."""
+    parts = []
+    for step in TIMELINE_PLAN:
+        if step == "ad":
+            parts.append('<div class="no__dot"><div class="banner">Advertisement</div></div>')
+        elif isinstance(step, list):
+            entries = "".join(_timeline_entry(lang, items[i], "") for i in step)
+            parts.append(f'<div class="timeline__group">{entries}</div>')
+        else:
+            css = "timeline__smalltext" if step == 3 else "timeline__text"
+            parts.append(_timeline_entry(lang, items[step], css))
+    return f'<div class="timeline">{"".join(parts)}</div>'
+
+
+def layout_grouped_quotes(lang, items, style):
+    """The grouped timeline after a quotes table with eight dated rows."""
+    day = (CORPUS_NOW - dt.timedelta(days=2)).strftime("%d.%m")
+    rows = "".join(
+        f'<tr><td><a href="/{lang}/quotes/{i}">{name}</a></td><td>{1200 + 37 * i},00</td>'
+        f'<td class="plus">+{i % 3},{10 + i}%</td><td class="font__small">{day} 00:00</td></tr>'
+        for i, name in enumerate(QUOTES[lang])
+    )
+    quotes = f'<div class="info"><table class="info__table">{rows}</table></div>'
+    return quotes + layout_grouped(lang, items, style)
+
+
+# Layouts added after the corpus was first built; generated last so the
+# earlier cases keep their seeds (and pages) unchanged.
+GROUPED_LAYOUTS = {
+    "grouped": layout_grouped,
+    "grouped-quotes": layout_grouped_quotes,
+}
+
+
 #: A word in place of the date: the date is only in the ``datetime`` attribute.
 TIME_LABELS = {"en": "Recently", "ru": "Недавно"}
 
@@ -429,8 +495,7 @@ def layout_time_label(lang, items, style):
     return f'<section class="teasers">{rows}</section>'
 
 
-# Layouts added after the corpus was first built; generated last so the
-# earlier cases keep their seeds (and pages) unchanged.
+# Generated after the grouped layouts, so their cases keep their seeds.
 ATTRIBUTE_LAYOUTS = {
     "time-empty": layout_time_empty,
     "time-label": layout_time_label,
@@ -448,6 +513,9 @@ def _variants():
         for style in styles:
             for layout_name, layout in LAYOUTS.items():
                 yield lang, style, layout_name, layout
+    for lang in TOPICS:
+        for layout_name, layout in GROUPED_LAYOUTS.items():
+            yield lang, "none", layout_name, layout
     for lang in TIME_LABELS:
         for layout_name, layout in ATTRIBUTE_LAYOUTS.items():
             yield lang, "none", layout_name, layout
@@ -458,7 +526,12 @@ def build():
     pages.mkdir(parents=True, exist_ok=True)
     cases = []
     for seed, (lang, style, layout_name, layout) in enumerate(_variants(), start=1):
-        items = relative_items(lang, seed) if layout_name == "relative" else items_for(lang, seed)
+        if layout_name == "relative":
+            items = relative_items(lang, seed)
+        elif layout_name in GROUPED_LAYOUTS:
+            items = grouped_items(lang, seed)
+        else:
+            items = items_for(lang, seed)
         name = f"{lang}-{layout_name}" + ("" if style == "none" else f"-{style}")
         document = (
             f'<!DOCTYPE html><html lang="{lang}"><head><meta charset="utf-8">'
