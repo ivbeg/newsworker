@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_feed(cached_p=...)`) now narrow every parser that reads the page.
 
 ### Fixed
+- **`<time datetime>` without a visible date** — listings whose items carry
+  the date only in the attribute, as `<time datetime="2026-11-04T12:51"></time>`
+  or `<time datetime="...">recently</time>`, gave no items: date candidates
+  had to show a digit or a relative-date word. A `<time>` with a non-empty
+  `datetime` is now a candidate whatever its text, so dynamic extraction reads
+  it, inferred (and cached) specs use `attr:datetime`, and `explain` lists the
+  group with the attribute values as samples. A `<time>` without `datetime`
+  still needs a digit or a relative-date word.
 - **Inferred specs that read only dates** — when analysis found dates but no
   title or link rule (for example a flat listing where each date comes before
   its heading, `dt`/`dd` pairs or `<br>`-separated lines), `extract` applied
