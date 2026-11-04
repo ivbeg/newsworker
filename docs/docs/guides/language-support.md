@@ -25,7 +25,7 @@ Print the same matrix from the command line with `newsworker languages`
 The source of truth is `newsworker.language.LANGUAGE_SUPPORT`; localized date
 examples are in `tests/fixtures/languages/matrix.json`, and the extraction
 corpus (`tests/corpus`) covers listing layouts, absolute and relative dates in
-all eight supported languages. newsworker requires qddate 1.0.16 or newer.
+all eight supported languages. newsworker requires qddate 1.1.0 or newer.
 General-purpose missing date patterns belong upstream in qddate rather than in
 a second newsworker date engine. newsworker only reshapes short date lines that
 qddate cannot read as written: a leading dateline place or weekday is dropped

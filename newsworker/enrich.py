@@ -8,13 +8,29 @@ optional dependency yields ``None``/empty rather than raising.
 """
 
 import logging
+from typing import Any
 
+from lxml import etree
 from lxml.html import fromstring
+
+from .tools import compiled_xpath
 
 log = logging.getLogger(__name__)
 
+# XPath expressions run on every item; compiled once per thread
+# (:func:`newsworker.tools.compiled_xpath`).
+_AUTHOR_META = "//meta[translate(@name,'AUTHOR','author')='author']/@content"
+_AUTHOR_REL = "//a[contains(concat(' ', normalize-space(@rel), ' '), ' author ')]"
+_AUTHOR_CLASS = "//*[contains(concat(' ', normalize-space(@class), ' '), ' author ')]"
+_TAG_REL = "//a[contains(concat(' ', normalize-space(@rel), ' '), ' tag ')]"
+_CLASS_CONTAINER = "//*[contains(concat(' ', normalize-space(@class), ' '), ' %s ')]"
+_ENCLOSURES = ".//a[contains(concat(' ', normalize-space(@rel), ' '), ' enclosure ')] | .//img"
+
 
 def _parse(html):
+    """``html`` parsed; an element already parsed is returned as it is."""
+    if html is None or isinstance(html, etree._Element):
+        return html
     if not html:
         return None
     try:
@@ -32,16 +48,16 @@ def extract_author(html):
     doc = _parse(html)
     if doc is None:
         return None
-    metas = doc.xpath("//meta[translate(@name,'AUTHOR','author')='author']/@content")
+    metas = compiled_xpath(_AUTHOR_META)(doc)
     for meta in metas:
         if meta and meta.strip():
             return meta.strip()
-    rel_nodes = doc.xpath("//a[contains(concat(' ', normalize-space(@rel), ' '), ' author ')]")
+    rel_nodes = compiled_xpath(_AUTHOR_REL)(doc)
     for node in rel_nodes:
         text = node.text_content().strip()
         if text:
             return text
-    class_nodes = doc.xpath("//*[contains(concat(' ', normalize-space(@class), ' '), ' author ')]")
+    class_nodes = compiled_xpath(_AUTHOR_CLASS)(doc)
     for node in class_nodes:
         text = node.text_content().strip()
         if text:
@@ -55,16 +71,14 @@ def extract_categories(html):
     if doc is None:
         return []
     categories = []
-    for node in doc.xpath("//a[contains(concat(' ', normalize-space(@rel), ' '), ' tag ')]"):
+    for node in compiled_xpath(_TAG_REL)(doc):
         text = node.text_content().strip()
         if text:
             categories.append(text)
     for cls in ("tags", "categories"):
-        containers = doc.xpath(
-            "//*[contains(concat(' ', normalize-space(@class), ' '), ' %s ')]" % cls
-        )
+        containers = compiled_xpath(_CLASS_CONTAINER % cls)(doc)
         for container in containers:
-            links = container.xpath(".//a")
+            links = compiled_xpath(".//a")(container)
             if links:
                 for link in links:
                     text = link.text_content().strip()
@@ -93,9 +107,7 @@ def extract_enclosure_metadata(html):
     doc = _parse(html)
     if doc is None:
         return None, None
-    nodes = doc.xpath(
-        ".//a[contains(concat(' ', normalize-space(@rel), ' '), ' enclosure ')] | .//img"
-    )
+    nodes = compiled_xpath(_ENCLOSURES)(doc)
     for node in nodes:
         media_type = node.get("type") or node.get("data-media-type")
         raw_length = (
@@ -115,13 +127,21 @@ def extract_enclosure_metadata(html):
 
 def enrich_item(item):
     """Adds ``author``/``categories`` to ``item`` from its ``raw_html`` in place."""
-    html = item.get("raw_html")
+    raw_html = item.get("raw_html")
+    parsed: list[Any] = []
+
+    def html():
+        # Parsed once, on first use, for all three lookups.
+        if not parsed:
+            parsed.append(_parse(raw_html))
+        return parsed[0]
+
     if not item.get("author"):
-        author = extract_author(html)
+        author = extract_author(html())
         if author:
             item["author"] = author
     if not item.get("categories"):
-        categories = extract_categories(html)
+        categories = extract_categories(html())
         if categories:
             item["categories"] = categories
     extra = item.get("extra")
@@ -131,7 +151,7 @@ def enrich_item(item):
     if extra.get("images") and not (
         extra.get("enclosure_type") and extra.get("enclosure_length") is not None
     ):
-        media_type, length = extract_enclosure_metadata(html)
+        media_type, length = extract_enclosure_metadata(html())
         if media_type and length is not None:
             extra["enclosure_type"] = media_type
             extra["enclosure_length"] = length

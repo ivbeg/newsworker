@@ -447,11 +447,23 @@ class FeedService:
         from .structured import extract_structured_items, merge_structured_dates
 
         try:
-            document = fromstring(decode_html(data), parser=etree.HTMLParser())
+            # The tree extraction parsed: JSON-LD, attributes and the title do
+            # not depend on whitespace-only text.
+            document = self.extractor.parse_page(data)
+            # Microdata values join an element's text, spaces between child
+            # elements included, so they are read from the page as written.
+            microdata = (
+                fromstring(decode_html(data), parser=etree.HTMLParser())
+                if document.xpath("boolean(//*[@itemscope][@itemtype])")
+                else None
+            )
         except (ValueError, etree.ParserError, etree.XMLSyntaxError):
             return feed
         structured = extract_structured_items(
-            document, url, default_timezone=self.settings.default_timezone
+            document,
+            url,
+            default_timezone=self.settings.default_timezone,
+            microdata_document=microdata,
         )
         if not structured:
             return feed

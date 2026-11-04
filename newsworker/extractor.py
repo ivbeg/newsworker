@@ -3,6 +3,7 @@
 
 import contextvars
 import hashlib
+import re
 import threading
 from copy import copy
 from dataclasses import replace
@@ -35,7 +36,7 @@ from .dates import (
     read_datetime_attr,
 )
 from .fetch import FetchPolicy, FetchRequest, FetchResult, RequestsTransport, new_session
-from .relative import read_relative
+from .relative import looks_relative, read_relative
 from .runtime import ExtractionContext
 from .tagmapper import TagBlock, TagPath
 from .tools import (
@@ -44,7 +45,6 @@ from .tools import (
     decode_html,
     detect_page_locale,
     get_abs_url,
-    looks_like_fuzzy_date,
     normalize_language_tag,
     pick_link_node,
     resolve_feed_language,
@@ -53,6 +53,17 @@ from .tools import (
 
 #: Heading tags checked for titles before generic long-text heuristics.
 _HEADING_TAGS = ("h1", "h2", "h3", "h4")
+
+#: A decimal digit (any script, so full-width ``２０２２`` too). Dates are read
+#: from decimal digits only, so text without one can be a date only through a
+#: relative-date word. One regex search per text node replaces a Python loop
+#: over its characters.
+_DIGIT_RE = re.compile(r"\d")
+
+
+def _may_be_date(text):
+    """Whether ``text`` has a digit or a relative-date word ("yesterday", "ago")."""
+    return bool(text) and (_DIGIT_RE.search(text) is not None or looks_relative(text))
 
 
 def _element_text(node):
@@ -270,6 +281,23 @@ class FeedExtractor:
         context.set_date_language(qddate_language(tag))
         context.date_locale = locale or None
 
+    def parse_page(self, data):
+        """``data`` (page bytes) decoded and parsed into an lxml document.
+
+        Spec analysis, spec extraction and the dynamic extractor all read the
+        page of one build; inside a request context (a :class:`FeedService`
+        build) the tree is parsed once and shared, as nothing changes it. Parse
+        errors propagate and are not remembered.
+        """
+        context = self._context()
+        shared = context is not self._fallback_context
+        if shared and context.page_document is not None and context.page_document[0] is data:
+            return context.page_document[1]
+        document = fromstring(decode_html(data), parser=etree.HTMLParser(remove_blank_text=True))
+        if shared:
+            context.page_document = (data, document)
+        return document
+
     def narrowed_dates(self, patterns):
         """Context manager: match only ``patterns`` (qddate keys) inside the block."""
         return self._context().narrowed_dates(patterns)
@@ -363,9 +391,10 @@ class FeedExtractor:
         if text is None:
             return None
         context = self._context()
+        session = context.session
         res, date_text, language = self._qddate_match(text)
-        if self.session:
-            self.session["debug"]["num_textcompared"] += 1
+        if session:
+            session["debug"]["num_textcompared"] += 1
         if res:
             reordered = False
             if context.date_order:
@@ -377,8 +406,8 @@ class FeedExtractor:
             if the_date is None:
                 self.log.save("match_text", "Rejected implausible or invalid date %r" % text)
                 return None
-            if self.session:
-                self.session["debug"]["num_matched"] += 1
+            if session:
+                session["debug"]["num_matched"] += 1
             return DateReading(
                 key=res["pattern"]["key"],
                 text=text,
@@ -390,6 +419,13 @@ class FeedExtractor:
                 reordered=reordered,
                 precision=match_precision(res),
             )
+        # Whether text is a relative date does not depend on the clock, so a
+        # miss is remembered: most texts read here are not dates ("8 comments")
+        # and are read again for item blocks and annotations.
+        memo = context.date_memo()
+        miss = ("not relative", text)
+        if miss in memo:
+            return None
         relative = read_relative(
             text, now=context.clock(), default_timezone=context.default_timezone
         )
@@ -397,9 +433,10 @@ class FeedExtractor:
             value, precision = relative
             if precision == DAY:
                 value = anchor_day(value, context.default_timezone)
-            if self.session:
-                self.session["debug"]["num_matched"] += 1
+            if session:
+                session["debug"]["num_matched"] += 1
             return DateReading(key="fuzzy", text=text, value=value, precision=precision)
+        memo[miss] = True
         return None
 
     def match_text(self, text):
@@ -418,15 +455,16 @@ class FeedExtractor:
         its text, else its tail. Returns a :class:`DateReading` or ``None``."""
         if node is None:
             return None
+        context = self._context()
         if isinstance(getattr(node, "tag", None), str) and node.tag == "time":
             dt_attr = node.get("datetime")
             if dt_attr:
-                parsed = read_datetime_attr(dt_attr, self._context().default_timezone)
+                parsed = read_datetime_attr(dt_attr, context.default_timezone)
                 if parsed is not None:
                     display = (node.text or "").strip() or dt_attr
-                    if self.session:
-                        self.session["debug"]["num_datematched"] += 1
-                        self.session["debug"]["num_matched"] += 1
+                    if context.session:
+                        context.session["debug"]["num_datematched"] += 1
+                        context.session["debug"]["num_matched"] += 1
                     return DateReading(
                         key="html:time", text=display, value=parsed[0], precision=parsed[1]
                     )
@@ -435,8 +473,8 @@ class FeedExtractor:
                 continue
             reading = self.read_text(str(raw.strip("/\\«[]»").strip().replace("\xa0", " ")))
             if reading is not None:
-                if self.session:
-                    self.session["debug"]["num_datematched"] += 1
+                if context.session:
+                    context.session["debug"]["num_datematched"] += 1
                 return reading
         return None
 
@@ -496,15 +534,11 @@ class FeedExtractor:
         # Early filtering: only check nodes that likely contain dates (have digits
         # or a relative-date keyword such as "yesterday"/"ago"). This avoids
         # expensive pattern matching on nodes that cannot be dates.
-        potential_date_nodes = []
-        for node in nodes:
-            text = (node.text or "").strip()
-            tail = (node.tail or "").strip()
-            if any(
-                value and (any(char.isdigit() for char in value) or looks_like_fuzzy_date(value))
-                for value in (text, tail)
-            ):
-                potential_date_nodes.append(node)
+        # Text and tail are tested as they are: the whitespace around them has
+        # no digit and no relative-date word.
+        potential_date_nodes = [
+            node for node in nodes if _may_be_date(node.text) or _may_be_date(node.tail)
+        ]
 
         shared_node = None
         last = None
@@ -918,12 +952,10 @@ class FeedExtractor:
         if data is None:
             data = self.fetch(url, user_agent)
             self.log.save("get_rss", "Url fetched %s" % (url))
-        edata = decode_html(data)
         self.log.save("get_rss", "Decode data")
         try:
             # Use memory-efficient parser that removes blank text nodes
-            parser = etree.HTMLParser(remove_blank_text=True)
-            document = fromstring(edata, parser=parser)
+            document = self.parse_page(data)
         except (ValueError, etree.ParserError, etree.XMLSyntaxError) as e:
             self.log.save("get_rss", f"Failed to parse HTML: {e}")
             document = None

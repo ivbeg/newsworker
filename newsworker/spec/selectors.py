@@ -5,8 +5,36 @@ element itself, ``.``, ``./…``, ``..``, ``/…`` and ``(…)`` are XPath, anyt
 else is CSS (via ``lxml``'s ``cssselect``).
 """
 
+from functools import lru_cache
+
+from lxml import etree
+from lxml.html import HtmlMixin
+
+from ..tools import compiled_xpath
+
 #: Heading tags preferred for item titles (h1 highest priority).
 _HEADING_TAGS = ("h1", "h2", "h3", "h4")
+
+
+@lru_cache(maxsize=2048)
+def _css_xpath(css, html):
+    """The XPath ``lxml`` evaluates for the CSS selector ``css``.
+
+    Translating CSS costs far more than evaluating the result, and analysis
+    and extraction ask for the same few selectors on every item, so the
+    translation is kept. ``html`` picks the translator ``cssselect()`` uses for
+    the element: HTML for ``lxml.html`` elements, XML for the plain elements of
+    ``etree.HTMLParser``.
+    """
+    from lxml.cssselect import LxmlHTMLTranslator, LxmlTranslator
+
+    translator = LxmlHTMLTranslator() if html else LxmlTranslator()
+    return translator.css_to_xpath(css)
+
+
+def css_select(scope, css):
+    """``scope.cssselect(css)``, with the CSS translated and compiled once."""
+    return compiled_xpath(_css_xpath(css, isinstance(scope, HtmlMixin)))(scope)
 
 
 def _element_text(node):
@@ -179,7 +207,7 @@ def relative_selector(item_root, target, prefer_keywords=None):
     css = css_for_element(target, prefer_keywords)
     if css:
         try:
-            matches = item_root.cssselect(css)
+            matches = css_select(item_root, css)
         except Exception:
             matches = []
         if matches and matches[0] is target:
@@ -190,7 +218,7 @@ def relative_selector(item_root, target, prefer_keywords=None):
             if parent_css:
                 compound = "%s %s" % (parent_css, css)
                 try:
-                    matches = item_root.cssselect(compound)
+                    matches = css_select(item_root, compound)
                 except Exception:
                     matches = []
                 if matches and matches[0] is target:
@@ -213,11 +241,11 @@ def select_nodes(scope, selector):
         return [scope]
     if _is_xpath(selector):
         try:
-            return scope.xpath(selector)
+            return compiled_xpath(selector)(scope)
         except Exception:
             return []
     try:
-        return scope.cssselect(selector)
+        return css_select(scope, selector)
     except Exception:
         return []
 
@@ -230,9 +258,11 @@ def _contains(ancestor, node):
 
 
 def _walk_elements(node):
-    """Yields ``node`` and all descendant elements in document order."""
+    """Yields ``node`` and all descendant elements in document order.
+
+    Comments and processing instructions are skipped (``lxml`` walks the
+    tree; a recursive generator per element cost more than the work done on
+    the elements).
+    """
     yield node
-    for child in node.iterchildren():
-        if not isinstance(child.tag, str):
-            continue
-        yield from _walk_elements(child)
+    yield from node.iterdescendants(etree.Element)

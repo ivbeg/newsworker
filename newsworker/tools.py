@@ -4,6 +4,7 @@ Supportive functions to help news extraction algorithms
 """
 
 import datetime
+import functools
 import hashlib
 import re
 import threading
@@ -72,6 +73,33 @@ class _RobotsCache:
 
 
 _ROBOTS_CACHE = _RobotsCache()
+
+
+#: Compiled XPath expressions of this thread, by expression. Evaluating a
+#: compiled expression is several times faster than ``element.xpath(text)``,
+#: which compiles it on every call; lxml serialises calls of one compiled
+#: expression, so each thread keeps its own.
+_compiled = threading.local()
+_COMPILED_LIMIT = 2048
+
+
+def compiled_xpath(path):
+    """This thread's compiled ``etree.XPath`` for ``path``.
+
+    Raises :class:`lxml.etree.XPathSyntaxError` for an invalid expression,
+    which is not remembered.
+    """
+    cache = getattr(_compiled, "xpaths", None)
+    if cache is None:
+        cache = _compiled.xpaths = {}
+    xpath = cache.get(path)
+    if xpath is None:
+        if len(cache) >= _COMPILED_LIMIT:
+            cache.clear()
+        from lxml import etree
+
+        xpath = cache[path] = etree.XPath(path)
+    return xpath
 
 
 def decode_html(html_string):
@@ -229,7 +257,8 @@ def detect_page_locale(document):
         return None
     for query in _LANGUAGE_METADATA_QUERIES:
         try:
-            values = document.xpath(query)
+            # Asked several times per build (page language, feed language).
+            values = compiled_xpath(query)(document)
         except Exception:  # noqa: S112 - a query the document cannot answer is skipped
             continue
         for value in values:
@@ -260,44 +289,30 @@ _LATIN_LANGUAGE_HINTS = {
 _UKRAINIAN_CHARS = set("іїєґІЇЄҐ")
 
 
+#: Unicode blocks counted by :func:`_script_counts`, in its key order; every
+#: other letter counts as Latin.
+_SCRIPT_BLOCKS = (
+    ("cyrillic", re.compile("[\u0400-\u04ff]")),
+    ("greek", re.compile("[\u0370-\u03ff]")),
+    ("arabic", re.compile("[\u0600-\u06ff]")),
+    ("hebrew", re.compile("[\u0590-\u05ff]")),
+    ("hiragana_katakana", re.compile("[\u3040-\u30ff]")),
+    ("hangul", re.compile("[\uac00-\ud7af]")),
+    ("cjk", re.compile("[\u4e00-\u9fff]")),
+    ("thai", re.compile("[\u0e00-\u0e7f]")),
+    ("devanagari", re.compile("[\u0900-\u097f]")),
+)
+
+
 def _script_counts(text):
     """Returns rough script counts for ``text``."""
-    counts = {
-        "cyrillic": 0,
-        "greek": 0,
-        "arabic": 0,
-        "hebrew": 0,
-        "hiragana_katakana": 0,
-        "hangul": 0,
-        "cjk": 0,
-        "thai": 0,
-        "devanagari": 0,
-        "latin": 0,
-    }
-    for ch in text:
-        if not ch.isalpha():
-            continue
-        code = ord(ch)
-        if 0x0400 <= code <= 0x04FF:
-            counts["cyrillic"] += 1
-        elif 0x0370 <= code <= 0x03FF:
-            counts["greek"] += 1
-        elif 0x0600 <= code <= 0x06FF:
-            counts["arabic"] += 1
-        elif 0x0590 <= code <= 0x05FF:
-            counts["hebrew"] += 1
-        elif 0x3040 <= code <= 0x30FF:
-            counts["hiragana_katakana"] += 1
-        elif 0xAC00 <= code <= 0xD7AF:
-            counts["hangul"] += 1
-        elif 0x4E00 <= code <= 0x9FFF:
-            counts["cjk"] += 1
-        elif 0x0E00 <= code <= 0x0E7F:
-            counts["thai"] += 1
-        elif 0x0900 <= code <= 0x097F:
-            counts["devanagari"] += 1
-        else:
-            counts["latin"] += 1
+    # The letters, then one regex scan per script: no Python loop per character.
+    letters = "".join(filter(str.isalpha, text))
+    counts = dict.fromkeys((name for name, _block in _SCRIPT_BLOCKS), 0)
+    if not letters.isascii():
+        for name, block in _SCRIPT_BLOCKS:
+            counts[name] = len(block.findall(letters))
+    counts["latin"] = len(letters) - sum(counts.values())
     return counts
 
 
@@ -305,15 +320,20 @@ def _detect_latin_language(text):
     """Guesses a Latin-script language from distinctive letters in ``text``."""
     scores = {lang: 0 for lang in _LATIN_LANGUAGE_HINTS}
     for lang, chars in _LATIN_LANGUAGE_HINTS.items():
-        scores[lang] = sum(text.count(ch) for ch in chars)
+        scores[lang] = sum(map(text.count, chars))
     best_lang, best_score = max(scores.items(), key=lambda item: item[1])
     if best_score < 2:
         return None
     return best_lang
 
 
+@functools.lru_cache(maxsize=4096)
 def detect_text_language(text):  # noqa: C901
-    """Guesses a language subtag from visible text, or ``None`` when unsure."""
+    """Guesses a language subtag from visible text, or ``None`` when unsure.
+
+    Results are kept: a build reads the same titles to resolve the feed
+    language several times (analysis, spec extraction, the dynamic path).
+    """
     if not text:
         return None
     text = text.strip()

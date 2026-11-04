@@ -48,6 +48,9 @@ class ExtractionContext:
     #: qddate results by text and matching state; extraction reads most date
     #: nodes several times (clusters, item blocks, annotations).
     _date_memo: dict[tuple[Any, ...], Any] = field(default_factory=dict, repr=False)
+    #: ``(data, document)``: the page bytes last parsed in this build and their
+    #: tree. Analysis, spec extraction and the dynamic extractor read one page.
+    page_document: tuple[Any, Any] | None = field(default=None, repr=False)
 
     def date_memo(self) -> dict[tuple[Any, ...], Any]:
         """The store for this build's qddate results, keyed by the extractor."""
@@ -144,6 +147,7 @@ class ExtractionContext:
         self._date_parser = None
         self._date_parsers = None
         self._date_memo.clear()
+        self.page_document = None
         self.logger = None
 
     def metadata_get(self, key: str, default: Any = None) -> Any:
