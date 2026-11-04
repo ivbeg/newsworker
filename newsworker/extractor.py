@@ -60,10 +60,23 @@ _HEADING_TAGS = ("h1", "h2", "h3", "h4")
 #: over its characters.
 _DIGIT_RE = re.compile(r"\d")
 
+#: The pattern key of a date read from a ``<time datetime>`` attribute
+#: (``newsworker.spec.HTML_TIME_PATTERN``).
+_HTML_TIME_KEY = "html:time"
+
 
 def _may_be_date(text):
     """Whether ``text`` has a digit or a relative-date word ("yesterday", "ago")."""
     return bool(text) and (_DIGIT_RE.search(text) is not None or looks_relative(text))
+
+
+def _has_datetime_attr(node):
+    """Whether ``node`` is a ``<time>`` with a non-empty ``datetime`` attribute.
+
+    Such an element is read from the attribute, so it may be a date even when
+    its visible text is empty or has no digit (``<time datetime="..."></time>``).
+    """
+    return node.tag == "time" and bool((node.get("datetime") or "").strip())
 
 
 def _element_text(node):
@@ -466,7 +479,7 @@ class FeedExtractor:
                         context.session["debug"]["num_datematched"] += 1
                         context.session["debug"]["num_matched"] += 1
                     return DateReading(
-                        key="html:time", text=display, value=parsed[0], precision=parsed[1]
+                        key=_HTML_TIME_KEY, text=display, value=parsed[0], precision=parsed[1]
                     )
         for raw in (node.text, node.tail):
             if raw is None or not raw.strip():
@@ -535,9 +548,12 @@ class FeedExtractor:
         # or a relative-date keyword such as "yesterday"/"ago"). This avoids
         # expensive pattern matching on nodes that cannot be dates.
         # Text and tail are tested as they are: the whitespace around them has
-        # no digit and no relative-date word.
+        # no digit and no relative-date word. A ``<time datetime>`` is kept
+        # whatever its text: ``read_date`` reads it from the attribute.
         potential_date_nodes = [
-            node for node in nodes if _may_be_date(node.text) or _may_be_date(node.tail)
+            node
+            for node in nodes
+            if _may_be_date(node.text) or _may_be_date(node.tail) or _has_datetime_attr(node)
         ]
 
         shared_node = None
@@ -546,10 +562,21 @@ class FeedExtractor:
         last_path = None
         clusters = {}
         first = True
+        # The last ``<time>`` read from its ``datetime`` attribute. Nodes come in
+        # document order, so its descendants follow it right after; their text
+        # repeats the same date one level deeper and would split the run of
+        # dates by level, so they are skipped.
+        time_reading_node = None
         # Only match patterns on potential date nodes
         for node in potential_date_nodes:
+            if time_reading_node is not None:
+                if any(ancestor is time_reading_node for ancestor in node.iterancestors()):
+                    continue
+                time_reading_node = None
             reading = self.read_date(node)
             if reading is not None:
+                if reading.key == _HTML_TIME_KEY:
+                    time_reading_node = node
                 path = TagPath(node)
                 current = {"t_key": reading.key, "node": node, "reading": reading}
                 if last is not None and last_path is not None and path.level == last_path.level:
@@ -657,6 +684,9 @@ class FeedExtractor:
                 (match, t_key, t_data, the_text, the_date) = self.match_date(nodes[i]["node"])
                 use_tail = nodes[i]["node"].text is None
                 text = nodes[i]["node"].text if not use_tail else nodes[i]["node"].tail
+                if text is None:
+                    # An empty ``<time datetime>``: its reading shows the attribute.
+                    text = the_text
                 if text is not None:
                     block.add_entity(
                         "pub_date",
@@ -685,6 +715,8 @@ class FeedExtractor:
                 else:
                     use_tail = nodes[i]["node"].text is None
                     text = nodes[i]["node"].text if not use_tail else nodes[i]["node"].tail
+                    if text is None:
+                        text = the_text
                     if text is not None:
                         block.add_entity(
                             "pub_date",

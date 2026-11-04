@@ -404,6 +404,39 @@ EXTRA_LAYOUTS = {
 }
 
 
+#: A word in place of the date: the date is only in the ``datetime`` attribute.
+TIME_LABELS = {"en": "Recently", "ru": "Недавно"}
+
+
+def layout_time_empty(lang, items, style):
+    """An empty ``<time datetime>`` per item; CSS or JavaScript draws the date."""
+    rows = "".join(
+        f"""<div class="timeline__item"><time datetime="{it["date"].isoformat()}T{8 + i:02d}:{5 * i:02d}"></time>
+<a href="{it["path"]}"><h3>{esc(it["title"])}</h3></a></div>"""
+        for i, it in enumerate(items)
+    )
+    return f'<div class="timeline">{rows}</div>'
+
+
+def layout_time_label(lang, items, style):
+    """``<time datetime>`` shows a word, not the date, below the teaser."""
+    rows = "".join(
+        f"""<article class="teaser"><h3><a href="{it["path"]}">{esc(it["title"])}</a></h3>
+<p>{esc(it["title"])}: summary.</p>
+<footer><time class="ago" datetime="{it["date"].isoformat()}T10:{10 + i:02d}:00+03:00">{TIME_LABELS[lang]}</time></footer></article>"""
+        for i, it in enumerate(items)
+    )
+    return f'<section class="teasers">{rows}</section>'
+
+
+# Layouts added after the corpus was first built; generated last so the
+# earlier cases keep their seeds (and pages) unchanged.
+ATTRIBUTE_LAYOUTS = {
+    "time-empty": layout_time_empty,
+    "time-label": layout_time_label,
+}
+
+
 def _variants():
     for lang, styles in STYLES.items():
         for style in styles:
@@ -415,6 +448,9 @@ def _variants():
         for style in styles:
             for layout_name, layout in LAYOUTS.items():
                 yield lang, style, layout_name, layout
+    for lang in TIME_LABELS:
+        for layout_name, layout in ATTRIBUTE_LAYOUTS.items():
+            yield lang, "none", layout_name, layout
 
 
 def build():

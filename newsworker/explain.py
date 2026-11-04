@@ -68,6 +68,16 @@ def _node_text(node) -> str:
     return " ".join(text.split())[:80]
 
 
+def _date_sample(info: dict[str, Any]) -> str:
+    """A date node's text, or what its date was read from (an empty
+    ``<time datetime>`` shows its ``datetime`` attribute)."""
+    text = _node_text(info["node"])
+    reading = info.get("reading")
+    if not text and reading is not None and reading.text:
+        text = " ".join(str(reading.text).split())[:80]
+    return text
+
+
 def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
     from .spec import SpecAnalyzer
 
@@ -99,7 +109,7 @@ def _clusters(service, url: str, data: bytes, context) -> list[ClusterReport]:
                     titles=max(0, titles),
                     news_class=bool(news_bonus > 0),
                     patterns=sorted({str(n.get("t_key")) for n in nodes if n.get("t_key")}),
-                    samples=[_node_text(n["node"]) for n in nodes[:3]],
+                    samples=[_date_sample(n) for n in nodes[:3]],
                     chosen=path == chosen_path,
                     date_order=order.order if order is not None else None,
                     date_order_reason=order.reason if order is not None else None,
